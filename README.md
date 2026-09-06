@@ -17,7 +17,10 @@ visualizer needs, use `pip install -e ".[viz]"` instead.
 ## Usage
 
 ```bash
-neurohacking                 # 8 x 8 mesh (64 neurons), random weights
+neurohacking                 # open the window, free-run, learn, report accuracy; close it to stop
+neurohacking --headless --epochs 20000 -q   # the same without a window, for a fixed number of epochs
+neurohacking --step          # window where each Space press runs one epoch
+neurohacking --no-learn      # just watch the untrained network
 neurohacking --columns 24 --rows 20       # a bigger mesh: 12 input bits, coded to 24
 neurohacking --input 1011                 # choose the 4 input bits
 neurohacking --no-permute                 # coded bits in order on the bottom row
@@ -44,24 +47,26 @@ mesh and presents the next input.
 ## Seeing the grid
 
 ```bash
-neurohacking --show                  # open an 800x600 window on the mesh
-neurohacking --columns 24 --rows 20 --save grid.png
-neurohacking --window 1200 800 --show
-neurohacking --fast                       # free-run the system; the window monitors it at 30 Hz
-neurohacking --quiet                      # no line per firing neuron
-neurohacking --fast --learn               # reinforce after every epoch; accuracy in the title bar
-neurohacking --learn --epochs 20000 -q    # headless training run, accuracy printed as it goes
+neurohacking                              # the default: free-running window with learning
+neurohacking --window 1200 800            # a bigger window
+neurohacking --report 300                 # a progress line every 5 minutes instead of 30 s
+neurohacking --step                       # one epoch per Space press
+neurohacking --columns 24 --rows 20 --headless --save grid.png
 ```
 
-With `--show` the window opens on the mesh after its first epoch has run.
-Press **Space** to start a new epoch: every neuron is reset (weights,
-shortcuts and thresholds are kept), a fresh random input is drawn, and the
-bottom row is fired again. **Esc** or **Q** closes the window.
+By default the window is a monitor on a free-running system. The network
+runs epoch after epoch as fast as the machine allows, silently, learning
+after every one, with no coupling to the display; the window samples its
+state 30 times a second, always showing a completed epoch. The title bar
+shows the epoch count, the epoch rate, the accuracy to date (the mean over
+every epoch since the start) and the recent accuracy, and the same figures
+go to the terminal every `--report` seconds with an elapsed-time stamp, so a
+run can be left for hours and read back later. **Esc** or **Q** closes the
+window; the final figures are printed on exit.
 
-`--fast` (which implies `--show`) turns the window into a monitor. The system
-runs epoch after epoch as fast as the machine allows, silently, with no
-coupling to the display, and the window samples its state 30 times a second,
-always showing a completed epoch. The title bar reports the epoch rate. The input
+With `--step` nothing happens until you press **Space**, which resets every
+neuron (weights, shortcuts and thresholds are kept), draws a fresh random
+input, fires the bottom row and, unless `--no-learn`, teaches. The input
 neurons are ringed in white. Fired neurons are coloured, shading from
 yellow in wave 0 to orange in the last wave, unfired neurons are grey, and the
 neurons that were forced in wave 0 carry a white ring. Adding `--save PATH`
@@ -193,6 +198,9 @@ the target fired, -1 if not) with no noise. Forced inputs are never adjusted
 and weights stay within [-1, 1]. `Teacher` wraps all this; use
 `teacher.epoch()` instead of `run_epoch(grid)` so the exploration noise is
 injected.
+
+Accuracy **to date** is the mean over every epoch since the start; the
+**recent** figure is an exponential average over roughly the last 200.
 
 **Where this stands.** Input-independent targets are learned: `all-off`
 passes 90% within a couple of thousand epochs on an 8x4 mesh. For

@@ -143,6 +143,7 @@ class Teacher:
         self.window = window
         self.rng = random.Random(seed)
         self.epochs = 0
+        self.total_reward = 0.0  # sum of every epoch's reward, for accuracy to date
         self.baseline: float | None = None  # running average reward: what "usual" looks like
         self.last_reward: float | None = None
         self.average: float | None = None  # exponential moving average over about `window` epochs
@@ -161,6 +162,7 @@ class Teacher:
         reinforce(self.grid, advantage, self.lr, self.sigma, self.eligibility)
         self.baseline += self.baseline_rate * (reward - self.baseline)
         self.epochs += 1
+        self.total_reward += reward
         self.last_reward = reward
         if self.average is None:
             self.average = reward
@@ -169,10 +171,16 @@ class Teacher:
             self.average = (1 - alpha) * self.average + alpha * reward
         return reward
 
+    @property
+    def accuracy_to_date(self) -> float | None:
+        """Mean reward over every epoch taught so far."""
+        return self.total_reward / self.epochs if self.epochs else None
+
     def status(self) -> str:
         if self.average is None:
             return f"learning {self.target}: no epochs yet"
         return (
             f"learning {self.target} ({self.eligibility}, lr {self.lr:g}): "
-            f"accuracy {self.average:.0%} avg, {self.last_reward:.0%} last"
+            f"accuracy {self.accuracy_to_date:.1%} to date over {self.epochs:,} epochs, "
+            f"{self.average:.0%} recent"
         )

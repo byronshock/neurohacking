@@ -162,3 +162,12 @@ def test_teacher_with_seed_is_reproducible():
 
 def test_targets_registry_has_the_four_builtin_targets():
     assert set(learning.TARGETS) == {"reversed", "copy", "all-off", "all-on"}
+
+
+def test_accuracy_to_date_is_the_mean_over_all_epochs():
+    grid = main(columns=8, rows=4, seed=1)
+    teacher = Teacher(grid, seed=1)
+    assert teacher.accuracy_to_date is None
+    rewards = [teacher.step()] + [teacher.epoch(verbose=False) for _ in range(9)]
+    assert teacher.accuracy_to_date == pytest.approx(sum(rewards) / 10)
+    assert "to date over 10 epochs" in teacher.status()

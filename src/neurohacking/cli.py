@@ -15,7 +15,10 @@ from .neuron import Neuron
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="neurohacking",
-        description="Fire a signal through a hexagonal grid of neurons.",
+        description=(
+            "A hexagonal mesh of neurons that learns to reproduce its input on its output row. "
+            "By default it opens a window, free-runs, learns, and reports accuracy until you close it."
+        ),
     )
     parser.add_argument(
         "-c",
@@ -79,19 +82,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="input a neuron needs before it fires (default: 0.25)",
     )
     parser.add_argument(
-        "--show",
+        "--step",
         action="store_true",
-        help="open a window on the fired mesh; Space resets it and presents a new random input, Esc quits",
+        help="window mode where nothing happens until you press Space for the next epoch (instead of free-running)",
     )
     parser.add_argument(
-        "--fast",
+        "--headless",
         action="store_true",
-        help="free-run: the system runs epochs as fast as it can and the window monitors it at 30 Hz (implies --show)",
+        help="no window: run --epochs epochs and exit",
     )
     parser.add_argument(
-        "--learn",
+        "--report",
+        type=float,
+        default=30.0,
+        metavar="SECONDS",
+        help="while free-running, print a progress line this often (default: 30)",
+    )
+    parser.add_argument(
+        "--no-learn",
         action="store_true",
-        help="teach the network after every epoch: the top row should show the target pattern",
+        help="do not teach the network (learning is on by default)",
     )
     parser.add_argument(
         "--target",
@@ -121,13 +131,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--epochs",
         type=int,
         default=1,
-        help="without a window: how many epochs to run, printing accuracy along the way (default: 1)",
+        help="with --headless: how many epochs to run, printing accuracy along the way (default: 1)",
     )
     parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
-        help="do not print a line for every neuron that fires (--fast is always quiet)",
+        help="do not print a line for every neuron that fires (free-running is always quiet)",
     )
     parser.add_argument(
         "--save",
@@ -140,8 +150,9 @@ def build_parser() -> argparse.ArgumentParser:
 def cli_main(argv: list[str] | None = None) -> int:
     """Run the CLI. Returns a process exit code (0 = success)."""
     args = build_parser().parse_args(argv)
-    if args.fast:
-        args.show = True
+    args.show = not args.headless
+    args.fast = args.show and not args.step
+    args.learn = not args.no_learn
     was_verbose = Neuron.verbose
     Neuron.verbose = not (args.quiet or args.fast)
     try:
@@ -187,8 +198,9 @@ def _run(args: argparse.Namespace) -> int:
                 )
                 teacher.step()  # the first epoch ran without exploration; still score and learn from it
             if args.show:
-                # Space runs a new epoch; with --fast the system free-runs and the window monitors it.
-                visualizer.show(grid, width, height, fast=args.fast, teacher=teacher)
+                # Free-running: the system runs and learns on its own and the window monitors it.
+                # --step: nothing happens until Space is pressed.
+                visualizer.show(grid, width, height, fast=args.fast, teacher=teacher, report_seconds=args.report)
             else:
                 report_every = max(1, args.epochs // 10)
                 for epoch in range(2, args.epochs + 1):

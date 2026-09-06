@@ -90,14 +90,14 @@ def test_save_writes_an_image_file(tmp_path, capsys):
 
 def test_cli_save_option(tmp_path, capsys):
     out = tmp_path / "cli.png"
-    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--save", str(out)]) == 0
+    assert cli_main(["--headless", "--columns", "4", "--rows", "4", "--weight", "1", "--save", str(out)]) == 0
     assert out.exists()
     assert "Saved" in capsys.readouterr().err
 
 
 def test_cli_window_option_sets_image_size(tmp_path, capsys):
     out = tmp_path / "wide.png"
-    assert cli_main(["--columns", "4", "--rows", "4", "--save", str(out), "--window", "320", "200"]) == 0
+    assert cli_main(["--headless", "--columns", "4", "--rows", "4", "--save", str(out), "--window", "320", "200"]) == 0
     assert pygame.image.load(str(out)).get_size() == (320, 200)
 
 
@@ -168,7 +168,7 @@ def test_cli_show_opens_on_an_already_fired_mesh(monkeypatch, capsys):
         shown.append((grid.epoch, len(grid.fired_neurons())))
 
     monkeypatch.setattr(viz, "show", fake_show)
-    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--show"]) == 0
+    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--step"]) == 0
     assert shown == [(1, 16)]
     assert "16 of 16 neurons fired" in capsys.readouterr().err
 
@@ -224,14 +224,17 @@ def test_fast_caption_reports_the_rate(capsys):
     assert "[Space]" not in text
 
 
-def test_cli_fast_implies_show_and_passes_fast_through(monkeypatch, capsys):
+def test_cli_defaults_to_a_free_running_learning_window(monkeypatch, capsys):
     calls = []
-    monkeypatch.setattr(viz, "show", lambda grid, w, h, fast=False, **kw: calls.append(fast))
-    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--fast"]) == 0
-    assert calls == [True]
+    monkeypatch.setattr(viz, "show", lambda grid, w, h, fast=False, teacher=None, **kw: calls.append((fast, teacher is not None, kw.get("report_seconds"))))
+    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1"]) == 0
+    assert calls == [(True, True, 30.0)]
     calls.clear()
-    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--show"]) == 0
-    assert calls == [False]
+    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--step", "--no-learn", "--report", "5"]) == 0
+    assert calls == [(False, False, 5.0)]
+    calls.clear()
+    assert cli_main(["--headless", "--columns", "4", "--rows", "4", "--weight", "1"]) == 0
+    assert calls == []  # headless never opens the window
 
 
 def test_window_teaches_after_each_epoch_and_shows_accuracy(monkeypatch, capsys):
@@ -248,3 +251,24 @@ def test_window_teaches_after_each_epoch_and_shows_accuracy(monkeypatch, capsys)
     monkeypatch.setattr(pygame.event, "get", lambda: scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)])
     viz.show(grid, 200, 150, fast=True, fps=50, teacher=teacher)
     assert teacher.epochs == grid.epoch  # one teaching step per epoch, in fast mode too
+
+
+def test_format_elapsed():
+    assert viz.format_elapsed(0) == "0:00:00"
+    assert viz.format_elapsed(59.9) == "0:00:59"
+    assert viz.format_elapsed(3661) == "1:01:01"
+    assert viz.format_elapsed(10 * 3600 + 5) == "10:00:05"
+
+
+def test_free_run_logs_progress_with_accuracy_to_date(monkeypatch, capsys):
+    from neurohacking.learning import Teacher
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    grid = main(columns=8, rows=4, weight=None, seed=1)
+    teacher = Teacher(grid, target="all-off", seed=1)
+    lines = []
+    scripted = [[], [], [pygame.event.Event(pygame.QUIT)]]
+    monkeypatch.setattr(pygame.event, "get", lambda: scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)])
+    viz.show(grid, 200, 150, fast=True, fps=50, teacher=teacher, report_seconds=0, log=lines.append)
+    assert len(lines) >= 2  # one line per frame when report_seconds is 0
+    assert lines[-1].startswith("[0:00:0") and "to date over" in lines[-1] and "epochs/s" in lines[-1]
+    assert capsys.readouterr().err == ""  # the custom log took the lines, nothing leaked to stderr

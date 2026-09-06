@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 import time
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
@@ -119,6 +120,12 @@ def save(grid: GridOfNeurons, path: str, width: int = 800, height: int = 600) ->
     pygame.image.save(surface, path)
 
 
+def format_elapsed(seconds: float) -> str:
+    """Seconds as h:mm:ss."""
+    seconds = int(seconds)
+    return f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+
+
 def caption(grid: GridOfNeurons, teacher: Teacher | None = None) -> str:
     fired = len(grid.fired_neurons())
     state = f"{fired} of {len(grid.neurons)} fired in {len(grid.waves)} waves" if fired else "unfired"
@@ -160,12 +167,16 @@ def show(
     fast: bool = False,
     fps: int = 30,
     teacher: Teacher | None = None,
+    report_seconds: float | None = 30.0,
+    log=None,
 ) -> None:
     """Open a window on the grid and let the keyboard drive it.
 
     Space resets every neuron and runs a new epoch with a fresh random input.
     Esc or Q closes the window. With a `teacher`, every epoch is followed by a
-    teaching step and the title bar reports the running accuracy.
+    teaching step and the title bar reports the running accuracy. While
+    free-running with a teacher, a progress line goes to `log` (default:
+    stderr) every `report_seconds`; None disables it.
 
     With `fast` the window becomes a monitor: the system runs epoch after
     epoch as fast as it can, silently, and the window samples its state `fps`
@@ -184,6 +195,9 @@ def show(
         epochs_per_second = 0.0
         needs_redraw = True
         running = True
+        started = time.perf_counter()
+        last_report = started
+        log = log or (lambda line: print(line, file=sys.stderr, flush=True))
         if fast:
             Neuron.verbose = False
         while running:
@@ -211,6 +225,10 @@ def show(
                         run_epoch(grid, verbose=False)
                     count += 1
                 epochs_per_second = 0.8 * epochs_per_second + 0.2 * count * fps if epochs_per_second else count * fps
+                now = time.perf_counter()
+                if teacher and report_seconds is not None and now - last_report >= report_seconds:
+                    last_report = now
+                    log(f"[{format_elapsed(now - started)}] epoch {grid.epoch:,}: {teacher.status()}, {epochs_per_second:,.0f} epochs/s")
                 next_frame += frame_time
                 if time.perf_counter() > next_frame:  # drawing took longer than a frame; don't try to catch up
                     next_frame = time.perf_counter() + frame_time

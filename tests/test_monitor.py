@@ -88,7 +88,7 @@ def test_main_random_input_is_reproducible_by_seed(capsys):
 
 
 def test_cli_runs_and_returns_zero(capsys):
-    assert cli_main(["--weight", "1"]) == 0
+    assert cli_main(["--headless", "--weight", "1"]) == 0
     captured = capsys.readouterr()
     assert captured.out.count("fired in wave 0.") == 4  # half of the 8-column bottom row
     assert "64 of 64 neurons fired" in captured.err
@@ -96,7 +96,7 @@ def test_cli_runs_and_returns_zero(capsys):
 
 
 def test_cli_input_option_sets_the_pattern(capsys):
-    assert cli_main(["--columns", "6", "--rows", "3", "--weight", "1", "--input", "110", "--no-permute"]) == 0
+    assert cli_main(["--headless", "--columns", "6", "--rows", "3", "--weight", "1", "--input", "110", "--no-permute"]) == 0
     captured = capsys.readouterr()
     assert "epoch 1: input 110 -> coded 110001 -> bottom row 110001" in captured.out
     assert captured.out.count("fired in wave 0.") == 3
@@ -105,38 +105,39 @@ def test_cli_input_option_sets_the_pattern(capsys):
 
 @pytest.mark.parametrize("bad", [["--input", "10"], ["--input", "1x1"], ["--columns", "5", "--rows", "3"]])
 def test_cli_rejects_bad_input(bad, capsys):
-    assert cli_main(["--columns", "6", "--rows", "3"] + bad if "--columns" not in bad else bad) == 2
+    args = ["--headless", "--columns", "6", "--rows", "3"] + bad if "--columns" not in bad else ["--headless"] + bad
+    assert cli_main(args) == 2
     assert "error:" in capsys.readouterr().err
 
 
 def test_cli_defaults_to_random_weights_and_reports_the_seed(capsys):
-    assert cli_main(["--columns", "6", "--rows", "6"]) == 0
+    assert cli_main(["--headless", "--columns", "6", "--rows", "6"]) == 0
     err = capsys.readouterr().err
     assert "seed " in err and "of 36 neurons fired" in err
 
 
 def test_cli_seed_makes_runs_repeatable(capsys):
-    cli_main(["--columns", "10", "--rows", "8", "--seed", "11"])
+    cli_main(["--headless", "--columns", "10", "--rows", "8", "--seed", "11"])
     first = capsys.readouterr()
-    cli_main(["--columns", "10", "--rows", "8", "--seed", "11"])
+    cli_main(["--headless", "--columns", "10", "--rows", "8", "--seed", "11"])
     second = capsys.readouterr()
     assert first.out == second.out and first.err == second.err
     assert "seed 11" in first.err
 
 
 def test_cli_columns_and_rows_options(capsys):
-    assert cli_main(["--columns", "4", "--rows", "3", "--weight", "1"]) == 0
+    assert cli_main(["--headless", "--columns", "4", "--rows", "3", "--weight", "1"]) == 0
     assert capsys.readouterr().out.count("fired") == 12
 
 
 def test_cli_rejects_unknown_arguments():
     with pytest.raises(SystemExit) as exc:
-        cli_main(["0.5"])
+        cli_main(["--headless", "0.5"])
     assert exc.value.code == 2
 
 
 def test_cli_weight_and_threshold_options(capsys):
-    args = ["--columns", "6", "--rows", "5", "--weight", "0.2", "--threshold", "1", "--input", "101"]
+    args = ["--headless", "--columns", "6", "--rows", "5", "--weight", "0.2", "--threshold", "1", "--input", "101"]
     assert cli_main(args) == 0
     assert capsys.readouterr().out.count("fired") == 3  # only the input neurons: 0.4 max input < 1
 
@@ -147,13 +148,13 @@ def test_main_passes_weight_and_threshold_through(capsys):
 
 
 def test_cli_omega_option_reports_shortcuts(capsys):
-    assert cli_main(["--columns", "6", "--rows", "6", "--weight", "1", "--omega", "0.2", "--seed", "1"]) == 0
+    assert cli_main(["--headless", "--columns", "6", "--rows", "6", "--weight", "1", "--omega", "0.2", "--seed", "1"]) == 0
     err = capsys.readouterr().err
     assert "omega 0.2:" in err and "small-world connections" in err and "seed 1" in err
 
 
 def test_cli_rejects_omega_out_of_range(capsys):
-    assert cli_main(["--columns", "4", "--rows", "3", "--omega", "1"]) == 2
+    assert cli_main(["--headless", "--columns", "4", "--rows", "3", "--omega", "1"]) == 2
     assert "omega" in capsys.readouterr().err
 
 
@@ -171,38 +172,45 @@ def test_run_epoch_verbose_false_prints_nothing_about_the_input(capsys, monkeypa
 
 
 def test_cli_quiet_suppresses_neuron_lines_but_keeps_the_epoch_line(capsys):
-    assert cli_main(["--columns", "6", "--rows", "3", "--weight", "1", "--quiet"]) == 0
+    assert cli_main(["--headless", "--columns", "6", "--rows", "3", "--weight", "1", "--quiet"]) == 0
     out = capsys.readouterr().out
     assert "fired in wave" not in out and "epoch 1: input" in out
     assert Neuron.verbose is True  # restored once the command finishes
-    cli_main(["--columns", "6", "--rows", "3", "--weight", "1"])
+    cli_main(["--headless", "--columns", "6", "--rows", "3", "--weight", "1"])
     assert "fired in wave" in capsys.readouterr().out
 
 
 def test_cli_learn_runs_epochs_and_reports_accuracy(capsys):
-    args = ["--columns", "8", "--rows", "4", "--seed", "2", "--quiet", "--learn", "--target", "all-off",
+    args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "2", "--quiet", "--target", "all-off",
             "--lr", "0.1", "--epochs", "2000"]
     assert cli_main(args) == 0
     err = capsys.readouterr().err
     assert "learning all-off (perturb, lr 0.1): accuracy" in err
-    assert "after 2000 epochs:" in err
-    final = float(err.rsplit("accuracy ", 1)[1].split("%")[0])
+    assert "after 2000 epochs:" in err and "to date over 2,000 epochs" in err
+    final = float(err.rsplit("% recent", 1)[0].rsplit(" ", 1)[1])
     assert final > 85
 
 
 def test_cli_epochs_without_learn_just_runs_them(capsys):
-    assert cli_main(["--columns", "8", "--rows", "4", "--seed", "1", "--quiet", "--epochs", "5"]) == 0
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "--quiet", "--epochs", "5", "--no-learn"]) == 0
     out = capsys.readouterr().out
     assert out.count("epoch ") == 5 and "epoch 5:" in out
 
 
 def test_cli_rejects_unknown_target():
     with pytest.raises(SystemExit):
-        cli_main(["--learn", "--target", "sideways"])
+        cli_main(["--headless", "--target", "sideways"])
+
+
+def test_cli_learns_by_default_and_no_learn_switches_it_off(capsys):
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "-q", "--seed", "1", "--epochs", "3"]) == 0
+    assert "learning reversed" in capsys.readouterr().err
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "-q", "--seed", "1", "--epochs", "3", "--no-learn"]) == 0
+    assert "learning" not in capsys.readouterr().err
 
 
 def test_cli_eligibility_and_sigma_options(capsys):
-    args = ["--columns", "8", "--rows", "4", "--seed", "1", "-q", "--learn", "--eligibility", "hebb",
+    args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--eligibility", "hebb",
             "--sigma", "0.3", "--lr", "0.02", "--epochs", "20"]
     assert cli_main(args) == 0
     assert "learning reversed (hebb, lr 0.02)" in capsys.readouterr().err
