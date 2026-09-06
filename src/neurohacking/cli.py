@@ -21,15 +21,15 @@ def build_parser() -> argparse.ArgumentParser:
         "-c",
         "--columns",
         type=int,
-        default=24,
-        help="number of hexagons across (default: 24)",
+        default=8,
+        help="number of hexagons across (default: 8)",
     )
     parser.add_argument(
         "-r",
         "--rows",
         type=int,
-        default=20,
-        help="number of hexagon rows (default: 20)",
+        default=8,
+        help="number of hexagon rows (default: 8)",
     )
     parser.add_argument(
         "--window",
@@ -58,7 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--input",
         metavar="BITS",
         default=None,
-        help="raw input bits, one per half column, e.g. 101100111000 for 24 columns (default: random)",
+        help="raw input bits, one per half column, e.g. 1011 for 8 columns (default: random)",
+    )
+    parser.add_argument(
+        "--no-permute",
+        action="store_true",
+        help="lay the complement-coded bits on the bottom row in order instead of scrambling them",
     )
     parser.add_argument(
         "--seed",
@@ -165,6 +170,7 @@ def _run(args: argparse.Namespace) -> int:
             threshold=args.threshold,
             seed=seed,
             omega=args.omega,
+            permute=not args.no_permute,
         )
         if args.weight is None or args.omega > 0 or args.input is None:
             print(f"seed {seed}", file=sys.stderr)
@@ -172,6 +178,8 @@ def _run(args: argparse.Namespace) -> int:
         try:
             input_bits = parse_bits(args.input) if args.input is not None else None
             grid = main(**settings, input_bits=input_bits)
+            if not args.no_permute:
+                print(f"input permutation: bottom-row column i shows coded bit {grid.permutation}", file=sys.stderr)
             teacher = None
             if args.learn:
                 teacher = Teacher(

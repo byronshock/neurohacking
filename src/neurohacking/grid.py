@@ -54,12 +54,13 @@ class GridOfNeurons:
 
     def __init__(
         self,
-        columns: int = 24,
-        rows: int = 20,
+        columns: int = 8,
+        rows: int = 8,
         weight: float | None = 1.0,
         threshold: float = 0.25,
         seed: int | None = None,
         omega: float = 0.05,
+        permute: bool = True,
     ):
         """Build the mesh.
 
@@ -69,7 +70,10 @@ class GridOfNeurons:
         connections that are small-world shortcuts (0 <= omega < 1): after the
         local mesh is built, shortcuts from random neurons to random
         non-neighbours are added until they make up that fraction of the total.
-        `seed` makes both the shortcuts and the random weights reproducible.
+        `permute` draws a random permutation of the columns, fixed for the life
+        of the grid, that scrambles every input pattern onto the bottom row.
+        `seed` makes the shortcuts, the random weights, the permutation and the
+        random inputs all reproducible.
         """
         if columns < 1 or rows < 1:
             raise ValueError(f"grid needs at least one column and one row, got {columns}x{rows}")
@@ -87,12 +91,16 @@ class GridOfNeurons:
         self.waves: list[Wave] = []  # Waves of the most recent propagation
         self.input_pattern: list[bool] | None = None  # one bit per column, applied to the bottom row
         self.input_bits: list[bool] | None = None  # the raw bits before complement coding
+        self.input_coded: list[bool] | None = None  # the complement-coded bits before permutation
+        self.permutation: list[int] = list(range(columns))  # bottom-row column i shows coded bit permutation[i]
         self.epoch = 0  # how many inputs have been presented
         self.directions = DIRECTIONS
         self.create_grid()  # Initialize the grid
         self._add_small_world_connections(omega)
         if weight is None:
             self.randomize_weights()
+        if permute:
+            self._rng.shuffle(self.permutation)
 
     # --- building ---------------------------------------------------------
 
@@ -236,14 +244,20 @@ class GridOfNeurons:
         self.input_pattern = pattern
 
     def set_input_bits(self, bits) -> None:
-        """Set the input from raw bits (half the columns), complement-coded to fill the row."""
+        """Set the input from raw bits (half the columns): complement-code them, then permute.
+
+        Bottom-row column i receives coded bit permutation[i]. With the identity
+        permutation (permute=False) the coded bits land in order.
+        """
         if self.columns % 2:
             raise ValueError(f"complement coding needs an even number of columns, got {self.columns}")
         bits = [bool(b) for b in bits]
         if len(bits) != self.columns // 2:
             raise ValueError(f"expected {self.columns // 2} input bits for {self.columns} columns, got {len(bits)}")
-        self.set_input(complement_code(bits))
+        coded = complement_code(bits)
+        self.set_input([coded[i] for i in self.permutation])
         self.input_bits = bits
+        self.input_coded = coded
 
     def new_random_input(self) -> list[bool]:
         """Draw fresh raw bits from the grid's seeded stream and set them as the input.

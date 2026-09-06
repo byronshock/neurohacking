@@ -17,9 +17,22 @@ def test_main_fires_the_bottom_row_and_returns_the_grid(capsys):
 
 
 def test_main_complement_codes_the_input():
-    grid = main(columns=6, rows=3, weight=1.0, input_bits=[True, False, True])
-    assert grid.input_pattern == [True, False, True, False, True, False]
+    grid = main(columns=6, rows=3, weight=1.0, input_bits=[True, False, True], permute=False)
+    assert grid.input_coded == [True, False, True, False, True, False]
+    assert grid.input_pattern == grid.input_coded
     assert len(grid.waves[0].fired) == 3
+
+
+def test_main_permutes_the_coded_input_with_a_fixed_permutation(capsys):
+    grid = main(columns=8, rows=4, weight=1.0, seed=1, input_bits=[True, True, False, False])
+    assert grid.input_coded == [True, True, False, False, False, False, True, True]
+    assert sorted(grid.permutation) == list(range(8)) and grid.permutation != list(range(8))
+    assert grid.input_pattern == [grid.input_coded[i] for i in grid.permutation]
+    first_permutation = list(grid.permutation)
+    run_epoch(grid)
+    assert grid.permutation == first_permutation  # the same scramble every epoch
+    assert grid.input_pattern == [grid.input_coded[i] for i in grid.permutation]
+    assert sum(grid.input_pattern) == 4
 
 
 def test_run_epoch_requires_even_columns_and_the_right_bit_count(capsys):
@@ -48,13 +61,13 @@ def test_run_epoch_resets_the_mesh_and_presents_a_new_input(capsys):
 
 
 def test_run_epoch_clears_every_neuron_before_firing(capsys):
-    grid = main(columns=6, rows=3, weight=1.0, seed=1)
+    grid = main(columns=6, rows=3, weight=1.0, seed=1, permute=False)
     fired_before = {n.name: n.fired_in_wave for n in grid.neurons.values()}
     run_epoch(grid, bits=[False, True, False])  # a specific, different input
     assert grid.waves[0].fired == grid.input_neurons()
     assert grid.input_pattern == [False, True, False, True, False, True]
     assert any(fired_before[n.name] != n.fired_in_wave for n in grid.neurons.values())
-    assert "epoch 2: input 010 -> bottom row 010101" in capsys.readouterr().out
+    assert "epoch 2: input 010 -> coded 010101 -> bottom row 010101" in capsys.readouterr().out
 
 
 def test_run_epoch_keeps_weights_and_shortcuts(capsys):
@@ -77,15 +90,17 @@ def test_main_random_input_is_reproducible_by_seed(capsys):
 def test_cli_runs_and_returns_zero(capsys):
     assert cli_main(["--weight", "1"]) == 0
     captured = capsys.readouterr()
-    assert captured.out.count("fired in wave 0.") == 12  # half of the 24-column bottom row
-    assert "480 of 480 neurons fired" in captured.err
+    assert captured.out.count("fired in wave 0.") == 4  # half of the 8-column bottom row
+    assert "64 of 64 neurons fired" in captured.err
+    assert "input permutation:" in captured.err
 
 
 def test_cli_input_option_sets_the_pattern(capsys):
-    assert cli_main(["--columns", "6", "--rows", "3", "--weight", "1", "--input", "110"]) == 0
-    out = capsys.readouterr().out
-    assert "epoch 1: input 110 -> bottom row 110001" in out
-    assert out.count("fired in wave 0.") == 3
+    assert cli_main(["--columns", "6", "--rows", "3", "--weight", "1", "--input", "110", "--no-permute"]) == 0
+    captured = capsys.readouterr()
+    assert "epoch 1: input 110 -> coded 110001 -> bottom row 110001" in captured.out
+    assert captured.out.count("fired in wave 0.") == 3
+    assert "input permutation:" not in captured.err
 
 
 @pytest.mark.parametrize("bad", [["--input", "10"], ["--input", "1x1"], ["--columns", "5", "--rows", "3"]])

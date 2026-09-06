@@ -357,3 +357,32 @@ def test_fire_input_forces_exactly_the_pattern_in_wave_zero(grid, capsys):
 def test_fire_input_without_a_pattern_raises(grid):
     with pytest.raises(ValueError):
         grid.fire_input()
+
+
+
+# --- the input permutation ----------------------------------------------------
+
+
+def test_permutation_is_drawn_once_from_the_seed():
+    a = GridOfNeurons(columns=8, rows=4, seed=3)
+    b = GridOfNeurons(columns=8, rows=4, seed=3)
+    c = GridOfNeurons(columns=8, rows=4, seed=4)
+    assert sorted(a.permutation) == list(range(8))
+    assert a.permutation == b.permutation
+    assert a.permutation != c.permutation
+
+
+def test_permute_false_keeps_the_coded_bits_in_order():
+    grid = GridOfNeurons(columns=8, rows=4, seed=3, permute=False)
+    assert grid.permutation == list(range(8))
+    grid.set_input_bits([True, False, False, True])
+    assert grid.input_pattern == grid.input_coded == [True, False, False, True, False, True, True, False]
+
+
+def test_set_input_bits_applies_the_permutation():
+    grid = GridOfNeurons(columns=8, rows=4, seed=3)
+    grid.set_input_bits([True, False, False, True])
+    coded = [True, False, False, True, False, True, True, False]
+    assert grid.input_coded == coded
+    assert grid.input_pattern == [coded[i] for i in grid.permutation]
+    assert sorted(grid.input_pattern) == sorted(coded)  # a scramble, not a change of content

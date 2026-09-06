@@ -17,9 +17,10 @@ visualizer needs, use `pip install -e ".[viz]"` instead.
 ## Usage
 
 ```bash
-neurohacking                 # 24 x 20 mesh (480 neurons), random weights
-neurohacking --columns 8 --rows 6         # 4 input bits, coded to 8
-neurohacking --input 101100111000         # choose the 12 input bits
+neurohacking                 # 8 x 8 mesh (64 neurons), random weights
+neurohacking --columns 24 --rows 20       # a bigger mesh: 12 input bits, coded to 24
+neurohacking --input 1011                 # choose the 4 input bits
+neurohacking --no-permute                 # coded bits in order on the bottom row
 neurohacking --seed 42       # repeat a particular random mesh
 neurohacking --weight 1      # a fixed weight on every connection instead
 neurohacking --omega 0.1     # one connection in ten is a shortcut (default: 0.05)
@@ -28,19 +29,23 @@ neurohacking --weight 0.2 --show   # signal dies at the origin
 python -m neurohacking       # same thing without the installed command
 ```
 
-**Input.** The network's input is its bottom row. Each epoch draws 12 random
+**Input.** The network's input is its bottom row. Each epoch draws 4 random
 bits (half the columns), complement-codes them by appending their negations,
-and forces the bottom-row neurons whose bit is 1 to fire in wave 0. So
-exactly half of the row fires every time. The raw bits and the coded row are
-printed, `--input 101100111000` supplies specific bits for the first epoch,
-and `--seed` reproduces the whole sequence of random inputs. Columns must be
-even. From Python, `run_epoch(grid)` resets the mesh and presents the next input.
+and scrambles the 8 coded bits with a random permutation of the columns that
+is drawn once per run and never changes. The bottom-row neurons whose bit is
+1 are forced to fire in wave 0, so exactly half of the row fires every time.
+The raw bits, the coded bits and the permuted row are printed, and the
+permutation is printed once at the start. `--input 1011` supplies specific
+bits for the first epoch, `--no-permute` lays the coded bits down in order,
+and `--seed` reproduces the permutation and the whole sequence of random
+inputs. Columns must be even. From Python, `run_epoch(grid)` resets the
+mesh and presents the next input.
 
 ## Seeing the grid
 
 ```bash
-neurohacking --show                  # open an 800x600 window on the fresh mesh
-neurohacking --columns 8 --rows 6 --save grid.png
+neurohacking --show                  # open an 800x600 window on the mesh
+neurohacking --columns 24 --rows 20 --save grid.png
 neurohacking --window 1200 800 --show
 neurohacking --fast                       # free-run the system; the window monitors it at 30 Hz
 neurohacking --quiet                      # no line per firing neuron
@@ -190,13 +195,13 @@ and weights stay within [-1, 1]. `Teacher` wraps all this; use
 injected.
 
 **Where this stands.** Input-independent targets are learned: `all-off`
-passes 90% within a couple of thousand epochs on an 8x4 mesh, `all-on` more
-slowly. For input-dependent targets learning is real but slow: on an 8x4
-mesh over thirty thousand epochs, `copy` climbs from about 55% to 65-68% and
-`reversed` from 50% to 57-68%, depending on the seed. On the default 24x20
-mesh nothing measurable has happened within fifteen thousand epochs.
-Reinforcement learning of this kind pays for its generality with variance,
-and the variance grows with the number of neurons being perturbed.
+passes 90% within a couple of thousand epochs on an 8x4 mesh. For
+input-dependent targets learning is real but slow: on an 8x4 mesh with both
+rings of neighbours, `reversed` climbs from 50% to the low 60s within ten
+thousand epochs. On a 24x20 mesh nothing measurable happened within fifteen
+thousand epochs. Reinforcement learning of this kind pays for its generality
+with variance, and the variance grows with the number of neurons being
+perturbed.
 
 ```python
 from neurohacking.learning import Teacher
