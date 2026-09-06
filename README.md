@@ -11,6 +11,9 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+The `dev` extra includes pytest and pygame. To install only what the
+visualizer needs, use `pip install -e ".[viz]"` instead.
+
 ## Usage
 
 ```bash
@@ -20,6 +23,24 @@ python -m neurohacking       # same thing without the installed command
 ```
 
 `--interval` is accepted but not used yet.
+
+## Seeing the grid
+
+```bash
+neurohacking --show                  # open a window; close it or press Esc/Q
+neurohacking --size 6 --save grid.png
+```
+
+Fired neurons are coloured, shading from yellow at the origin to orange at
+the rim, unfired neurons are grey, and the origin carries a white ring.
+
+```python
+from neurohacking import main, visualizer
+
+grid = main(grid_size=6)
+visualizer.save(grid, "grid.png")   # write a picture, no window needed
+visualizer.show(grid)               # or open a window
+```
 
 ## From Python
 
@@ -52,6 +73,7 @@ src/neurohacking/
   neuron.py    Neuron: connections, has_fired flag, activate() and reset()
   grid.py      GridOfNeurons: builds the hexagon and wires up neighbours
   monitor.py   main(grid_size): build a grid, fire the origin, return the grid
+  visualizer.py hex geometry and pygame drawing: show() and save()
   cli.py       argument parsing and the `neurohacking` command
   __main__.py  lets you run `python -m neurohacking`
 tests/         pytest tests for the neuron, the grid, and the command line
