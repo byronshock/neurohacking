@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "error-rate-monitor"
+version = "0.1.0"
+description = "Continuously display an error rate in the terminal until interrupted."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+# This makes `error-rate-monitor` a real command after `pip install -e .`
+[project.scripts]
+error-rate-monitor = "error_rate_monitor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
