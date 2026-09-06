@@ -7,7 +7,8 @@ import random
 import sys
 
 from .inputs import parse_bits
-from .monitor import main, run_epoch
+from .monitor import main
+from .neuron import Neuron
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,6 +78,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="open a window on the fired mesh; Space resets it and presents a new random input, Esc quits",
     )
     parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="free-run: the system runs epochs as fast as it can and the window monitors it at 30 Hz (implies --show)",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="do not print a line for every neuron that fires (--fast is always quiet)",
+    )
+    parser.add_argument(
         "--save",
         metavar="PATH",
         help="write a picture of the grid to PATH (e.g. grid.png)",
@@ -87,6 +99,9 @@ def build_parser() -> argparse.ArgumentParser:
 def cli_main(argv: list[str] | None = None) -> int:
     """Run the CLI. Returns a process exit code (0 = success)."""
     args = build_parser().parse_args(argv)
+    if args.fast:
+        args.show = True
+    Neuron.verbose = not (args.quiet or args.fast)
 
     try:
         if args.show or args.save:
@@ -115,8 +130,8 @@ def cli_main(argv: list[str] | None = None) -> int:
             input_bits = parse_bits(args.input) if args.input is not None else None
             grid = main(**settings, input_bits=input_bits)
             if args.show:
-                # Each Space in the window resets the mesh and runs a new random epoch.
-                visualizer.show(grid, width, height)
+                # Space runs a new epoch; with --fast the system free-runs and the window monitors it.
+                visualizer.show(grid, width, height, fast=args.fast)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

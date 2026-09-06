@@ -12,18 +12,20 @@ from .grid import GridOfNeurons
 from .inputs import format_bits
 
 
-def run_epoch(grid: GridOfNeurons, bits: Sequence[bool] | None = None) -> list:
+def run_epoch(grid: GridOfNeurons, bits: Sequence[bool] | None = None, verbose: bool = True) -> list:
     """Reset every neuron, present an input (random unless `bits` is given), and propagate.
 
     Weights, shortcuts and thresholds are untouched; only the neurons' fired
-    state and potential are cleared. Prints the input, returns the waves.
+    state and potential are cleared. Prints the input unless `verbose` is
+    False. Returns the waves.
     """
     grid.reset()
     if bits is None:
         grid.new_random_input()
     else:
         grid.set_input_bits(bits)
-    print(f"epoch {grid.epoch + 1}: input {format_bits(grid.input_bits)} -> bottom row {format_bits(grid.input_pattern)}")
+    if verbose:
+        print(f"epoch {grid.epoch + 1}: input {format_bits(grid.input_bits)} -> bottom row {format_bits(grid.input_pattern)}")
     return grid.fire_input()
 
 

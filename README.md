@@ -42,12 +42,19 @@ even. From Python, `run_epoch(grid)` resets the mesh and presents the next input
 neurohacking --show                  # open an 800x600 window on the fresh mesh
 neurohacking --columns 8 --rows 6 --save grid.png
 neurohacking --window 1200 800 --show
+neurohacking --fast                       # free-run the system; the window monitors it at 30 Hz
+neurohacking --quiet                      # no line per firing neuron
 ```
 
 With `--show` the window opens on the mesh after its first epoch has run.
 Press **Space** to start a new epoch: every neuron is reset (weights,
 shortcuts and thresholds are kept), a fresh random input is drawn, and the
-bottom row is fired again. **Esc** or **Q** closes the window. The input
+bottom row is fired again. **Esc** or **Q** closes the window.
+
+`--fast` (which implies `--show`) turns the window into a monitor. The system
+runs epoch after epoch as fast as the machine allows, silently, with no
+coupling to the display, and the window samples its state 30 times a second,
+always showing a completed epoch. The title bar reports the epoch rate. The input
 neurons are ringed in white. Fired neurons are coloured, shading from
 yellow in wave 0 to orange in the last wave, unfired neurons are grey, and the
 neurons that were forced in wave 0 carry a white ring. Adding `--save PATH`

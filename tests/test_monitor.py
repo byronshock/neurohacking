@@ -4,6 +4,7 @@ from neurohacking import main
 from neurohacking.cli import cli_main
 from neurohacking.grid import GridOfNeurons
 from neurohacking.monitor import run_epoch
+from neurohacking.neuron import Neuron
 
 
 def test_main_fires_the_bottom_row_and_returns_the_grid(capsys):
@@ -144,3 +145,20 @@ def test_cli_rejects_omega_out_of_range(capsys):
 def test_main_passes_omega_through(capsys):
     grid = main(columns=6, rows=6, weight=1.0, omega=0.25, seed=2)
     assert grid.omega == 0.25 and len(grid.small_world_connections()) > 0
+
+
+def test_run_epoch_verbose_false_prints_nothing_about_the_input(capsys, monkeypatch):
+    monkeypatch.setattr(Neuron, "verbose", False)
+    grid = main(columns=6, rows=3, weight=1.0, seed=1)
+    capsys.readouterr()
+    run_epoch(grid, verbose=False)
+    assert capsys.readouterr().out == ""
+
+
+def test_cli_quiet_suppresses_neuron_lines_but_keeps_the_epoch_line(capsys):
+    assert cli_main(["--columns", "6", "--rows", "3", "--weight", "1", "--quiet"]) == 0
+    out = capsys.readouterr().out
+    assert "fired in wave" not in out and "epoch 1: input" in out
+    assert Neuron.verbose is False
+    cli_main(["--columns", "6", "--rows", "3", "--weight", "1"])
+    assert Neuron.verbose is True and "fired in wave" in capsys.readouterr().out

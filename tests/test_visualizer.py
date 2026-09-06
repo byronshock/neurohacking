@@ -6,6 +6,7 @@ import pytest
 from neurohacking import main
 from neurohacking.cli import cli_main
 from neurohacking.grid import DIRECTIONS, GridOfNeurons
+from neurohacking.neuron import Neuron
 from neurohacking import visualizer as viz
 
 
@@ -163,7 +164,7 @@ def test_cli_show_opens_on_an_already_fired_mesh(monkeypatch, capsys):
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     shown = []
 
-    def fake_show(grid, width, height):
+    def fake_show(grid, width, height, fast=False):
         shown.append((grid.epoch, len(grid.fired_neurons())))
 
     monkeypatch.setattr(viz, "show", fake_show)
@@ -193,3 +194,41 @@ def test_stimulus_ring_is_drawn_on_input_neurons_before_firing(capsys):
     assert surface.get_at(ring_pixel)[:3] == viz.ORIGIN_RING
     dx, dy = viz.axial_to_pixel(0, 0, radius)
     assert surface.get_at((round(ox + dx), round(oy + dy - 0.55 * radius)))[:3] != viz.ORIGIN_RING
+
+
+def test_fast_mode_free_runs_between_monitor_frames(monkeypatch, capsys):
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    grid = main(columns=8, rows=4, weight=1.0, seed=1)
+    capsys.readouterr()
+    frames = []
+    scripted = [[], [], [], [pygame.event.Event(pygame.QUIT)]]
+
+    def fake_get():
+        frames.append(grid.epoch)
+        return scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)]
+
+    monkeypatch.setattr(pygame.event, "get", fake_get)
+    viz.show(grid, 200, 150, fast=True, fps=50)  # 20 ms per frame; an 8x4 epoch takes well under 1 ms
+    assert frames[0] == 1
+    assert all(later > earlier for earlier, later in zip(frames, frames[1:]))  # epochs advanced between every sample
+    assert frames[1] - frames[0] > 1  # many epochs per frame, not one: the system is not paced by the display
+    assert grid.epoch == frames[-1]  # no epochs after the quit
+    assert capsys.readouterr().out == ""  # the free run is silent
+    assert Neuron.verbose  # and printing is restored afterwards
+
+
+def test_fast_caption_reports_the_rate(capsys):
+    grid = main(columns=8, rows=4, weight=1.0, seed=1)
+    text = viz.caption_fast(grid, 1234.5, 30)
+    assert "free-running at 1,234 epochs/s, monitored at 30 Hz" in text
+    assert "[Space]" not in text
+
+
+def test_cli_fast_implies_show_and_passes_fast_through(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(viz, "show", lambda grid, w, h, fast=False: calls.append(fast))
+    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--fast"]) == 0
+    assert calls == [True]
+    calls.clear()
+    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--show"]) == 0
+    assert calls == [False]

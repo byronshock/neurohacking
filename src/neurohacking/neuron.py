@@ -4,6 +4,8 @@ from .connection import Connection
 
 
 class Neuron:
+    verbose = True  # class-wide: print a line each time any neuron fires
+
     def __init__(self, name: str = "Neuron", threshold: float = 0.25):
         self.name = name
         self.position = None  # (q, r) axial coordinates, set by the grid
@@ -67,7 +69,8 @@ class Neuron:
         """
         self.has_fired = True
         self.fired_in_wave = wave
-        print(f"{self.name} fired in wave {wave}.")
+        if Neuron.verbose:
+            print(f"{self.name} fired in wave {wave}.")
         return [connection for connection in self.outgoing if connection.is_active]
 
     def reset(self) -> None:

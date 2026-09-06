@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402  (import after the env var so pygame stays quiet)
@@ -125,6 +126,12 @@ def caption(grid: GridOfNeurons) -> str:
     return f"neurohacking {grid.columns}x{grid.rows}{omega}{epoch} {state}   [Space] new input  [Esc] quit"
 
 
+def caption_fast(grid: GridOfNeurons, epochs_per_second: float, fps: int) -> str:
+    return caption(grid).replace(
+        "[Space] new input", f"free-running at {epochs_per_second:,.0f} epochs/s, monitored at {fps} Hz"
+    )
+
+
 def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, bool]:
     """Apply one event to the grid. Returns (keep_running, needs_redraw)."""
     if event.type == pygame.QUIT:
@@ -139,23 +146,35 @@ def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, 
     return True, False
 
 
-def show(grid: GridOfNeurons, width: int = 800, height: int = 600) -> None:
-    """Open a window showing the grid as it is now, and let the keyboard drive it.
+def show(grid: GridOfNeurons, width: int = 800, height: int = 600, fast: bool = False, fps: int = 30) -> None:
+    """Open a window on the grid and let the keyboard drive it.
 
     Space resets every neuron and runs a new epoch with a fresh random input.
-    Esc or Q closes the window. Returns when the window is closed; the grid
-    keeps the state of its last epoch.
+    Esc or Q closes the window.
+
+    With `fast` the window becomes a monitor: the system runs epoch after
+    epoch as fast as it can, silently, and the window samples its state `fps`
+    times a second. Every sample is a completed epoch. Returns when the window
+    is closed; the grid keeps the state of its last epoch.
     """
     pygame.init()
+    from .neuron import Neuron  # local import: only needed to silence the free run
+
+    was_verbose = Neuron.verbose
     try:
         screen = pygame.display.set_mode((width, height))
-        needs_redraw = True
         clock = pygame.time.Clock()
+        frame_time = 1.0 / fps
+        next_frame = time.perf_counter() + frame_time
+        epochs_per_second = 0.0
+        needs_redraw = True
         running = True
+        if fast:
+            Neuron.verbose = False
         while running:
             if needs_redraw:
                 draw_grid(screen, grid)
-                pygame.display.set_caption(caption(grid))
+                pygame.display.set_caption(caption_fast(grid, epochs_per_second, fps) if fast else caption(grid))
                 pygame.display.flip()
                 needs_redraw = False
             for event in pygame.event.get():
@@ -163,6 +182,21 @@ def show(grid: GridOfNeurons, width: int = 800, height: int = 600) -> None:
                 needs_redraw = needs_redraw or changed
                 if not running:
                     break
-            clock.tick(30)
+            if not running:
+                break
+            if fast:
+                # Let the system run until the monitor's next sample is due.
+                count = 0
+                while time.perf_counter() < next_frame:
+                    run_epoch(grid, verbose=False)
+                    count += 1
+                epochs_per_second = 0.8 * epochs_per_second + 0.2 * count * fps if epochs_per_second else count * fps
+                next_frame += frame_time
+                if time.perf_counter() > next_frame:  # drawing took longer than a frame; don't try to catch up
+                    next_frame = time.perf_counter() + frame_time
+                needs_redraw = True
+            else:
+                clock.tick(fps)
     finally:
+        Neuron.verbose = was_verbose
         pygame.quit()

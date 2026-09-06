@@ -76,3 +76,10 @@ def test_list_connections_shows_ids_weights_and_state(capsys):
     a.list_connections()
     out = capsys.readouterr().out
     assert "#1 b, weight 0.75" in out and "#2 c, weight 1 (inactive)" in out
+
+
+def test_verbose_false_silences_firing(capsys, monkeypatch):
+    monkeypatch.setattr(Neuron, "verbose", False)
+    a = Neuron("a")
+    a.fire()
+    assert a.has_fired and capsys.readouterr().out == ""
