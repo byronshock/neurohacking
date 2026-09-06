@@ -24,7 +24,8 @@ class GridOfNeurons:
         """Generate a hexagonal grid of neurons within the given size."""
         for q in range(-self.size, self.size + 1):
             for r in range(-self.size, self.size + 1):
-                if abs(q) + abs(r) <= self.size:
+                # Hexagon in axial coordinates: |q|, |r| and |q + r| all within size.
+                if max(abs(q), abs(r), abs(q + r)) <= self.size:
                     neuron = Neuron(f"Neuron_{q}_{r}")
                     neuron.position = (q, r)
                     self.neurons[(q, r)] = neuron

@@ -17,8 +17,8 @@ def test_cli_runs_and_returns_zero(capsys):
 
 def test_cli_size_option_controls_grid(capsys):
     assert cli_main(["--size", "1"]) == 0
-    # size 1 with the current abs(q) + abs(r) <= size shape: origin plus 4 neighbours
-    assert capsys.readouterr().out.count("received a signal") == 5
+    # size 1 hexagon: origin plus its six neighbours
+    assert capsys.readouterr().out.count("received a signal") == 7
 
 
 def test_cli_rejects_unknown_arguments():

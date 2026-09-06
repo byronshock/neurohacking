@@ -50,3 +50,19 @@ def test_reset_clears_all_fired_flags(grid, capsys):
 
 def test_default_size_is_five():
     assert GridOfNeurons().size == 5
+
+
+@pytest.mark.parametrize("size, expected", [(0, 1), (1, 7), (2, 19), (3, 37), (10, 331)])
+def test_grid_is_a_hexagon_with_expected_cell_count(size, expected):
+    # A hexagon of radius n has 3n^2 + 3n + 1 cells.
+    grid = GridOfNeurons(size=size)
+    assert len(grid.neurons) == expected
+    for q, r in grid.neurons:
+        assert max(abs(q), abs(r), abs(q + r)) <= size
+
+
+def test_every_interior_neuron_has_six_neighbours():
+    grid = GridOfNeurons(size=3)
+    for (q, r), neuron in grid.neurons.items():
+        if max(abs(q), abs(r), abs(q + r)) < 3:
+            assert len(neuron.connections) == 6
