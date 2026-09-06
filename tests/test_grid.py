@@ -205,3 +205,9 @@ def test_randomize_weights_respects_custom_range(grid):
 def test_fixed_weight_is_still_the_library_default(grid):
     assert grid.weight == 1.0
     assert all(c.weight == 1.0 for c in grid.connections.values())
+
+
+def test_default_threshold_is_a_quarter():
+    grid = GridOfNeurons(columns=3, rows=3)
+    assert grid.threshold == 0.25
+    assert all(n.threshold == 0.25 for n in grid.neurons.values())

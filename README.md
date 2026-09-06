@@ -21,7 +21,7 @@ neurohacking                 # 24 x 20 mesh (480 neurons), random weights
 neurohacking --columns 8 --rows 6
 neurohacking --seed 42       # repeat a particular random mesh
 neurohacking --weight 1      # a fixed weight on every connection instead
-neurohacking --weight 0.5 --threshold 1.0 --show   # signal dies at the origin
+neurohacking --weight 0.2 --show   # signal dies at the origin
 python -m neurohacking       # same thing without the installed command
 ```
 
@@ -78,7 +78,7 @@ flag. The grid keeps every connection in `grid.connections`, a dictionary
 keyed by ID starting from 1. A neuron lists the connections it sends along in
 `outgoing` and the ones it receives from in `incoming`.
 
-**Firing rule.** Every neuron has a `threshold` (default 1.0) and a running
+**Firing rule.** Every neuron has a `threshold` (default 0.25) and a running
 `potential`. When a neuron fires, each of its active outgoing connections adds
 its weight to the target's potential. A neuron fires the moment its potential
 reaches its threshold, and it fires at most once until the grid is reset.
@@ -109,11 +109,14 @@ waves = grid.propagate(inputs={origin: 0.6, corner: 0.6})  # external input amou
 **Weights.** By default the command line gives every connection its own
 random weight, drawn uniformly between -1 and 1, so each direction between a
 pair of neurons gets an independent value. The seed is printed so a run can be
-repeated with `--seed`. `--weight W` uses a fixed weight instead; with weight
-1.0 and threshold 1.0 one signal is enough and the wave crosses the whole
-grid, while `--weight 0.5` stops at the origin because no neuron ever hears
-from more than one fired neighbour. From Python, `GridOfNeurons(weight=None,
-seed=...)` or `grid.randomize_weights(low, high, seed)` do the same.
+repeated with `--seed`. With the default threshold of 0.25, a typical random
+mesh lets the signal reach somewhere between a tenth and a third of the
+neurons before it dies out; raise `--threshold` to make it die sooner, lower
+it to let it spread further. `--weight W` uses a fixed weight instead: with
+`--weight 1` one signal is enough and the wave crosses the whole grid, while
+`--weight 0.2` stops at the origin because no neuron ever hears from more
+than one fired neighbour. From Python, `GridOfNeurons(weight=None, seed=...)`
+or `grid.randomize_weights(low, high, seed)` do the same.
 
 ```python
 grid = main(columns=8, rows=6)

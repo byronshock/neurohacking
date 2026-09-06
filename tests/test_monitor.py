@@ -50,7 +50,7 @@ def test_cli_rejects_unknown_arguments():
 
 
 def test_cli_weight_and_threshold_options(capsys):
-    assert cli_main(["--columns", "5", "--rows", "5", "--weight", "0.5", "--threshold", "1"]) == 0
+    assert cli_main(["--columns", "5", "--rows", "5", "--weight", "0.2"]) == 0  # 0.2 < default threshold 0.25
     assert capsys.readouterr().out.count("fired") == 1  # only the origin
 
 

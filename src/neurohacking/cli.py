@@ -61,8 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-t",
         "--threshold",
         type=float,
-        default=1.0,
-        help="input a neuron needs before it fires (default: 1.0)",
+        default=0.25,
+        help="input a neuron needs before it fires (default: 0.25)",
     )
     parser.add_argument(
         "--show",

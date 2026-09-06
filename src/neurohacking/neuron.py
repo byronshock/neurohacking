@@ -4,7 +4,7 @@ from .connection import Connection
 
 
 class Neuron:
-    def __init__(self, name: str = "Neuron", threshold: float = 1.0):
+    def __init__(self, name: str = "Neuron", threshold: float = 0.25):
         self.name = name
         self.position = None  # (q, r) axial coordinates, set by the grid
         self.outgoing: list[Connection] = []  # connections this neuron sends signals along
