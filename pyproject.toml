@@ -3,18 +3,18 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "error-rate-monitor"
+name = "neurohacking"
 version = "0.1.0"
-description = "Continuously display an error rate in the terminal until interrupted."
+description = "Signal propagation through a hexagonal grid of neurons."
 requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
-# This makes `error-rate-monitor` a real command after `pip install -e .`
+# This makes `neurohacking` a real command after `pip install -e .`
 [project.scripts]
-error-rate-monitor = "error_rate_monitor.cli:cli_main"
+neurohacking = "neurohacking.cli:cli_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -10,7 +10,7 @@ from .monitor import main
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="error-rate-monitor",
+        prog="neurohacking",
         description="Fire a signal through a hexagonal grid of neurons.",
     )
     parser.add_argument(

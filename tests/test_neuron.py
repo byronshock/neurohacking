@@ -1,4 +1,4 @@
-from error_rate_monitor.neuron import Neuron
+from neurohacking.neuron import Neuron
 
 
 def test_connect_adds_active_pathway():

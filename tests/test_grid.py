@@ -1,6 +1,6 @@
 import pytest
 
-from error_rate_monitor.grid import GridOfNeurons
+from neurohacking.grid import GridOfNeurons
 
 
 @pytest.fixture

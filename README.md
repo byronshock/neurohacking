@@ -1,7 +1,7 @@
-# error-rate-monitor
+# neurohacking
 
-Continuously prints an error rate to the terminal, as a percentage with two
-decimals, until you press Ctrl+C.
+Builds a hexagonal grid of neurons, fires the one at the centre, and watches
+the signal spread outward. Each neuron fires at most once per run.
 
 ## Setup (once)
 
@@ -14,21 +14,30 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-error-rate-monitor 0.05            # prints "5.00%" once per second
-error-rate-monitor 0.05 -i 0.5     # twice per second
+neurohacking                 # grid of radius 10 (331 neurons)
+neurohacking --size 3        # smaller grid, 37 neurons
+python -m neurohacking       # same thing without the installed command
 ```
 
-The rate is given as a fraction between 0 and 1. Stop with Ctrl+C.
+`--interval` is accepted but not used yet.
 
 ## From Python
 
 ```python
-from error_rate_monitor import ErrorRateMonitor
+from neurohacking import main
 
-monitor = ErrorRateMonitor(0.05)
-monitor.set_error_rate(0.12)   # change what is displayed
-monitor.run()                  # loops until Ctrl+C
+grid = main(grid_size=3)       # builds the grid and fires the origin
+print(len(grid.fired_neurons()))
+grid.reset()                   # allow every neuron to fire again
 ```
+
+## How the grid works
+
+Neurons sit on a hexagonal grid addressed by axial coordinates `(q, r)`. A
+grid of size `n` contains every cell where the largest of `|q|`, `|r|` and
+`|q + r|` is at most `n`, which gives `3n² + 3n + 1` neurons. Each neuron is
+connected to its six neighbours. Activating a neuron marks it as fired and
+passes the signal to each connected neighbour that has not fired yet.
 
 ## Tests
 
@@ -39,10 +48,12 @@ pytest
 ## Layout
 
 ```
-src/error_rate_monitor/
-  monitor.py   ErrorRateMonitor class (the logic)
-  cli.py       argument parsing and the `error-rate-monitor` command
-  __main__.py  lets you run `python -m error_rate_monitor`
-tests/         pytest tests
+src/neurohacking/
+  neuron.py    Neuron: connections, has_fired flag, activate() and reset()
+  grid.py      GridOfNeurons: builds the hexagon and wires up neighbours
+  monitor.py   main(grid_size): build a grid, fire the origin, return the grid
+  cli.py       argument parsing and the `neurohacking` command
+  __main__.py  lets you run `python -m neurohacking`
+tests/         pytest tests for the neuron, the grid, and the command line
 pyproject.toml project metadata, dependencies, and the command definition
 ```

@@ -1,7 +1,7 @@
 import pytest
 
-from error_rate_monitor import main
-from error_rate_monitor.cli import cli_main
+from neurohacking import main
+from neurohacking.cli import cli_main
 
 
 def test_main_fires_the_whole_grid_and_returns_it(capsys):
