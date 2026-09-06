@@ -1,10 +1,19 @@
+import random
 import statistics
 
 import pytest
 
 from neurohacking import learning
 from neurohacking.grid import GridOfNeurons
-from neurohacking.learning import Teacher, accuracy, expected_outputs, output_errors, output_row, teach
+from neurohacking.learning import (
+    Teacher,
+    accuracy,
+    delivered_connections,
+    expected_outputs,
+    output_errors,
+    output_row,
+    reinforce,
+)
 from neurohacking.monitor import main, run_epoch
 from neurohacking.neuron import Neuron
 
@@ -23,16 +32,13 @@ def test_output_row_is_the_top_row_left_to_right():
     assert row[0] is grid.get_neuron_at(0, 0)
 
 
-def test_expected_outputs_reversed_and_copy():
+def test_expected_outputs_for_each_target():
     grid = GridOfNeurons(columns=6, rows=4, omega=0)
     grid.set_input([True, True, False, False, False, True])
     assert expected_outputs(grid, "reversed") == [True, False, False, False, True, True]
     assert expected_outputs(grid, "copy") == [True, True, False, False, False, True]
     assert expected_outputs(grid, "all-off") == [False] * 6
     assert expected_outputs(grid, "all-on") == [True] * 6
-
-
-def test_expected_outputs_need_an_input():
     with pytest.raises(ValueError):
         expected_outputs(GridOfNeurons(columns=6, rows=4))
 
@@ -48,70 +54,109 @@ def test_errors_and_accuracy_against_the_top_row():
     assert accuracy(grid, "reversed") == 0.75
 
 
-def test_teach_moves_weights_toward_the_target_and_keeps_them_in_range():
-    grid = main(columns=8, rows=4, weight=1.0, seed=1, omega=0)  # weight 1: the whole top row fires
+def test_run_epoch_noise_gives_every_neuron_a_remembered_starting_potential():
+    grid = GridOfNeurons(columns=6, rows=4, weight=None, seed=1)
+    run_epoch(grid, verbose=False, noise=0.1, rng=random.Random(1))
+    noises = [n.noise for n in grid.neurons.values()]
+    assert len(set(noises)) > 1 and abs(statistics.mean(noises)) < 0.05
+    assert 0.05 < statistics.pstdev(noises) < 0.15
+    forced = grid.input_neurons()[0]
+    assert forced.has_fired and forced.fired_in_wave == 0
+    run_epoch(grid, verbose=False)  # without noise everything starts from 0 again
+    assert all(n.noise == 0.0 for n in grid.neurons.values())
+
+
+def test_delivered_connections_are_those_whose_source_fired():
+    grid = main(columns=8, rows=4, weight=None, seed=1)
+    delivered = delivered_connections(grid)
+    assert delivered
+    assert all(c.source.has_fired for c in delivered)
+    assert all(c in delivered for c in grid.connections.values() if c.source.has_fired and c.is_active)
+
+
+def test_reinforce_moves_delivered_weights_by_advantage_times_noise():
+    grid = GridOfNeurons(columns=8, rows=4, weight=None, seed=2, omega=0)
+    run_epoch(grid, verbose=False, noise=0.1, rng=random.Random(2))
     before = {c.id: c.weight for c in grid.connections.values()}
-    acc = teach(grid, lr=0.1, target="all-off")
-    assert 0 <= acc <= 1
-    changed = {c.id: c.weight for c in grid.connections.values() if c.weight != before[c.id]}
-    assert changed  # something was learned from the errors
-    assert all(-1.0 <= w <= 1.0 for w in changed.values())
-    # with target all-off every error is -1, so no weight can have gone up
-    assert all(changed[i] < before[i] for i in changed)
-
-
-def test_teach_never_touches_connections_into_the_forced_inputs():
-    grid = main(columns=8, rows=4, weight=None, seed=2, omega=0)
-    forced = grid.input_neurons()  # bottom-row neurons whose bit is 0 are ordinary neurons
-    into_inputs = {c.id: c.weight for n in forced for c in n.incoming}
-    teach(grid, lr=0.5, target="all-on")
-    assert {c.id: c.weight for n in forced for c in n.incoming} == into_inputs
-
-
-def test_teach_only_changes_connections_from_neurons_that_fired():
-    grid = main(columns=8, rows=4, weight=None, seed=3, omega=0)
-    before = {c.id: c.weight for c in grid.connections.values()}
-    teach(grid, lr=0.5, target="reversed")
+    changed = reinforce(grid, advantage=0.5, lr=0.01, sigma=0.1)
+    assert changed > 0
     for c in grid.connections.values():
-        if c.weight != before[c.id]:
-            assert c.source.has_fired
+        if c.target.fired_in_wave == 0 or c not in delivered_connections(grid):
+            assert c.weight == before[c.id]  # forced inputs and idle connections untouched
+        else:
+            expected = max(-1.0, min(1.0, before[c.id] + 0.01 * 0.5 * c.target.noise / 0.1))
+            assert c.weight == pytest.approx(expected)
 
 
-def test_teach_with_no_errors_changes_nothing():
-    grid = GridOfNeurons(columns=4, rows=3, weight=1.0, omega=0)
-    grid.set_input([True, False, False, True])
-    grid.fire_input()  # weight 1 fires everything, so the top row is all on
+def test_reinforce_with_zero_advantage_changes_nothing():
+    grid = main(columns=8, rows=4, weight=None, seed=3)
     before = [c.weight for c in grid.connections.values()]
-    assert teach(grid, lr=0.5, target="all-on") == 1.0
+    assert reinforce(grid, advantage=0.0) == 0
     assert [c.weight for c in grid.connections.values()] == before
 
 
-@pytest.mark.parametrize("target", ["all-off", "all-on"])
-def test_rule_learns_input_independent_targets(target):
+def test_hebbian_eligibility_uses_target_firing_and_keeps_weights_in_range():
+    grid = main(columns=8, rows=4, weight=None, seed=4)
+    before = {c.id: c.weight for c in grid.connections.values()}
+    reinforce(grid, advantage=-1.0, lr=0.5, eligibility="hebb")
+    for c in delivered_connections(grid):
+        if c.target.fired_in_wave == 0:
+            continue
+        if c.target.has_fired:
+            assert c.weight <= before[c.id]  # negative advantage x positive eligibility
+        else:
+            assert c.weight >= before[c.id]
+        assert -1.0 <= c.weight <= 1.0
+    with pytest.raises(ValueError):
+        reinforce(grid, 1.0, eligibility="magic")
+
+
+def test_global_reward_learns_to_silence_the_output():
     grid = GridOfNeurons(columns=8, rows=4, weight=None, seed=1, omega=0.05)
-    teacher = Teacher(grid, target=target, lr=0.05, window=50)
-    accs = []
-    for _ in range(400):
-        run_epoch(grid, verbose=False)
-        accs.append(teacher.step())
-    assert statistics.mean(accs[:20]) < 1.0  # it did not start out right
-    assert statistics.mean(accs[-50:]) > 0.9  # but it got there
+    teacher = Teacher(grid, target="all-off", lr=0.03, seed=1)
+    rewards = [teacher.epoch(verbose=False) for _ in range(2000)]
+    assert statistics.mean(rewards[:100]) < 0.9
+    assert statistics.mean(rewards[-200:]) > 0.9
 
 
-def test_teacher_validates_and_tracks():
+def test_global_reward_learns_to_light_the_output():
+    # Reinforcement is slow when the network must become more active; ask for clear progress, not perfection.
+    grid = GridOfNeurons(columns=8, rows=4, weight=None, seed=1, omega=0.05)
+    teacher = Teacher(grid, target="all-on", lr=0.03, seed=1)
+    rewards = [teacher.epoch(verbose=False) for _ in range(2500)]
+    assert statistics.mean(rewards[-300:]) > statistics.mean(rewards[:300]) + 0.25
+
+
+def test_teacher_validates_tracks_and_reports():
     grid = main(columns=8, rows=4, seed=1)
     with pytest.raises(ValueError):
         Teacher(grid, target="upside-down")
     with pytest.raises(ValueError):
+        Teacher(grid, eligibility="magic")
+    with pytest.raises(ValueError):
         Teacher(grid, lr=-1)
-    teacher = Teacher(grid, target="reversed", lr=0.05, window=10)
+    teacher = Teacher(grid, target="reversed", lr=0.01, window=10, seed=1)
     assert "no epochs yet" in teacher.status()
     first = teacher.step()
-    assert teacher.epochs == 1 and teacher.last_accuracy == first and teacher.average == first
-    run_epoch(grid, verbose=False)
-    teacher.step()
-    assert teacher.epochs == 2 and 0 <= teacher.average <= 1
-    assert "learning reversed (lr 0.05): accuracy" in teacher.status()
+    assert teacher.epochs == 1 and teacher.last_reward == first == teacher.average == teacher.baseline
+    second = teacher.epoch(verbose=False)
+    assert teacher.epochs == 2 and 0 <= teacher.average <= 1 and 0 <= second <= 1
+    assert grid.epoch == 2
+    assert "learning reversed (perturb, lr 0.01): accuracy" in teacher.status()
+    hebb = Teacher(grid, eligibility="hebb")
+    assert hebb.sigma == 0.0  # no exploration noise for the Hebbian variant
+
+
+def test_teacher_with_seed_is_reproducible():
+    def run(seed):
+        grid = GridOfNeurons(columns=8, rows=4, weight=None, seed=1)
+        teacher = Teacher(grid, target="copy", seed=seed)
+        for _ in range(30):
+            teacher.epoch(verbose=False)
+        return [c.weight for c in grid.connections.values()]
+
+    assert run(5) == run(5)
+    assert run(5) != run(6)
 
 
 def test_targets_registry_has_the_four_builtin_targets():

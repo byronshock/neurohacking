@@ -7,7 +7,7 @@ import random
 import sys
 
 from .inputs import parse_bits
-from .learning import TARGETS, Teacher
+from .learning import ELIGIBILITIES, TARGETS, Teacher
 from .monitor import main, run_epoch
 from .neuron import Neuron
 
@@ -97,8 +97,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lr",
         type=float,
-        default=0.05,
-        help="learning rate for --learn (default: 0.05)",
+        default=0.03,
+        help="learning rate for --learn (default: 0.03)",
+    )
+    parser.add_argument(
+        "--sigma",
+        type=float,
+        default=0.1,
+        help="exploration noise: std dev of each neuron's starting potential under --learn (default: 0.1)",
+    )
+    parser.add_argument(
+        "--eligibility",
+        choices=ELIGIBILITIES,
+        default="perturb",
+        help="what the global reward acts on: the neuron's exploration noise (perturb) or plain Hebbian (default: perturb)",
     )
     parser.add_argument(
         "--epochs",
@@ -160,20 +172,24 @@ def _run(args: argparse.Namespace) -> int:
         try:
             input_bits = parse_bits(args.input) if args.input is not None else None
             grid = main(**settings, input_bits=input_bits)
-            teacher = Teacher(grid, target=args.target, lr=args.lr) if args.learn else None
-            if teacher:
-                teacher.step()
+            teacher = None
+            if args.learn:
+                teacher = Teacher(
+                    grid, target=args.target, lr=args.lr, sigma=args.sigma, eligibility=args.eligibility, seed=seed
+                )
+                teacher.step()  # the first epoch ran without exploration; still score and learn from it
             if args.show:
                 # Space runs a new epoch; with --fast the system free-runs and the window monitors it.
                 visualizer.show(grid, width, height, fast=args.fast, teacher=teacher)
             else:
                 report_every = max(1, args.epochs // 10)
                 for epoch in range(2, args.epochs + 1):
-                    run_epoch(grid)  # --quiet drops the per-neuron lines, not the per-epoch line
                     if teacher:
-                        teacher.step()
+                        teacher.epoch()  # --quiet drops the per-neuron lines, not the per-epoch line
                         if epoch % report_every == 0 or epoch == args.epochs:
                             print(f"epoch {epoch}: {teacher.status()}", file=sys.stderr)
+                    else:
+                        run_epoch(grid)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

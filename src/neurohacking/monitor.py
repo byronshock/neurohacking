@@ -6,24 +6,38 @@ separate from the CLI makes it easy to test and to reuse from other code.
 
 from __future__ import annotations
 
+import random
 from typing import Sequence
 
 from .grid import GridOfNeurons
 from .inputs import format_bits
 
 
-def run_epoch(grid: GridOfNeurons, bits: Sequence[bool] | None = None, verbose: bool = True) -> list:
+def run_epoch(
+    grid: GridOfNeurons,
+    bits: Sequence[bool] | None = None,
+    verbose: bool = True,
+    noise: float = 0.0,
+    rng: random.Random | None = None,
+) -> list:
     """Reset every neuron, present an input (random unless `bits` is given), and propagate.
 
     Weights, shortcuts and thresholds are untouched; only the neurons' fired
-    state and potential are cleared. Prints the input unless `verbose` is
-    False. Returns the waves.
+    state and potential are cleared. With `noise` > 0 every neuron starts the
+    epoch with a Gaussian random potential of that standard deviation (the
+    exploration used by learning); each neuron remembers it as `noise`.
+    Prints the input unless `verbose` is False. Returns the waves.
     """
     grid.reset()
     if bits is None:
         grid.new_random_input()
     else:
         grid.set_input_bits(bits)
+    if noise > 0:
+        rng = rng or random
+        for neuron in grid.neurons.values():
+            neuron.noise = rng.gauss(0.0, noise)
+            neuron.potential = neuron.noise
     if verbose:
         print(f"epoch {grid.epoch + 1}: input {format_bits(grid.input_bits)} -> bottom row {format_bits(grid.input_pattern)}")
     return grid.fire_input()

@@ -44,8 +44,8 @@ neurohacking --columns 8 --rows 6 --save grid.png
 neurohacking --window 1200 800 --show
 neurohacking --fast                       # free-run the system; the window monitors it at 30 Hz
 neurohacking --quiet                      # no line per firing neuron
-neurohacking --fast --learn               # teach it after every epoch; accuracy in the title bar
-neurohacking --learn --epochs 3000 -q     # headless training run, accuracy printed as it goes
+neurohacking --fast --learn               # reinforce after every epoch; accuracy in the title bar
+neurohacking --learn --epochs 20000 -q    # headless training run, accuracy printed as it goes
 ```
 
 With `--show` the window opens on the mesh after its first epoch has run.
@@ -168,26 +168,38 @@ Accuracy is the fraction of the 24 output neurons that match. Because the
 input is complement-coded, exactly half the outputs should fire, so an output
 row that never fires already scores 50%; that is the number to beat.
 
-The teaching rule (`learning.teach`) backpropagates the output error through
-the epoch's waves, treating each threshold as if it passed the error straight
-through. Connections from fired sources into erring neurons move by
-`lr * error`, and the error is passed upstream so earlier neurons learn too.
-Inputs are never adjusted and weights stay within [-1, 1]. `Teacher` wraps
-this with a running accuracy that the window shows in its title bar.
+Learning is **global reinforcement**: a single scalar reward, the epoch's
+accuracy, is broadcast to every connection. Nothing is traced back through
+the network. Each epoch every neuron starts with a small random potential
+(exploration, `--sigma`), the epoch runs, and the reward is compared with a
+running average to give an *advantage*: better or worse than usual. Every
+connection that carried a signal into a neuron that was not a forced input
+then moves by `lr * advantage * eligibility`, where the eligibility is the
+target neuron's exploration noise. A neuron that was nudged towards firing
+in a better-than-usual epoch gets stronger inputs from whoever fed it. This
+is the REINFORCE / node-perturbation estimator, a three-factor rule:
+presynaptic activity x postsynaptic perturbation x global reward.
+`--eligibility hebb` swaps the perturbation for a plain Hebbian term (+1 if
+the target fired, -1 if not) with no noise. Forced inputs are never adjusted
+and weights stay within [-1, 1]. `Teacher` wraps all this; use
+`teacher.epoch()` instead of `run_epoch(grid)` so the exploration noise is
+injected.
 
-**Where this stands.** The rule reliably learns the input-independent
-targets (`all-off`, `all-on` reach 100% within a few hundred epochs) but
-has not yet learned `reversed` or `copy`: after 3000 epochs accuracy sits
-between 50% and 60%. Any mapping that depends on the input is still beyond
-it; see the discussion in the project history for the likely reasons.
+**Where this stands.** Input-independent targets are learned: `all-off`
+passes 90% within a couple of thousand epochs on an 8x4 mesh, `all-on` more
+slowly. For input-dependent targets learning is real but slow: on an 8x4
+mesh over thirty thousand epochs, `copy` climbs from about 55% to 65-68% and
+`reversed` from 50% to 57-68%, depending on the seed. On the default 24x20
+mesh nothing measurable has happened within fifteen thousand epochs.
+Reinforcement learning of this kind pays for its generality with variance,
+and the variance grows with the number of neurons being perturbed.
 
 ```python
 from neurohacking.learning import Teacher
 grid = main(columns=24, rows=20, seed=1)
-teacher = Teacher(grid, target="reversed", lr=0.05)
-for _ in range(1000):
-    run_epoch(grid, verbose=False)
-    teacher.step()
+teacher = Teacher(grid, target="reversed", lr=0.03, sigma=0.1, seed=1)
+for _ in range(10000):
+    teacher.epoch(verbose=False)   # exploration noise, new input, propagate, reinforce
 print(teacher.status())
 ```
 
@@ -207,7 +219,7 @@ src/neurohacking/
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up neighbours
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input
-  learning.py  output targets, accuracy, the teaching rule, and Teacher
+  learning.py  output targets, reward, the global-reinforcement rule, and Teacher
   visualizer.py hex geometry and pygame drawing: show() and save()
   cli.py       argument parsing and the `neurohacking` command
   __main__.py  lets you run `python -m neurohacking`

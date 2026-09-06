@@ -238,10 +238,11 @@ def test_window_teaches_after_each_epoch_and_shows_accuracy(monkeypatch, capsys)
     from neurohacking.learning import Teacher
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     grid = main(columns=8, rows=4, weight=None, seed=1)
-    teacher = Teacher(grid, target="all-off", lr=0.05)
-    teacher.step()  # teach from the first epoch, as the command line does
+    teacher = Teacher(grid, target="all-off", lr=0.01, seed=1)
+    teacher.step()  # learn from the first epoch, as the command line does
     assert viz.handle_event(key(pygame.K_SPACE), grid, teacher) == (True, True)
-    assert teacher.epochs == 2
+    assert teacher.epochs == 2 and grid.epoch == 2
+    assert any(n.noise != 0 for n in grid.neurons.values())  # Space ran the epoch with exploration
     assert "learning all-off" in viz.caption(grid, teacher)
     scripted = [[], [pygame.event.Event(pygame.QUIT)]]
     monkeypatch.setattr(pygame.event, "get", lambda: scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)])

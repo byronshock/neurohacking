@@ -13,6 +13,7 @@ class Neuron:
         self.incoming: list[Connection] = []  # connections that deliver signals to this neuron
         self.threshold = float(threshold)  # total weighted input needed to fire
         self.potential = 0.0  # weighted input received since the last reset
+        self.noise = 0.0  # exploration noise this epoch started with (see learning.py)
         self.has_fired = False
         self.fired_in_wave: int | None = None  # set by fire(); None until it fires
 
@@ -78,6 +79,7 @@ class Neuron:
         self.has_fired = False
         self.fired_in_wave = None
         self.potential = 0.0
+        self.noise = 0.0
 
     def list_connections(self) -> None:
         print(f"I am {self.name}, and I send signals to:")

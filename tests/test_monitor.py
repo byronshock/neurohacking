@@ -165,13 +165,13 @@ def test_cli_quiet_suppresses_neuron_lines_but_keeps_the_epoch_line(capsys):
 
 
 def test_cli_learn_runs_epochs_and_reports_accuracy(capsys):
-    args = ["--columns", "8", "--rows", "4", "--seed", "1", "--quiet", "--learn", "--target", "all-off", "--epochs", "300"]
+    args = ["--columns", "8", "--rows", "4", "--seed", "1", "--quiet", "--learn", "--target", "all-off", "--epochs", "2000"]
     assert cli_main(args) == 0
     err = capsys.readouterr().err
-    assert "learning all-off (lr 0.05): accuracy" in err
-    assert "after 300 epochs:" in err
+    assert "learning all-off (perturb, lr 0.03): accuracy" in err
+    assert "after 2000 epochs:" in err
     final = float(err.rsplit("accuracy ", 1)[1].split("%")[0])
-    assert final > 90
+    assert final > 85
 
 
 def test_cli_epochs_without_learn_just_runs_them(capsys):
@@ -183,3 +183,10 @@ def test_cli_epochs_without_learn_just_runs_them(capsys):
 def test_cli_rejects_unknown_target():
     with pytest.raises(SystemExit):
         cli_main(["--learn", "--target", "sideways"])
+
+
+def test_cli_eligibility_and_sigma_options(capsys):
+    args = ["--columns", "8", "--rows", "4", "--seed", "1", "-q", "--learn", "--eligibility", "hebb",
+            "--sigma", "0.3", "--lr", "0.02", "--epochs", "20"]
+    assert cli_main(args) == 0
+    assert "learning reversed (hebb, lr 0.02)" in capsys.readouterr().err

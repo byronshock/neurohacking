@@ -145,9 +145,10 @@ def handle_event(
     if event.key in (pygame.K_ESCAPE, pygame.K_q):
         return False, False
     if event.key == pygame.K_SPACE:
-        run_epoch(grid)  # clear every neuron, draw a new random input, propagate
         if teacher:
-            teacher.step()
+            teacher.epoch()  # new input with exploration noise, then reinforce
+        else:
+            run_epoch(grid)  # clear every neuron, draw a new random input, propagate
         return True, True
     return True, False
 
@@ -204,9 +205,10 @@ def show(
                 # Let the system run until the monitor's next sample is due.
                 count = 0
                 while time.perf_counter() < next_frame:
-                    run_epoch(grid, verbose=False)
                     if teacher:
-                        teacher.step()
+                        teacher.epoch(verbose=False)
+                    else:
+                        run_epoch(grid, verbose=False)
                     count += 1
                 epochs_per_second = 0.8 * epochs_per_second + 0.2 * count * fps if epochs_per_second else count * fps
                 next_frame += frame_time
