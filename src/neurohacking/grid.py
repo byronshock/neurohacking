@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 
 from .connection import Connection
+from .inputs import complement_code
 from .neuron import Neuron
 from .propagation import Wave, propagate
 
@@ -69,6 +70,8 @@ class GridOfNeurons:
         self.connections: dict[int, Connection] = {}  # Maps connection ID (from 1) to Connection
         self.waves: list[Wave] = []  # Waves of the most recent propagation
         self.input_pattern: list[bool] | None = None  # one bit per column, applied to the bottom row
+        self.input_bits: list[bool] | None = None  # the raw bits before complement coding
+        self.epoch = 0  # how many inputs have been presented
         self.directions = DIRECTIONS
         self.create_grid()  # Initialize the grid
         self._add_small_world_connections(omega)
@@ -196,6 +199,28 @@ class GridOfNeurons:
             raise ValueError(f"input pattern has {len(pattern)} bits but the mesh has {self.columns} columns")
         self.input_pattern = pattern
 
+    def set_input_bits(self, bits) -> None:
+        """Set the input from raw bits (half the columns), complement-coded to fill the row."""
+        if self.columns % 2:
+            raise ValueError(f"complement coding needs an even number of columns, got {self.columns}")
+        bits = [bool(b) for b in bits]
+        if len(bits) != self.columns // 2:
+            raise ValueError(f"expected {self.columns // 2} input bits for {self.columns} columns, got {len(bits)}")
+        self.set_input(complement_code(bits))
+        self.input_bits = bits
+
+    def new_random_input(self) -> list[bool]:
+        """Draw fresh raw bits from the grid's seeded stream and set them as the input.
+
+        Because the stream is the same one used for shortcuts and weights, a
+        seed reproduces the whole sequence of inputs, not just the first.
+        """
+        if self.columns % 2:
+            raise ValueError(f"complement coding needs an even number of columns, got {self.columns}")
+        bits = [self._rng.random() < 0.5 for _ in range(self.columns // 2)]
+        self.set_input_bits(bits)
+        return bits
+
     def input_neurons(self) -> list[Neuron]:
         """The bottom-row neurons whose input bit is 1 (empty if no pattern is set)."""
         if self.input_pattern is None:
@@ -206,6 +231,7 @@ class GridOfNeurons:
         """Force the input neurons to fire and propagate the signal wave by wave."""
         if self.input_pattern is None:
             raise ValueError("no input pattern set; call set_input() first")
+        self.epoch += 1
         return self.propagate(fire=self.input_neurons())
 
     # --- running ----------------------------------------------------------

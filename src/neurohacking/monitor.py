@@ -1,4 +1,4 @@
-"""Core logic: build a grid, present an input pattern on its bottom row, and propagate.
+"""Core logic: build a grid, present input patterns on its bottom row, and propagate.
 
 This module knows nothing about command-line arguments. Keeping the logic
 separate from the CLI makes it easy to test and to reuse from other code.
@@ -9,25 +9,22 @@ from __future__ import annotations
 from typing import Sequence
 
 from .grid import GridOfNeurons
-from .inputs import complement_code, format_bits, random_bits
+from .inputs import format_bits
 
 
-def prepare_input(grid: GridOfNeurons, bits: Sequence[bool] | None = None, seed: int | None = None) -> list[bool]:
-    """Set the grid's input pattern from raw bits (random if None), complement-coded.
+def run_epoch(grid: GridOfNeurons, bits: Sequence[bool] | None = None) -> list:
+    """Reset every neuron, present an input (random unless `bits` is given), and propagate.
 
-    The raw bits number half the columns; complement coding doubles them so
-    the pattern covers the whole bottom row. Returns the raw bits used.
+    Weights, shortcuts and thresholds are untouched; only the neurons' fired
+    state and potential are cleared. Prints the input, returns the waves.
     """
-    if grid.columns % 2:
-        raise ValueError(f"complement coding needs an even number of columns, got {grid.columns}")
+    grid.reset()
     if bits is None:
-        bits = random_bits(grid.columns // 2, seed)
-    bits = [bool(b) for b in bits]
-    if len(bits) != grid.columns // 2:
-        raise ValueError(f"expected {grid.columns // 2} input bits for {grid.columns} columns, got {len(bits)}")
-    grid.set_input(complement_code(bits))
-    print(f"input {format_bits(bits)} -> bottom row {format_bits(grid.input_pattern)}")
-    return bits
+        grid.new_random_input()
+    else:
+        grid.set_input_bits(bits)
+    print(f"epoch {grid.epoch + 1}: input {format_bits(grid.input_bits)} -> bottom row {format_bits(grid.input_pattern)}")
+    return grid.fire_input()
 
 
 def main(
@@ -39,18 +36,17 @@ def main(
     omega: float = 0.05,
     input_bits: Sequence[bool] | None = None,
 ) -> GridOfNeurons:
-    """Build a columns x rows grid, fire its bottom row with an input pattern, and return it.
+    """Build a columns x rows grid, run one epoch on its bottom row, and return it.
 
     `weight` is given to every connection, or None (the default) for random
     weights uniform between -1 and 1. `threshold` is given to every neuron and
     `omega` is the proportion of small-world shortcuts. `input_bits` are the raw
     input bits (columns / 2 of them); if None they are drawn at random. `seed`
-    makes the shortcuts, the weights and the random input all reproducible.
+    makes the shortcuts, the weights and the random inputs all reproducible.
     Returning the grid lets callers (and tests) inspect which neurons fired.
     """
     grid = GridOfNeurons(
         columns=columns, rows=rows, weight=weight, threshold=threshold, seed=seed, omega=omega
     )
-    prepare_input(grid, input_bits, seed)
-    grid.fire_input()
+    run_epoch(grid, input_bits)
     return grid

@@ -28,12 +28,13 @@ neurohacking --weight 0.2 --show   # signal dies at the origin
 python -m neurohacking       # same thing without the installed command
 ```
 
-**Input.** The network's input is its bottom row. Each run draws 12 random
+**Input.** The network's input is its bottom row. Each epoch draws 12 random
 bits (half the columns), complement-codes them by appending their negations,
 and forces the bottom-row neurons whose bit is 1 to fire in wave 0. So
 exactly half of the row fires every time. The raw bits and the coded row are
-printed, `--input 101100111000` supplies specific bits, and `--seed`
-reproduces a random draw. Columns must be even.
+printed, `--input 101100111000` supplies specific bits for the first epoch,
+and `--seed` reproduces the whole sequence of random inputs. Columns must be
+even. From Python, `run_epoch(grid)` resets the mesh and presents the next input.
 
 ## Seeing the grid
 
@@ -43,10 +44,11 @@ neurohacking --columns 8 --rows 6 --save grid.png
 neurohacking --window 1200 800 --show
 ```
 
-With `--show` the window opens as soon as the mesh is built, before anything
-has fired. The input neurons are ringed in white. Press **Space** to fire the
-input row, **R** to reset the mesh, and
-**Esc** or **Q** to close the window. Fired neurons are coloured, shading from
+With `--show` the window opens on the mesh after its first epoch has run.
+Press **Space** to start a new epoch: every neuron is reset (weights,
+shortcuts and thresholds are kept), a fresh random input is drawn, and the
+bottom row is fired again. **Esc** or **Q** closes the window. The input
+neurons are ringed in white. Fired neurons are coloured, shading from
 yellow in wave 0 to orange in the last wave, unfired neurons are grey, and the
 neurons that were forced in wave 0 carry a white ring. Adding `--save PATH`
 writes whatever state the mesh is in when the window closes.
@@ -56,15 +58,17 @@ from neurohacking import main, visualizer
 
 grid = main(columns=8, rows=6)
 visualizer.save(grid, "grid.png")   # write a picture, no window needed
-visualizer.show(grid, 1200, 800)    # or open a window; Space fires the input row, R resets, Esc quits
+visualizer.show(grid, 1200, 800)    # or open a window; Space runs a new epoch, Esc quits
 ```
 
 ## From Python
 
 ```python
 from neurohacking import main
+from neurohacking.monitor import run_epoch
 
-grid = main(columns=8, rows=6)  # builds the grid and fires its bottom row
+grid = main(columns=8, rows=6)  # builds the grid and runs the first epoch on its bottom row
+run_epoch(grid)                 # reset every neuron and present a new random input
 print(len(grid.fired_neurons()))
 grid.reset()                   # allow every neuron to fire again
 ```
@@ -161,7 +165,7 @@ src/neurohacking/
   propagation.py Signal queue and wave-by-wave propagate()
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up neighbours
   inputs.py    random bits, complement coding, parsing and formatting
-  monitor.py   main(columns, rows): build a grid, fire its bottom row, return the grid
+  monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input
   visualizer.py hex geometry and pygame drawing: show() and save()
   cli.py       argument parsing and the `neurohacking` command
   __main__.py  lets you run `python -m neurohacking`

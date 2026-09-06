@@ -14,6 +14,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402  (import after the env var so pygame stays quiet)
 
 from .grid import GridOfNeurons
+from .monitor import run_epoch
 
 SQRT3 = math.sqrt(3)
 
@@ -120,8 +121,8 @@ def caption(grid: GridOfNeurons) -> str:
     fired = len(grid.fired_neurons())
     state = f"{fired} of {len(grid.neurons)} fired in {len(grid.waves)} waves" if fired else "unfired"
     omega = f" omega {grid.omega:g}" if grid.omega else ""
-    what = "input row" if grid.input_pattern is not None else "origin"
-    return f"neurohacking {grid.columns}x{grid.rows}{omega}: {state}   [Space] fire {what}  [R] reset  [Esc] quit"
+    epoch = f" epoch {grid.epoch}:" if grid.epoch else ":"
+    return f"neurohacking {grid.columns}x{grid.rows}{omega}{epoch} {state}   [Space] new input  [Esc] quit"
 
 
 def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, bool]:
@@ -133,15 +134,7 @@ def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, 
     if event.key in (pygame.K_ESCAPE, pygame.K_q):
         return False, False
     if event.key == pygame.K_SPACE:
-        if grid.fired_neurons():
-            return True, False  # already fired; press R first
-        if grid.input_pattern is not None:
-            grid.fire_input()
-        else:
-            grid.activate_origin()
-        return True, True
-    if event.key == pygame.K_r:
-        grid.reset()
+        run_epoch(grid)  # clear every neuron, draw a new random input, propagate
         return True, True
     return True, False
 
@@ -149,8 +142,9 @@ def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, 
 def show(grid: GridOfNeurons, width: int = 800, height: int = 600) -> None:
     """Open a window showing the grid as it is now, and let the keyboard drive it.
 
-    Space fires the origin, R resets the grid, Esc or Q closes the window.
-    Returns when the window is closed; the grid keeps whatever state it reached.
+    Space resets every neuron and runs a new epoch with a fresh random input.
+    Esc or Q closes the window. Returns when the window is closed; the grid
+    keeps the state of its last epoch.
     """
     pygame.init()
     try:

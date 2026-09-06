@@ -6,9 +6,8 @@ import argparse
 import random
 import sys
 
-from .grid import GridOfNeurons
 from .inputs import parse_bits
-from .monitor import main, prepare_input
+from .monitor import main, run_epoch
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--show",
         action="store_true",
-        help="open a window showing the mesh; press Space to fire the origin, R to reset, Esc to quit",
+        help="open a window on the fired mesh; Space resets it and presents a new random input, Esc quits",
     )
     parser.add_argument(
         "--save",
@@ -114,13 +113,10 @@ def cli_main(argv: list[str] | None = None) -> int:
 
         try:
             input_bits = parse_bits(args.input) if args.input is not None else None
+            grid = main(**settings, input_bits=input_bits)
             if args.show:
-                # Show the mesh as soon as it exists; firing happens from the keyboard.
-                grid = GridOfNeurons(**settings)
-                prepare_input(grid, input_bits, seed)
+                # Each Space in the window resets the mesh and runs a new random epoch.
                 visualizer.show(grid, width, height)
-            else:
-                grid = main(**settings, input_bits=input_bits)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

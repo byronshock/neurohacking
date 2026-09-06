@@ -3,6 +3,7 @@ import math
 import pygame
 import pytest
 
+from neurohacking import main
 from neurohacking.cli import cli_main
 from neurohacking.grid import DIRECTIONS, GridOfNeurons
 from neurohacking import visualizer as viz
@@ -106,17 +107,25 @@ def key(k):
     return pygame.event.Event(pygame.KEYDOWN, key=k)
 
 
-def test_space_fires_origin_and_r_resets(capsys):
-    grid = GridOfNeurons(columns=3, rows=3)
-    assert viz.handle_event(key(pygame.K_SPACE), grid) == (True, True)
-    assert len(grid.fired_neurons()) == 9
-    assert viz.handle_event(key(pygame.K_SPACE), grid) == (True, False)  # already fired: nothing to do
-    assert viz.handle_event(key(pygame.K_r), grid) == (True, True)
-    assert grid.fired_neurons() == [] and grid.waves == []
+def test_space_runs_a_new_epoch_every_time(capsys):
+    grid = main(columns=8, rows=4, weight=1.0, seed=1)
+    inputs = {tuple(grid.input_bits)}
+    for expected_epoch in (2, 3, 4, 5):
+        assert viz.handle_event(key(pygame.K_SPACE), grid) == (True, True)
+        assert grid.epoch == expected_epoch
+        assert grid.waves[0].fired == grid.input_neurons()  # fresh wave 0 each time
+        inputs.add(tuple(grid.input_bits))
+    assert len(inputs) > 1
+
+
+def test_r_key_is_no_longer_special(capsys):
+    grid = main(columns=8, rows=4, weight=1.0, seed=1)
+    assert viz.handle_event(key(pygame.K_r), grid) == (True, False)
+    assert grid.fired_neurons()  # nothing was reset
 
 
 def test_quit_keys_and_window_close_stop_the_loop():
-    grid = GridOfNeurons(columns=3, rows=3)
+    grid = GridOfNeurons(columns=4, rows=3)
     assert viz.handle_event(key(pygame.K_ESCAPE), grid) == (False, False)
     assert viz.handle_event(key(pygame.K_q), grid) == (False, False)
     assert viz.handle_event(pygame.event.Event(pygame.QUIT), grid) == (False, False)
@@ -125,17 +134,19 @@ def test_quit_keys_and_window_close_stop_the_loop():
 
 
 def test_caption_reports_state(capsys):
-    grid = GridOfNeurons(columns=3, rows=3)
-    assert viz.caption(grid).startswith("neurohacking 3x3 omega 0.05: unfired")
-    grid.activate_origin()
-    assert "9 of 9 fired in 4 waves" in viz.caption(grid)  # waves 0-2 fire; wave 3 delivers to already-fired cells
+    grid = GridOfNeurons(columns=4, rows=3, weight=1.0, omega=0)
+    assert viz.caption(grid).startswith("neurohacking 4x3: unfired")
+    grid.set_input_bits([True, False])
+    grid.fire_input()
+    text = viz.caption(grid)
+    assert "epoch 1: 12 of 12 fired" in text and "[Space] new input" in text and "[R]" not in text
 
 
-def test_show_opens_on_the_unfired_mesh_and_returns_on_quit(monkeypatch, capsys):
+def test_show_opens_on_the_fired_mesh_and_space_advances_epochs(monkeypatch, capsys):
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    grid = GridOfNeurons(columns=3, rows=3)
+    grid = main(columns=8, rows=4, weight=1.0, seed=1)
     seen = []
-    scripted = [[key(pygame.K_SPACE)], [pygame.event.Event(pygame.QUIT)]]
+    scripted = [[key(pygame.K_SPACE)], [key(pygame.K_SPACE)], [pygame.event.Event(pygame.QUIT)]]
 
     def fake_get():
         seen.append(viz.caption(grid))
@@ -143,29 +154,30 @@ def test_show_opens_on_the_unfired_mesh_and_returns_on_quit(monkeypatch, capsys)
 
     monkeypatch.setattr(pygame.event, "get", fake_get)
     viz.show(grid, 200, 150)
-    assert seen[0].startswith("neurohacking 3x3 omega 0.05: unfired")  # first frame drawn before any key
-    assert len(grid.fired_neurons()) == 9  # Space fired it; state survives closing
+    assert "epoch 1:" in seen[0] and "unfired" not in seen[0]  # no pre-activation preview
+    assert "epoch 3:" in seen[2]
+    assert grid.epoch == 3  # state of the last epoch survives closing
 
 
-def test_cli_show_opens_before_firing(monkeypatch, capsys):
+def test_cli_show_opens_on_an_already_fired_mesh(monkeypatch, capsys):
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    fired_when_shown = []
+    shown = []
 
     def fake_show(grid, width, height):
-        fired_when_shown.append(len(grid.fired_neurons()))
+        shown.append((grid.epoch, len(grid.fired_neurons())))
 
     monkeypatch.setattr(viz, "show", fake_show)
-    assert cli_main(["--columns", "4", "--rows", "4", "--show"]) == 0
-    assert fired_when_shown == [0]
-    assert "0 of 16 neurons fired in 0 waves" in capsys.readouterr().err
+    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--show"]) == 0
+    assert shown == [(1, 16)]
+    assert "16 of 16 neurons fired" in capsys.readouterr().err
 
 
-def test_space_fires_the_input_row_when_a_pattern_is_set(capsys):
-    grid = GridOfNeurons(columns=4, rows=3, weight=1.0)
-    grid.set_input([True, False, False, True])
-    assert "fire input row" in viz.caption(grid)
+def test_space_input_lands_on_the_bottom_row(capsys):
+    grid = main(columns=4, rows=3, weight=1.0, seed=1)
     assert viz.handle_event(key(pygame.K_SPACE), grid) == (True, True)
+    bottom = max(r for _, r in grid.neurons)
     assert grid.waves[0].fired == grid.input_neurons()
+    assert all(n.position[1] == bottom for n in grid.waves[0].fired)
     assert grid.get_origin_neuron().fired_in_wave > 0
 
 
