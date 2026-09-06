@@ -18,7 +18,8 @@ visualizer needs, use `pip install -e ".[viz]"` instead.
 
 ```bash
 neurohacking                 # 24 x 20 mesh (480 neurons), random weights
-neurohacking --columns 8 --rows 6
+neurohacking --columns 8 --rows 6         # 4 input bits, coded to 8
+neurohacking --input 101100111000         # choose the 12 input bits
 neurohacking --seed 42       # repeat a particular random mesh
 neurohacking --weight 1      # a fixed weight on every connection instead
 neurohacking --omega 0.1     # one connection in ten is a shortcut (default: 0.05)
@@ -27,7 +28,12 @@ neurohacking --weight 0.2 --show   # signal dies at the origin
 python -m neurohacking       # same thing without the installed command
 ```
 
-`--interval` is accepted but not used yet.
+**Input.** The network's input is its bottom row. Each run draws 12 random
+bits (half the columns), complement-codes them by appending their negations,
+and forces the bottom-row neurons whose bit is 1 to fire in wave 0. So
+exactly half of the row fires every time. The raw bits and the coded row are
+printed, `--input 101100111000` supplies specific bits, and `--seed`
+reproduces a random draw. Columns must be even.
 
 ## Seeing the grid
 
@@ -38,18 +44,19 @@ neurohacking --window 1200 800 --show
 ```
 
 With `--show` the window opens as soon as the mesh is built, before anything
-has fired. Press **Space** to fire the origin, **R** to reset the mesh, and
+has fired. The input neurons are ringed in white. Press **Space** to fire the
+input row, **R** to reset the mesh, and
 **Esc** or **Q** to close the window. Fired neurons are coloured, shading from
 yellow in wave 0 to orange in the last wave, unfired neurons are grey, and the
-origin carries a white ring. Adding `--save PATH` writes whatever state the
-mesh is in when the window closes.
+neurons that were forced in wave 0 carry a white ring. Adding `--save PATH`
+writes whatever state the mesh is in when the window closes.
 
 ```python
 from neurohacking import main, visualizer
 
 grid = main(columns=8, rows=6)
 visualizer.save(grid, "grid.png")   # write a picture, no window needed
-visualizer.show(grid, 1200, 800)    # or open a window; Space fires, R resets, Esc quits
+visualizer.show(grid, 1200, 800)    # or open a window; Space fires the input row, R resets, Esc quits
 ```
 
 ## From Python
@@ -57,7 +64,7 @@ visualizer.show(grid, 1200, 800)    # or open a window; Space fires, R resets, E
 ```python
 from neurohacking import main
 
-grid = main(columns=8, rows=6)  # builds the grid and fires the origin
+grid = main(columns=8, rows=6)  # builds the grid and fires its bottom row
 print(len(grid.fired_neurons()))
 grid.reset()                   # allow every neuron to fire again
 ```
@@ -94,8 +101,8 @@ The same `seed` reproduces both the shortcuts and the weights.
 its weight to the target's potential. A neuron fires the moment its potential
 reaches its threshold, and it fires at most once until the grid is reset.
 Negative weights lower the potential, so they act as inhibitory connections.
-The origin is fired directly as an external stimulus, which ignores the
-threshold.
+The input neurons are fired directly as an external stimulus, which ignores
+the threshold.
 
 **Propagation** is not recursive. `propagation.propagate` keeps a first-in,
 first-out queue of `Signal` messages, each tagged with a wave number. In each
@@ -153,7 +160,8 @@ src/neurohacking/
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
   propagation.py Signal queue and wave-by-wave propagate()
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up neighbours
-  monitor.py   main(columns, rows): build a grid, fire the origin, return the grid
+  inputs.py    random bits, complement coding, parsing and formatting
+  monitor.py   main(columns, rows): build a grid, fire its bottom row, return the grid
   visualizer.py hex geometry and pygame drawing: show() and save()
   cli.py       argument parsing and the `neurohacking` command
   __main__.py  lets you run `python -m neurohacking`

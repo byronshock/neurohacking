@@ -88,14 +88,14 @@ def test_save_writes_an_image_file(tmp_path, capsys):
 
 def test_cli_save_option(tmp_path, capsys):
     out = tmp_path / "cli.png"
-    assert cli_main(["--columns", "3", "--rows", "3", "--weight", "1", "--save", str(out)]) == 0
+    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--save", str(out)]) == 0
     assert out.exists()
     assert "Saved" in capsys.readouterr().err
 
 
 def test_cli_window_option_sets_image_size(tmp_path, capsys):
     out = tmp_path / "wide.png"
-    assert cli_main(["--columns", "3", "--rows", "3", "--save", str(out), "--window", "320", "200"]) == 0
+    assert cli_main(["--columns", "4", "--rows", "4", "--save", str(out), "--window", "320", "200"]) == 0
     assert pygame.image.load(str(out)).get_size() == (320, 200)
 
 
@@ -155,6 +155,29 @@ def test_cli_show_opens_before_firing(monkeypatch, capsys):
         fired_when_shown.append(len(grid.fired_neurons()))
 
     monkeypatch.setattr(viz, "show", fake_show)
-    assert cli_main(["--columns", "3", "--rows", "3", "--show"]) == 0
+    assert cli_main(["--columns", "4", "--rows", "4", "--show"]) == 0
     assert fired_when_shown == [0]
-    assert "0 of 9 neurons fired in 0 waves" in capsys.readouterr().err
+    assert "0 of 16 neurons fired in 0 waves" in capsys.readouterr().err
+
+
+def test_space_fires_the_input_row_when_a_pattern_is_set(capsys):
+    grid = GridOfNeurons(columns=4, rows=3, weight=1.0)
+    grid.set_input([True, False, False, True])
+    assert "fire input row" in viz.caption(grid)
+    assert viz.handle_event(key(pygame.K_SPACE), grid) == (True, True)
+    assert grid.waves[0].fired == grid.input_neurons()
+    assert grid.get_origin_neuron().fired_in_wave > 0
+
+
+def test_stimulus_ring_is_drawn_on_input_neurons_before_firing(capsys):
+    grid = GridOfNeurons(columns=4, rows=3, weight=1.0)
+    grid.set_input([True, False, False, False])
+    surface = pygame.Surface((300, 300))
+    viz.draw_grid(surface, grid)
+    radius, ox, oy = viz.layout(grid, 300, 300)
+    dx, dy = viz.axial_to_pixel(*grid.input_row()[0].position, radius)
+    # the ring is a hexagon outline at 0.55 of the cell radius; sample straight up from the centre
+    ring_pixel = (round(ox + dx), round(oy + dy - 0.55 * radius))
+    assert surface.get_at(ring_pixel)[:3] == viz.ORIGIN_RING
+    dx, dy = viz.axial_to_pixel(0, 0, radius)
+    assert surface.get_at((round(ox + dx), round(oy + dy - 0.55 * radius)))[:3] != viz.ORIGIN_RING

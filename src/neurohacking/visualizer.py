@@ -98,9 +98,15 @@ def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) ->
         pygame.draw.polygon(surface, neuron_colour(neuron.fired_in_wave, last_wave), points)
         pygame.draw.polygon(surface, OUTLINE, points, width=max(1, round(hex_radius / 12)))
 
-    # Mark the origin so the eye can find where the signal started.
-    points = hexagon_points(offset_x, offset_y, hex_radius * 0.55)
-    pygame.draw.polygon(surface, ORIGIN_RING, points, width=max(1, round(hex_radius / 8)))
+    # Ring the stimulus: the neurons that fired in wave 0, or the input neurons
+    # that will be forced when the mesh is fired, or failing both the origin.
+    stimulus = [n for n in grid.neurons.values() if n.fired_in_wave == 0] or grid.input_neurons()
+    if not stimulus and grid.get_origin_neuron() is not None:
+        stimulus = [grid.get_origin_neuron()]
+    for neuron in stimulus:
+        dx, dy = axial_to_pixel(*neuron.position, hex_radius)
+        points = hexagon_points(offset_x + dx, offset_y + dy, hex_radius * 0.55)
+        pygame.draw.polygon(surface, ORIGIN_RING, points, width=max(1, round(hex_radius / 8)))
 
 
 def save(grid: GridOfNeurons, path: str, width: int = 800, height: int = 600) -> None:
@@ -114,7 +120,8 @@ def caption(grid: GridOfNeurons) -> str:
     fired = len(grid.fired_neurons())
     state = f"{fired} of {len(grid.neurons)} fired in {len(grid.waves)} waves" if fired else "unfired"
     omega = f" omega {grid.omega:g}" if grid.omega else ""
-    return f"neurohacking {grid.columns}x{grid.rows}{omega}: {state}   [Space] fire origin  [R] reset  [Esc] quit"
+    what = "input row" if grid.input_pattern is not None else "origin"
+    return f"neurohacking {grid.columns}x{grid.rows}{omega}: {state}   [Space] fire {what}  [R] reset  [Esc] quit"
 
 
 def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, bool]:
@@ -126,10 +133,13 @@ def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, 
     if event.key in (pygame.K_ESCAPE, pygame.K_q):
         return False, False
     if event.key == pygame.K_SPACE:
-        if grid.get_origin_neuron() is not None and not grid.get_origin_neuron().has_fired:
+        if grid.fired_neurons():
+            return True, False  # already fired; press R first
+        if grid.input_pattern is not None:
+            grid.fire_input()
+        else:
             grid.activate_origin()
-            return True, True
-        return True, False
+        return True, True
     if event.key == pygame.K_r:
         grid.reset()
         return True, True

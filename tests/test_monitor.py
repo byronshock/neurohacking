@@ -2,40 +2,73 @@ import pytest
 
 from neurohacking import main
 from neurohacking.cli import cli_main
+from neurohacking.grid import GridOfNeurons
+from neurohacking.monitor import prepare_input
 
 
-def test_main_fires_the_whole_grid_and_returns_it(capsys):
-    grid = main(columns=3, rows=3, weight=1.0)
-    assert len(grid.fired_neurons()) == 9
-    assert "Origin neuron Neuron_0_0 has 6 connections" in capsys.readouterr().out
+def test_main_fires_the_bottom_row_and_returns_the_grid(capsys):
+    grid = main(columns=4, rows=3, weight=1.0, seed=1)
+    out = capsys.readouterr().out
+    assert len(grid.fired_neurons()) == 12
+    assert grid.waves[0].fired == grid.input_neurons()
+    assert all(n.position[1] == max(r for _, r in grid.neurons) for n in grid.waves[0].fired)
+    assert "input " in out and "-> bottom row " in out
+
+
+def test_main_complement_codes_the_input():
+    grid = main(columns=6, rows=3, weight=1.0, input_bits=[True, False, True])
+    assert grid.input_pattern == [True, False, True, False, True, False]
+    assert len(grid.waves[0].fired) == 3
+
+
+def test_prepare_input_requires_even_columns_and_the_right_count():
+    with pytest.raises(ValueError):
+        prepare_input(GridOfNeurons(columns=5, rows=3))
+    with pytest.raises(ValueError):
+        prepare_input(GridOfNeurons(columns=6, rows=3), bits=[True, False])
+
+
+def test_main_random_input_is_reproducible_by_seed(capsys):
+    a = main(columns=8, rows=4, seed=4)
+    b = main(columns=8, rows=4, seed=4)
+    assert a.input_pattern == b.input_pattern
+    assert [n.has_fired for n in a.neurons.values()] == [n.has_fired for n in b.neurons.values()]
+    assert a.input_pattern != main(columns=8, rows=4, seed=5).input_pattern
 
 
 def test_cli_runs_and_returns_zero(capsys):
     assert cli_main(["--weight", "1"]) == 0
     captured = capsys.readouterr()
-    assert "Neuron_0_0 fired in wave 0." in captured.out
-    assert "480 of 480 neurons fired" in captured.err  # default 24 x 20
+    assert captured.out.count("fired in wave 0.") == 12  # half of the 24-column bottom row
+    assert "480 of 480 neurons fired" in captured.err
+
+
+def test_cli_input_option_sets_the_pattern(capsys):
+    assert cli_main(["--columns", "6", "--rows", "3", "--weight", "1", "--input", "110"]) == 0
+    out = capsys.readouterr().out
+    assert "input 110 -> bottom row 110001" in out
+    assert out.count("fired in wave 0.") == 3
+
+
+@pytest.mark.parametrize("bad", [["--input", "10"], ["--input", "1x1"], ["--columns", "5", "--rows", "3"]])
+def test_cli_rejects_bad_input(bad, capsys):
+    assert cli_main(["--columns", "6", "--rows", "3"] + bad if "--columns" not in bad else bad) == 2
+    assert "error:" in capsys.readouterr().err
 
 
 def test_cli_defaults_to_random_weights_and_reports_the_seed(capsys):
-    assert cli_main(["--columns", "5", "--rows", "5"]) == 0
+    assert cli_main(["--columns", "6", "--rows", "6"]) == 0
     err = capsys.readouterr().err
-    assert "seed " in err
-    assert "of 25 neurons fired" in err
+    assert "seed " in err and "of 36 neurons fired" in err
 
 
 def test_cli_seed_makes_runs_repeatable(capsys):
-    cli_main(["--columns", "9", "--rows", "7", "--threshold", "0.3", "--seed", "11"])
+    cli_main(["--columns", "10", "--rows", "8", "--seed", "11"])
     first = capsys.readouterr()
-    cli_main(["--columns", "9", "--rows", "7", "--threshold", "0.3", "--seed", "11"])
+    cli_main(["--columns", "10", "--rows", "8", "--seed", "11"])
     second = capsys.readouterr()
     assert first.out == second.out and first.err == second.err
     assert "seed 11" in first.err
-
-
-def test_cli_fixed_weight_does_not_mention_randomness(capsys):
-    cli_main(["--columns", "3", "--rows", "3", "--weight", "0.5"])
-    assert "random" not in capsys.readouterr().err
 
 
 def test_cli_columns_and_rows_options(capsys):
@@ -50,20 +83,14 @@ def test_cli_rejects_unknown_arguments():
 
 
 def test_cli_weight_and_threshold_options(capsys):
-    assert cli_main(["--columns", "5", "--rows", "5", "--weight", "0.2"]) == 0  # 0.2 < default threshold 0.25
-    assert capsys.readouterr().out.count("fired") == 1  # only the origin
+    args = ["--columns", "6", "--rows", "5", "--weight", "0.2", "--threshold", "1", "--input", "101"]
+    assert cli_main(args) == 0
+    assert capsys.readouterr().out.count("fired") == 3  # only the input neurons: 0.4 max input < 1
 
 
 def test_main_passes_weight_and_threshold_through(capsys):
-    grid = main(columns=3, rows=3, weight=0.25, threshold=0.25)
-    assert len(grid.fired_neurons()) == 9
-
-
-def test_main_random_weights_are_reproducible_by_seed(capsys):
-    a = main(columns=5, rows=5, seed=5)
-    b = main(columns=5, rows=5, seed=5)
-    assert [n.has_fired for n in a.neurons.values()] == [n.has_fired for n in b.neurons.values()]
-    assert [c.weight for c in a.connections.values()] == [c.weight for c in b.connections.values()]
+    grid = main(columns=4, rows=3, weight=0.25, threshold=0.25, seed=1)
+    assert len(grid.fired_neurons()) == 12
 
 
 def test_cli_omega_option_reports_shortcuts(capsys):
@@ -73,7 +100,7 @@ def test_cli_omega_option_reports_shortcuts(capsys):
 
 
 def test_cli_rejects_omega_out_of_range(capsys):
-    assert cli_main(["--columns", "3", "--rows", "3", "--omega", "1"]) == 2
+    assert cli_main(["--columns", "4", "--rows", "3", "--omega", "1"]) == 2
     assert "omega" in capsys.readouterr().err
 
 

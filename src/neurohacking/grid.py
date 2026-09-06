@@ -68,6 +68,7 @@ class GridOfNeurons:
         self.neurons: dict[tuple[int, int], Neuron] = {}  # Maps axial (q, r) to Neuron
         self.connections: dict[int, Connection] = {}  # Maps connection ID (from 1) to Connection
         self.waves: list[Wave] = []  # Waves of the most recent propagation
+        self.input_pattern: list[bool] | None = None  # one bit per column, applied to the bottom row
         self.directions = DIRECTIONS
         self.create_grid()  # Initialize the grid
         self._add_small_world_connections(omega)
@@ -181,6 +182,31 @@ class GridOfNeurons:
     def connection_between(self, source: Neuron, target: Neuron) -> Connection | None:
         """The connection running from `source` to `target`, or None if there is none."""
         return source.connection_to(target)
+
+    # --- input ------------------------------------------------------------
+
+    def input_row(self) -> list[Neuron]:
+        """The bottom row of neurons, left to right: the network's input."""
+        return [self.get_neuron_at(column, self.rows - 1) for column in range(self.columns)]
+
+    def set_input(self, pattern) -> None:
+        """Store the input pattern: one boolean per column of the bottom row."""
+        pattern = [bool(b) for b in pattern]
+        if len(pattern) != self.columns:
+            raise ValueError(f"input pattern has {len(pattern)} bits but the mesh has {self.columns} columns")
+        self.input_pattern = pattern
+
+    def input_neurons(self) -> list[Neuron]:
+        """The bottom-row neurons whose input bit is 1 (empty if no pattern is set)."""
+        if self.input_pattern is None:
+            return []
+        return [neuron for neuron, bit in zip(self.input_row(), self.input_pattern) if bit]
+
+    def fire_input(self) -> list[Wave]:
+        """Force the input neurons to fire and propagate the signal wave by wave."""
+        if self.input_pattern is None:
+            raise ValueError("no input pattern set; call set_input() first")
+        return self.propagate(fire=self.input_neurons())
 
     # --- running ----------------------------------------------------------
 

@@ -303,3 +303,46 @@ def test_default_omega_is_five_percent():
     grid = GridOfNeurons(columns=10, rows=8, seed=1)
     assert grid.omega == 0.05
     assert len(grid.small_world_connections()) == round(0.05 * len(grid.local_connections()) / 0.95)
+
+
+
+# --- the input row ------------------------------------------------------------
+
+
+def test_input_row_is_the_bottom_row_left_to_right(grid):
+    row = grid.input_row()
+    assert len(row) == grid.columns
+    lowest_r = max(r for _, r in grid.neurons)
+    assert all(n.position[1] == lowest_r for n in row)
+    assert [n.position[0] for n in row] == sorted(n.position[0] for n in row)
+    assert row[0] is grid.get_neuron_at(0, grid.rows - 1)
+
+
+def test_set_input_and_input_neurons(grid):
+    pattern = [True, False, False, True, False, True, False]
+    grid.set_input(pattern)
+    assert grid.input_pattern == pattern
+    row = grid.input_row()
+    assert grid.input_neurons() == [row[0], row[3], row[5]]
+
+
+def test_set_input_rejects_wrong_length(grid):
+    with pytest.raises(ValueError):
+        grid.set_input([True] * 3)
+
+
+def test_input_neurons_is_empty_without_a_pattern(grid):
+    assert grid.input_pattern is None and grid.input_neurons() == []
+
+
+def test_fire_input_forces_exactly_the_pattern_in_wave_zero(grid, capsys):
+    grid.set_input([True, False, True, False, True, False, True])
+    waves = grid.fire_input()
+    assert waves[0].fired == grid.input_neurons()
+    assert all(n.fired_in_wave == 0 for n in grid.input_neurons())
+    assert len(grid.fired_neurons()) == len(grid.neurons)  # weight 1 spreads everywhere
+
+
+def test_fire_input_without_a_pattern_raises(grid):
+    with pytest.raises(ValueError):
+        grid.fire_input()

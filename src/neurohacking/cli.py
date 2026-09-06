@@ -7,7 +7,8 @@ import random
 import sys
 
 from .grid import GridOfNeurons
-from .monitor import main
+from .inputs import parse_bits
+from .monitor import main, prepare_input
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,13 +39,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="window or image size in pixels (default: 800 600)",
     )
     parser.add_argument(
-        "-i",
-        "--interval",
-        type=float,
-        default=1.0,
-        help="update interval in seconds (accepted but not used yet)",
-    )
-    parser.add_argument(
         "-w",
         "--weight",
         type=float,
@@ -57,6 +51,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.05,
         help="proportion of connections that are small-world shortcuts, 0 to <1 (default: 0.05)",
+    )
+    parser.add_argument(
+        "-i",
+        "--input",
+        metavar="BITS",
+        default=None,
+        help="raw input bits, one per half column, e.g. 101100111000 for 24 columns (default: random)",
     )
     parser.add_argument(
         "--seed",
@@ -108,16 +109,18 @@ def cli_main(argv: list[str] | None = None) -> int:
             seed=seed,
             omega=args.omega,
         )
-        if args.weight is None or args.omega > 0:
+        if args.weight is None or args.omega > 0 or args.input is None:
             print(f"seed {seed}", file=sys.stderr)
 
         try:
+            input_bits = parse_bits(args.input) if args.input is not None else None
             if args.show:
                 # Show the mesh as soon as it exists; firing happens from the keyboard.
                 grid = GridOfNeurons(**settings)
+                prepare_input(grid, input_bits, seed)
                 visualizer.show(grid, width, height)
             else:
-                grid = main(**settings)
+                grid = main(**settings, input_bits=input_bits)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
