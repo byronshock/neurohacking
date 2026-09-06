@@ -14,7 +14,7 @@ dev = ["pytest>=8"]
 
 # This makes `error-rate-monitor` a real command after `pip install -e .`
 [project.scripts]
-error-rate-monitor = "error_rate_monitor.cli:main"
+error-rate-monitor = "error_rate_monitor.cli:cli_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

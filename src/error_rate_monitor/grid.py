@@ -10,6 +10,16 @@ class GridOfNeurons:
         ]
         self.create_grid()  # Initialize the grid
 
+    def _establish_connections(self):
+        """Establish connections between neurons without recursive references."""
+        visited = set()  # Track neurons already processed
+        for neuron in self.neurons.values():
+            if neuron not in visited:
+                neighbors = self.get_neighbors(neuron)
+                for neighbor in neighbors:
+                    neuron.connect(neighbor)
+                visited.add(neuron)
+
     def create_grid(self):
         """Generate a hexagonal grid of neurons within the given size."""
         for q in range(-self.size, self.size + 1):
@@ -19,12 +29,7 @@ class GridOfNeurons:
                     neuron.position = (q, r)
                     self.neurons[(q, r)] = neuron
 
-        # Establish connections between neurons
-        for neuron in self.neurons.values():
-            neighbors = self.get_neighbors(neuron)
-            for neighbor in neighbors:
-                neuron.connect(neighbor)
-
+        self._establish_connections()  # Call once after grid is fully initialized
     def get_neighbors(self, neuron: "Neuron") -> list:
         """Return the list of neighboring neurons in the grid."""
         q, r = neuron.position
