@@ -48,15 +48,24 @@ def hexagon_points(cx: float, cy: float, hex_radius: float) -> list[tuple[float,
     ]
 
 
-def fit_hex_radius(grid_size: int, width: int, height: int, margin: int = 24) -> float:
-    """Largest hex radius at which a grid of `grid_size` fits inside width x height."""
-    usable_w = width - 2 * margin
-    usable_h = height - 2 * margin
-    # Widest row (r = 0) holds 2*size + 1 hexagons, each sqrt(3)*R wide.
-    by_width = usable_w / ((2 * grid_size + 1) * SQRT3)
-    # Rows are 1.5*R apart; add a full R for the top and bottom corners.
-    by_height = usable_h / (3 * grid_size + 2)
-    return min(by_width, by_height)
+def layout(grid: GridOfNeurons, width: int, height: int, margin: int = 24) -> tuple[float, float, float]:
+    """Choose the largest hex radius at which the whole grid fits, and where to put it.
+
+    Returns (hex_radius, offset_x, offset_y): the pixel centre of cell (q, r) is
+    offset plus axial_to_pixel(q, r, hex_radius). Works for any grid shape by
+    measuring its bounding box with a radius of 1 and scaling to fit.
+    """
+    centres = [axial_to_pixel(q, r, 1.0) for q, r in grid.neurons]
+    xs = [x for x, _ in centres]
+    ys = [y for _, y in centres]
+    # Add the half-width (sqrt3/2) and the corner height (1) of the outermost cells.
+    extent_w = (max(xs) - min(xs)) + SQRT3
+    extent_h = (max(ys) - min(ys)) + 2.0
+    hex_radius = min((width - 2 * margin) / extent_w, (height - 2 * margin) / extent_h)
+    # Centre the bounding box in the window.
+    offset_x = width / 2 - hex_radius * (max(xs) + min(xs)) / 2
+    offset_y = height / 2 - hex_radius * (max(ys) + min(ys)) / 2
+    return hex_radius, offset_x, offset_y
 
 
 def _lerp_colour(a, b, t: float):
@@ -77,8 +86,7 @@ def neuron_colour(fired_in_wave: int | None, last_wave: int):
 def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) -> None:
     """Paint the whole grid onto `surface`, scaled to fit."""
     width, height = surface.get_size()
-    hex_radius = fit_hex_radius(grid.size, width, height, margin)
-    centre_x, centre_y = width / 2, height / 2
+    hex_radius, offset_x, offset_y = layout(grid, width, height, margin)
 
     waves = [n.fired_in_wave for n in grid.neurons.values() if n.fired_in_wave is not None]
     last_wave = max(waves) if waves else 0
@@ -86,30 +94,30 @@ def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) ->
     surface.fill(BACKGROUND)
     for (q, r), neuron in grid.neurons.items():
         dx, dy = axial_to_pixel(q, r, hex_radius)
-        points = hexagon_points(centre_x + dx, centre_y + dy, hex_radius)
+        points = hexagon_points(offset_x + dx, offset_y + dy, hex_radius)
         pygame.draw.polygon(surface, neuron_colour(neuron.fired_in_wave, last_wave), points)
         pygame.draw.polygon(surface, OUTLINE, points, width=max(1, round(hex_radius / 12)))
 
     # Mark the origin so the eye can find where the signal started.
-    points = hexagon_points(centre_x, centre_y, hex_radius * 0.55)
+    points = hexagon_points(offset_x, offset_y, hex_radius * 0.55)
     pygame.draw.polygon(surface, ORIGIN_RING, points, width=max(1, round(hex_radius / 8)))
 
 
-def save(grid: GridOfNeurons, path: str, width: int = 800, height: int = 800) -> None:
+def save(grid: GridOfNeurons, path: str, width: int = 800, height: int = 600) -> None:
     """Render the grid to an image file (PNG by extension). Needs no display."""
     surface = pygame.Surface((width, height))
     draw_grid(surface, grid)
     pygame.image.save(surface, path)
 
 
-def show(grid: GridOfNeurons, width: int = 800, height: int = 800) -> None:
+def show(grid: GridOfNeurons, width: int = 800, height: int = 600) -> None:
     """Open a window showing the grid. Close it, or press Esc or Q, to return."""
     pygame.init()
     try:
         screen = pygame.display.set_mode((width, height))
         fired = len(grid.fired_neurons())
         pygame.display.set_caption(
-            f"neurohacking: size {grid.size}, {fired} of {len(grid.neurons)} neurons fired"
+            f"neurohacking: {grid.columns}x{grid.rows}, {fired} of {len(grid.neurons)} neurons fired"
         )
         draw_grid(screen, grid)
         pygame.display.flip()

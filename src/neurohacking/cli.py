@@ -14,11 +14,26 @@ def build_parser() -> argparse.ArgumentParser:
         description="Fire a signal through a hexagonal grid of neurons.",
     )
     parser.add_argument(
-        "-s",
-        "--size",
+        "-c",
+        "--columns",
         type=int,
-        default=10,
-        help="grid radius in neurons (default: 10)",
+        default=24,
+        help="number of hexagons across (default: 24)",
+    )
+    parser.add_argument(
+        "-r",
+        "--rows",
+        type=int,
+        default=20,
+        help="number of hexagon rows (default: 20)",
+    )
+    parser.add_argument(
+        "--window",
+        type=int,
+        nargs=2,
+        metavar=("WIDTH", "HEIGHT"),
+        default=(800, 600),
+        help="window or image size in pixels (default: 800 600)",
     )
     parser.add_argument(
         "-i",
@@ -59,7 +74,7 @@ def cli_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     try:
-        grid = main(grid_size=args.size, weight=args.weight, threshold=args.threshold)
+        grid = main(columns=args.columns, rows=args.rows, weight=args.weight, threshold=args.threshold)
         print(
             f"{len(grid.fired_neurons())} of {len(grid.neurons)} neurons fired in {len(grid.waves)} waves",
             file=sys.stderr,
@@ -73,11 +88,12 @@ def cli_main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return 2
+            width, height = args.window
             if args.save:
-                visualizer.save(grid, args.save)
+                visualizer.save(grid, args.save, width, height)
                 print(f"Saved {args.save}", file=sys.stderr)
             if args.show:
-                visualizer.show(grid)
+                visualizer.show(grid, width, height)
     except KeyboardInterrupt:
         # Ctrl+C is the normal way to stop, so exit cleanly rather than with a traceback.
         print("\nStopped.", file=sys.stderr)

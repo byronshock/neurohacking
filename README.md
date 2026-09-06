@@ -1,7 +1,7 @@
 # neurohacking
 
-Builds a hexagonal grid of neurons, fires the one at the centre, and watches
-the signal spread outward. Each neuron fires at most once per run.
+Builds a rectangular mesh of hexagonal neurons, fires the one at the centre,
+and watches the signal spread outward. Each neuron fires at most once per run.
 
 ## Setup (once)
 
@@ -17,8 +17,8 @@ visualizer needs, use `pip install -e ".[viz]"` instead.
 ## Usage
 
 ```bash
-neurohacking                 # grid of radius 10 (331 neurons)
-neurohacking --size 3        # smaller grid, 37 neurons
+neurohacking                 # 24 x 20 mesh (480 neurons)
+neurohacking --columns 8 --rows 6
 neurohacking --weight 0.5 --threshold 1.0 --show   # signal dies at the origin
 python -m neurohacking       # same thing without the installed command
 ```
@@ -28,8 +28,9 @@ python -m neurohacking       # same thing without the installed command
 ## Seeing the grid
 
 ```bash
-neurohacking --show                  # open a window; close it or press Esc/Q
-neurohacking --size 6 --save grid.png
+neurohacking --show                  # open an 800x600 window; close it or press Esc/Q
+neurohacking --columns 8 --rows 6 --save grid.png
+neurohacking --window 1200 800 --show
 ```
 
 Fired neurons are coloured, shading from yellow in wave 0 to orange in the
@@ -38,9 +39,9 @@ last wave, unfired neurons are grey, and the origin carries a white ring.
 ```python
 from neurohacking import main, visualizer
 
-grid = main(grid_size=6)
+grid = main(columns=8, rows=6)
 visualizer.save(grid, "grid.png")   # write a picture, no window needed
-visualizer.show(grid)               # or open a window
+visualizer.show(grid, 1200, 800)    # or open a window of a chosen size
 ```
 
 ## From Python
@@ -48,17 +49,21 @@ visualizer.show(grid)               # or open a window
 ```python
 from neurohacking import main
 
-grid = main(grid_size=3)       # builds the grid and fires the origin
+grid = main(columns=8, rows=6)  # builds the grid and fires the origin
 print(len(grid.fired_neurons()))
 grid.reset()                   # allow every neuron to fire again
 ```
 
 ## How the grid works
 
-Neurons sit on a hexagonal grid addressed by axial coordinates `(q, r)`. A
-grid of size `n` contains every cell where the largest of `|q|`, `|r|` and
-`|q + r|` is at most `n`, which gives `3n² + 3n + 1` neurons. Each neuron is
-connected to its six neighbours.
+Neurons sit on a `columns x rows` rectangle of pointy-top hexagons. Every
+odd row is shifted half a cell to the right ("odd-r" layout), which is what
+lets whole hexagons fill a rectangle; the left and right edges are therefore
+slightly jagged rather than cut. Internally each cell is addressed by axial
+coordinates `(q, r)`, centred so the middle cell is `(0, 0)`, and each neuron
+is connected to its six neighbours (fewer on the edges). `grid.get_neuron_at(column, row)`
+looks a cell up by its position from the top-left corner; `grid.get_neuron(q, r)`
+by axial coordinates.
 
 Connections are one-way and weighted. Each neighbouring pair gets two
 `Connection` objects, one in each direction, and each holds references to its
@@ -88,8 +93,8 @@ fired neurons by wave.
 ```python
 from neurohacking.propagation import propagate
 
-grid = GridOfNeurons(size=3)
-origin, corner = grid.get_neuron(0, 0), grid.get_neuron(3, 0)
+grid = GridOfNeurons(columns=8, rows=6)
+origin, corner = grid.get_origin_neuron(), grid.get_neuron_at(0, 0)
 waves = grid.propagate(fire=[origin, corner])          # two stimuli in one epoch
 waves = grid.propagate(inputs={origin: 0.6, corner: 0.6})  # external input amounts instead
 [len(w.fired) for w in waves]                          # neurons fired per wave
@@ -100,8 +105,8 @@ wave crosses the whole grid. Try `--weight 0.5` to see it stop at the origin,
 because no neuron ever hears from more than one fired neighbour.
 
 ```python
-grid = main(grid_size=3)
-conn = grid.get_connection(1)   # Connection(1: Neuron_-3_0 -> Neuron_-2_0, weight 1, active)
+grid = main(columns=8, rows=6)
+conn = grid.get_connection(1)   # the first registered connection
 conn.weight = 0.5
 conn.is_active = False          # cut that direction only
 origin, right = grid.get_neuron(0, 0), grid.get_neuron(1, 0)
@@ -122,8 +127,8 @@ src/neurohacking/
   connection.py Connection: ID, source and target neurons, weight, is_active
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
   propagation.py Signal queue and wave-by-wave propagate()
-  grid.py      GridOfNeurons: builds the hexagon and wires up neighbours
-  monitor.py   main(grid_size): build a grid, fire the origin, return the grid
+  grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up neighbours
+  monitor.py   main(columns, rows): build a grid, fire the origin, return the grid
   visualizer.py hex geometry and pygame drawing: show() and save()
   cli.py       argument parsing and the `neurohacking` command
   __main__.py  lets you run `python -m neurohacking`
