@@ -17,8 +17,10 @@ visualizer needs, use `pip install -e ".[viz]"` instead.
 ## Usage
 
 ```bash
-neurohacking                 # 24 x 20 mesh (480 neurons)
+neurohacking                 # 24 x 20 mesh (480 neurons), random weights
 neurohacking --columns 8 --rows 6
+neurohacking --seed 42       # repeat a particular random mesh
+neurohacking --weight 1      # a fixed weight on every connection instead
 neurohacking --weight 0.5 --threshold 1.0 --show   # signal dies at the origin
 python -m neurohacking       # same thing without the installed command
 ```
@@ -104,9 +106,14 @@ waves = grid.propagate(inputs={origin: 0.6, corner: 0.6})  # external input amou
 [len(w.fired) for w in waves]                          # neurons fired per wave
 ```
 
-With the defaults (weight 1.0, threshold 1.0) one signal is enough and the
-wave crosses the whole grid. Try `--weight 0.5` to see it stop at the origin,
-because no neuron ever hears from more than one fired neighbour.
+**Weights.** By default the command line gives every connection its own
+random weight, drawn uniformly between -1 and 1, so each direction between a
+pair of neurons gets an independent value. The seed is printed so a run can be
+repeated with `--seed`. `--weight W` uses a fixed weight instead; with weight
+1.0 and threshold 1.0 one signal is enough and the wave crosses the whole
+grid, while `--weight 0.5` stops at the origin because no neuron ever hears
+from more than one fired neighbour. From Python, `GridOfNeurons(weight=None,
+seed=...)` or `grid.randomize_weights(low, high, seed)` do the same.
 
 ```python
 grid = main(columns=8, rows=6)

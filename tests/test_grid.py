@@ -163,3 +163,45 @@ def test_low_threshold_lets_the_signal_cross_the_grid(capsys):
     grid = GridOfNeurons(columns=7, rows=5, weight=0.5, threshold=0.5)
     grid.activate_origin()
     assert len(grid.fired_neurons()) == len(grid.neurons)
+
+
+# --- random weights -----------------------------------------------------------
+
+
+def test_randomize_weights_draws_each_connection_between_minus_one_and_one(grid):
+    grid.randomize_weights(seed=1)
+    weights = [c.weight for c in grid.connections.values()]
+    assert all(-1.0 <= w <= 1.0 for w in weights)
+    assert len(set(weights)) > len(weights) // 2  # they really are individual draws
+    assert min(weights) < 0 < max(weights)
+
+
+def test_random_weights_differ_per_direction(grid):
+    grid.randomize_weights(seed=2)
+    origin, right = grid.get_neuron(0, 0), grid.get_neuron(1, 0)
+    assert grid.connection_between(origin, right).weight != grid.connection_between(right, origin).weight
+
+
+def test_same_seed_gives_same_weights_and_different_seeds_differ():
+    a = GridOfNeurons(columns=5, rows=5, weight=None, seed=7)
+    b = GridOfNeurons(columns=5, rows=5, weight=None, seed=7)
+    c = GridOfNeurons(columns=5, rows=5, weight=None, seed=8)
+    weights = lambda g: [x.weight for x in g.connections.values()]
+    assert weights(a) == weights(b)
+    assert weights(a) != weights(c)
+
+
+def test_weight_none_in_constructor_randomizes():
+    grid = GridOfNeurons(columns=5, rows=5, weight=None, seed=3)
+    assert grid.weight is None and grid.seed == 3
+    assert len({c.weight for c in grid.connections.values()}) > 1
+
+
+def test_randomize_weights_respects_custom_range(grid):
+    grid.randomize_weights(low=0.2, high=0.3, seed=4)
+    assert all(0.2 <= c.weight <= 0.3 for c in grid.connections.values())
+
+
+def test_fixed_weight_is_still_the_library_default(grid):
+    assert grid.weight == 1.0
+    assert all(c.weight == 1.0 for c in grid.connections.values())

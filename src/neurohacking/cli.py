@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 
 from .grid import GridOfNeurons
@@ -47,8 +48,14 @@ def build_parser() -> argparse.ArgumentParser:
         "-w",
         "--weight",
         type=float,
-        default=1.0,
-        help="weight of every connection (default: 1.0)",
+        default=None,
+        help="fixed weight for every connection (default: random, uniform between -1 and 1)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="seed for the random weights, so a run can be repeated (default: chosen and printed)",
     )
     parser.add_argument(
         "-t",
@@ -85,13 +92,17 @@ def cli_main(argv: list[str] | None = None) -> int:
                 )
                 return 2
         width, height = args.window
+        seed = args.seed if args.seed is not None else random.randrange(2**31)
+        settings = dict(columns=args.columns, rows=args.rows, weight=args.weight, threshold=args.threshold, seed=seed)
+        if args.weight is None:
+            print(f"random weights uniform in [-1, 1], seed {seed}", file=sys.stderr)
 
         if args.show:
             # Show the mesh as soon as it exists; firing happens from the keyboard.
-            grid = GridOfNeurons(columns=args.columns, rows=args.rows, weight=args.weight, threshold=args.threshold)
+            grid = GridOfNeurons(**settings)
             visualizer.show(grid, width, height)
         else:
-            grid = main(columns=args.columns, rows=args.rows, weight=args.weight, threshold=args.threshold)
+            grid = main(**settings)
 
         print(
             f"{len(grid.fired_neurons())} of {len(grid.neurons)} neurons fired in {len(grid.waves)} waves",

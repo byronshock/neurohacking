@@ -88,7 +88,7 @@ def test_save_writes_an_image_file(tmp_path, capsys):
 
 def test_cli_save_option(tmp_path, capsys):
     out = tmp_path / "cli.png"
-    assert cli_main(["--columns", "3", "--rows", "3", "--save", str(out)]) == 0
+    assert cli_main(["--columns", "3", "--rows", "3", "--weight", "1", "--save", str(out)]) == 0
     assert out.exists()
     assert "Saved" in capsys.readouterr().err
 

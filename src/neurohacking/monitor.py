@@ -9,12 +9,20 @@ from __future__ import annotations
 from .grid import GridOfNeurons
 
 
-def main(columns: int = 24, rows: int = 20, weight: float = 1.0, threshold: float = 1.0) -> GridOfNeurons:
+def main(
+    columns: int = 24,
+    rows: int = 20,
+    weight: float | None = None,
+    threshold: float = 1.0,
+    seed: int | None = None,
+) -> GridOfNeurons:
     """Build a columns x rows grid, fire the origin neuron, and return the grid.
 
-    `weight` is given to every connection and `threshold` to every neuron.
-    Returning the grid lets callers (and tests) inspect which neurons fired.
+    `weight` is given to every connection, or None (the default) for random
+    weights uniform between -1 and 1, reproducible with `seed`. `threshold`
+    is given to every neuron. Returning the grid lets callers (and tests)
+    inspect which neurons fired.
     """
-    grid = GridOfNeurons(columns=columns, rows=rows, weight=weight, threshold=threshold)
+    grid = GridOfNeurons(columns=columns, rows=rows, weight=weight, threshold=threshold, seed=seed)
     grid.activate_origin()
     return grid

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+
 from .connection import Connection
 from .neuron import Neuron
 from .propagation import Wave, propagate
@@ -33,18 +35,34 @@ class GridOfNeurons:
     (0, 0). That cell is the origin used by activate_origin().
     """
 
-    def __init__(self, columns: int = 24, rows: int = 20, weight: float = 1.0, threshold: float = 1.0):
+    def __init__(
+        self,
+        columns: int = 24,
+        rows: int = 20,
+        weight: float | None = 1.0,
+        threshold: float = 1.0,
+        seed: int | None = None,
+    ):
+        """Build the mesh.
+
+        `weight` is given to every connection; pass None to draw each weight
+        independently from a uniform distribution between -1 and 1 instead
+        (`seed` makes that reproducible). `threshold` is given to every neuron.
+        """
         if columns < 1 or rows < 1:
             raise ValueError(f"grid needs at least one column and one row, got {columns}x{rows}")
         self.columns = columns
         self.rows = rows
-        self.weight = weight  # weight given to every connection
+        self.weight = weight  # fixed weight for every connection, or None for random
         self.threshold = threshold  # firing threshold given to every neuron
+        self.seed = seed
         self.neurons: dict[tuple[int, int], Neuron] = {}  # Maps axial (q, r) to Neuron
         self.connections: dict[int, Connection] = {}  # Maps connection ID (from 1) to Connection
         self.waves: list[Wave] = []  # Waves of the most recent propagation
         self.directions = DIRECTIONS
         self.create_grid()  # Initialize the grid
+        if weight is None:
+            self.randomize_weights(seed=seed)
 
     # --- building ---------------------------------------------------------
 
@@ -58,7 +76,7 @@ class GridOfNeurons:
                 neuron.position = (q, r)
                 self.neurons[(q, r)] = neuron
 
-        self._establish_connections(self.weight)  # Call once after grid is fully initialized
+        self._establish_connections(1.0 if self.weight is None else self.weight)
 
     def _establish_connections(self, weight: float = 1.0):
         """Create one one-way Connection from every neuron to each of its neighbours.
@@ -72,6 +90,16 @@ class GridOfNeurons:
                 if neuron.connection_to(neighbor) is None:
                     connection_id = len(self.connections) + 1
                     self.connections[connection_id] = neuron.connect(neighbor, connection_id, weight)
+
+    def randomize_weights(self, low: float = -1.0, high: float = 1.0, seed: int | None = None) -> None:
+        """Give every connection its own weight, drawn uniformly between low and high.
+
+        Each direction between two neurons gets an independent draw. Weights are
+        assigned in connection-ID order, so the same seed always gives the same mesh.
+        """
+        rng = random.Random(seed)
+        for connection in self.connections.values():
+            connection.weight = rng.uniform(low, high)
 
     # --- lookup -----------------------------------------------------------
 
