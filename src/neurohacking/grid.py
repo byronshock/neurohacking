@@ -13,6 +13,19 @@ DIRECTIONS = [
     (-1, 0), (0, -1), (1, -1),
 ]
 
+# The twelve cells at hex distance 2: the neighbours of a cell's neighbours,
+# other than the cell itself and its own neighbours.
+DIRECTIONS2 = [
+    (2, 0), (2, -1), (2, -2), (1, -2), (0, -2), (-1, -1),
+    (-2, 0), (-2, 1), (-2, 2), (-1, 2), (0, 2), (1, 1),
+]
+
+
+def hex_distance(a: tuple[int, int], b: tuple[int, int]) -> int:
+    """Number of steps between two axial cells."""
+    dq, dr = b[0] - a[0], b[1] - a[1]
+    return max(abs(dq), abs(dr), abs(dq + dr))
+
 
 def offset_to_axial(column: int, row: int) -> tuple[int, int]:
     """Convert a (column, row) position to axial (q, r).
@@ -32,8 +45,11 @@ def axial_to_offset(q: int, r: int) -> tuple[int, int]:
 class GridOfNeurons:
     """A rectangle of `columns` x `rows` hexagonal cells, each holding a Neuron.
 
-    Cells are stored by axial coordinates, centred so that the middle cell is
-    (0, 0). That cell is the origin used by activate_origin().
+    Every neuron is connected to its six neighbours (kind "local") and to the
+    twelve neighbours of those neighbours (kind "local2"), one way in each
+    direction, plus the small-world shortcuts chosen by omega. Cells are stored
+    by axial coordinates, centred so that the middle cell is (0, 0). That cell
+    is the origin used by activate_origin().
     """
 
     def __init__(
@@ -93,17 +109,24 @@ class GridOfNeurons:
         self._establish_connections(1.0 if self.weight is None else self.weight)
 
     def _establish_connections(self, weight: float = 1.0):
-        """Create one one-way Connection from every neuron to each of its neighbours.
+        """Create one one-way Connection from every neuron to each cell within two steps.
 
-        Neighbouring neurons A and B therefore get two connections, A -> B and
-        B -> A, each with its own ID (from 1) and weight. Every connection is
-        stored in self.connections and on both neurons.
+        First every neuron is connected to its six neighbours ("local"), then to
+        the twelve neighbours of its neighbours ("local2"). Neurons A and B
+        therefore get two connections, A -> B and B -> A, each with its own ID
+        (from 1) and weight. Every connection is stored in self.connections and
+        on both neurons.
         """
         for neuron in self.neurons.values():
             for neighbor in self.get_neighbors(neuron):
                 if neuron.connection_to(neighbor) is None:
                     connection_id = len(self.connections) + 1
                     self.connections[connection_id] = neuron.connect(neighbor, connection_id, weight)
+        for neuron in self.neurons.values():
+            for neighbor in self.get_second_neighbors(neuron):
+                if neuron.connection_to(neighbor) is None:
+                    connection_id = len(self.connections) + 1
+                    self.connections[connection_id] = neuron.connect(neighbor, connection_id, weight, kind="local2")
 
     def _add_small_world_connections(self, omega: float) -> None:
         """Add shortcuts until they are the fraction `omega` of all connections.
@@ -131,16 +154,24 @@ class GridOfNeurons:
             wanted -= 1
 
     def _are_neighbours(self, a: Neuron, b: Neuron) -> bool:
-        (q1, r1), (q2, r2) = a.position, b.position
-        return (q2 - q1, r2 - r1) in DIRECTIONS
+        """True if b is within two steps of a, i.e. already reached by a local connection."""
+        return hex_distance(a.position, b.position) <= 2
 
     def small_world_connections(self) -> list[Connection]:
         """The shortcut connections added for omega, in ID order."""
         return [c for c in self.connections.values() if c.kind == "small_world"]
 
     def local_connections(self) -> list[Connection]:
-        """The connections between grid neighbours, in ID order."""
+        """The connections within the mesh (first and second ring), in ID order."""
+        return [c for c in self.connections.values() if c.kind in ("local", "local2")]
+
+    def first_ring_connections(self) -> list[Connection]:
+        """Connections to immediate neighbours, in ID order."""
         return [c for c in self.connections.values() if c.kind == "local"]
+
+    def second_ring_connections(self) -> list[Connection]:
+        """Connections to neighbours of neighbours, in ID order."""
+        return [c for c in self.connections.values() if c.kind == "local2"]
 
     def randomize_weights(self, low: float = -1.0, high: float = 1.0, seed: int | None = None) -> None:
         """Give every connection its own weight, drawn uniformly between low and high.
@@ -164,6 +195,11 @@ class GridOfNeurons:
             if neighbor_pos in self.neurons:
                 neighbors.append(self.neurons[neighbor_pos])
         return neighbors
+
+    def get_second_neighbors(self, neuron: Neuron) -> list:
+        """The neurons two steps away: neighbours of neighbours, excluding the neighbours themselves."""
+        q, r = neuron.position
+        return [self.neurons[(q + dq, r + dr)] for dq, dr in DIRECTIONS2 if (q + dq, r + dr) in self.neurons]
 
     def get_neuron(self, q: int, r: int) -> Neuron | None:
         """Retrieve a neuron by axial coordinates."""

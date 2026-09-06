@@ -30,7 +30,7 @@ class Connection:
         self.target = target  # ...to here, never the other way
         self.weight = float(weight)
         self.is_active = is_active
-        self.kind = kind  # "local" (to a grid neighbour) or "small_world" (a long-range shortcut)
+        self.kind = kind  # "local" (a neighbour), "local2" (a neighbour of a neighbour), "small_world" (a shortcut)
 
     def joins(self, source: Neuron, target: Neuron) -> bool:
         """True if this connection runs from `source` to `target` (direction matters)."""

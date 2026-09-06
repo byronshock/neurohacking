@@ -1,6 +1,6 @@
 import pytest
 
-from neurohacking.grid import DIRECTIONS, GridOfNeurons, axial_to_offset, offset_to_axial
+from neurohacking.grid import DIRECTIONS, DIRECTIONS2, GridOfNeurons, axial_to_offset, hex_distance, offset_to_axial
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def test_origin_is_the_centre_cell(grid):
     origin = grid.get_origin_neuron()
     assert origin is grid.get_neuron(0, 0)
     assert origin is grid.get_neuron_at(3, 2)
-    assert len(origin.outgoing) == 6 and len(origin.incoming) == 6
+    assert len(origin.outgoing) == 18 and len(origin.incoming) == 18  # 6 neighbours + 12 neighbours of neighbours
 
 
 def test_every_cell_is_reachable_by_column_and_row(grid):
@@ -41,14 +41,23 @@ def test_every_cell_is_reachable_by_column_and_row(grid):
     assert grid.get_neuron(50, 50) is None
 
 
-def test_interior_cells_have_six_neighbours_and_edges_fewer(grid):
-    for row in range(5):
-        for column in range(7):
-            count = len(grid.get_neuron_at(column, row).outgoing)
-            if 0 < column < 6 and 0 < row < 4:
-                assert count == 6
-            else:
-                assert 2 <= count < 6
+
+def test_every_cell_connects_to_everything_within_two_steps(grid):
+    for neuron in grid.neurons.values():
+        within_two = [n for n in grid.neurons.values() if n is not neuron and hex_distance(neuron.position, n.position) <= 2]
+        assert sorted(neuron.targets(), key=id) == sorted(within_two, key=id)
+    assert len(grid.get_origin_neuron().outgoing) == 18
+    assert len(grid.get_neuron_at(0, 0).outgoing) < 18  # a corner has fewer
+
+
+def test_first_and_second_ring_kinds():
+    grid = GridOfNeurons(columns=5, rows=5, omega=0)
+    origin = grid.get_origin_neuron()
+    for c in origin.outgoing:
+        distance = hex_distance(origin.position, c.target.position)
+        assert (c.kind, distance) in (("local", 1), ("local2", 2))
+    assert len(grid.get_neighbors(origin)) == 6 and len(grid.get_second_neighbors(origin)) == 12
+    assert len(grid.first_ring_connections()) + len(grid.second_ring_connections()) == len(grid.local_connections())
 
 
 def test_neuron_names_and_positions_match_coordinates(grid):
@@ -86,23 +95,25 @@ def test_connection_registry_ids_run_from_one_without_gaps(grid):
         assert grid.get_connection(connection_id) is connection
 
 
+
 def test_connection_count_equals_total_neighbour_count(grid):
-    expected = sum(len(grid.get_neighbors(n)) for n in grid.neurons.values())
+    expected = sum(len(grid.get_neighbors(n)) + len(grid.get_second_neighbors(n)) for n in grid.neurons.values())
     assert len(grid.connections) == expected
-    # 7x5 odd-r rectangle: 5 rows x 6 horizontal pairs = 30, plus 4 row
-    # boundaries x 13 diagonal pairs = 52; 82 pairs, each connected both ways.
-    assert expected == 164
+    # 7x5 odd-r rectangle: 164 first-ring connections (82 pairs both ways) plus 252 second-ring.
+    assert len(grid.first_ring_connections()) == 164
+    assert len(grid.second_ring_connections()) == 252
 
 
 def test_grid_connections_default_to_weight_one(grid):
     assert all(connection.weight == 1.0 for connection in grid.connections.values())
 
 
-def test_every_connection_joins_adjacent_neurons_exactly_once(grid):
+
+def test_every_connection_joins_nearby_neurons_exactly_once(grid):
     seen = set()
     for connection in grid.connections.values():
         (q1, r1), (q2, r2) = connection.source.position, connection.target.position
-        assert (q2 - q1, r2 - r1) in DIRECTIONS
+        assert (q2 - q1, r2 - r1) in (DIRECTIONS if connection.kind == "local" else DIRECTIONS2)
         pair = (connection.source, connection.target)  # ordered: direction matters
         assert pair not in seen, "same direction connected twice"
         seen.add(pair)
@@ -244,7 +255,7 @@ def test_shortcuts_go_to_non_neighbours_without_duplicates():
     for c in grid.small_world_connections():
         assert c.kind == "small_world"
         assert c.source is not c.target
-        assert not hex_neighbours(c.source, c.target)
+        assert hex_distance(c.source.position, c.target.position) > 2  # beyond both local rings
         assert (c.source, c.target) not in seen
         seen.add((c.source, c.target))
         assert c in c.source.outgoing and c in c.target.incoming

@@ -97,9 +97,10 @@ def test_grid_waves_match_hex_distance_from_origin(capsys):
     waves = grid.activate_origin()
     assert grid.waves is waves
     assert waves[0].fired == [grid.get_origin_neuron()]
-    assert len(waves[1].fired) == 6
+    assert len(waves[1].fired) == 18  # both rings around the origin fire in wave 1
     for (q, r), neuron in grid.neurons.items():
-        assert neuron.fired_in_wave == max(abs(q), abs(r), abs(q + r))
+        distance = max(abs(q), abs(r), abs(q + r))
+        assert neuron.fired_in_wave == (distance + 1) // 2  # two steps per wave
 
 
 def test_grid_accepts_multiple_stimuli_in_one_epoch(capsys):
@@ -122,4 +123,4 @@ def test_large_grid_has_no_recursion_limit(capsys):
     grid = GridOfNeurons(columns=80, rows=60, omega=0)  # 4800 neurons; recursion died near 1000
     grid.activate_origin()
     assert len(grid.fired_neurons()) == len(grid.neurons)
-    assert len(grid.waves) > 40
+    assert len(grid.waves) > 20  # two cells per wave now; recursion would still have died

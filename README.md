@@ -88,8 +88,11 @@ Neurons sit on a `columns x rows` rectangle of pointy-top hexagons. Every
 odd row is shifted half a cell to the right ("odd-r" layout), which is what
 lets whole hexagons fill a rectangle; the left and right edges are therefore
 slightly jagged rather than cut. Internally each cell is addressed by axial
-coordinates `(q, r)`, centred so the middle cell is `(0, 0)`, and each neuron
-is connected to its six neighbours (fewer on the edges). `grid.get_neuron_at(column, row)`
+coordinates `(q, r)`, centred so the middle cell is `(0, 0)`. Each neuron is
+connected to its six neighbours and to the twelve neighbours of those
+neighbours, so an interior neuron has 18 outgoing and 18 incoming local
+connections (fewer on the edges), and a signal covers two cells per wave.
+`grid.get_neuron_at(column, row)`
 looks a cell up by its position from the top-left corner; `grid.get_neuron(q, r)`
 by axial coordinates.
 
@@ -104,8 +107,9 @@ keyed by ID starting from 1. A neuron lists the connections it sends along in
 is the proportion of all connections that are long-range shortcuts. After the local
 mesh is built with L connections, `omega * L / (1 - omega)` extra connections
 are added, each running one way from a random neuron to a random neuron that
-is not one of its six neighbours and not already a target of it. Shortcuts
-are marked `kind == "small_world"` (local ones are `"local"`), listed by
+is more than two steps away and not already a target of it. Shortcuts are
+marked `kind == "small_world"` (first-ring connections are `"local"`,
+second-ring ones `"local2"`), listed by
 `grid.small_world_connections()`, and get weights like any other connection.
 The same `seed` reproduces both the shortcuts and the weights.
 
@@ -216,7 +220,7 @@ src/neurohacking/
   connection.py Connection: ID, source and target neurons, weight, is_active, kind
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
   propagation.py Signal queue and wave-by-wave propagate()
-  grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up neighbours
+  grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input
   learning.py  output targets, reward, the global-reinforcement rule, and Teacher

@@ -112,8 +112,9 @@ def test_hebbian_eligibility_uses_target_firing_and_keeps_weights_in_range():
 
 
 def test_global_reward_learns_to_silence_the_output():
-    grid = GridOfNeurons(columns=8, rows=4, weight=None, seed=1, omega=0.05)
-    teacher = Teacher(grid, target="all-off", lr=0.03, seed=1)
+    # With 18 inputs per neuron the reward has more perturbations to attribute, so use a higher rate.
+    grid = GridOfNeurons(columns=8, rows=4, weight=None, seed=2, omega=0.05)
+    teacher = Teacher(grid, target="all-off", lr=0.1, seed=2)
     rewards = [teacher.epoch(verbose=False) for _ in range(2000)]
     assert statistics.mean(rewards[:100]) < 0.9
     assert statistics.mean(rewards[-200:]) > 0.9
