@@ -15,14 +15,18 @@ def main(
     weight: float | None = None,
     threshold: float = 0.25,
     seed: int | None = None,
+    omega: float = 0.0,
 ) -> GridOfNeurons:
     """Build a columns x rows grid, fire the origin neuron, and return the grid.
 
     `weight` is given to every connection, or None (the default) for random
     weights uniform between -1 and 1, reproducible with `seed`. `threshold`
-    is given to every neuron. Returning the grid lets callers (and tests)
+    is given to every neuron. `omega` is the proportion of connections that
+    are small-world shortcuts. Returning the grid lets callers (and tests)
     inspect which neurons fired.
     """
-    grid = GridOfNeurons(columns=columns, rows=rows, weight=weight, threshold=threshold, seed=seed)
+    grid = GridOfNeurons(
+        columns=columns, rows=rows, weight=weight, threshold=threshold, seed=seed, omega=omega
+    )
     grid.activate_origin()
     return grid

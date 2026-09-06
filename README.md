@@ -21,6 +21,7 @@ neurohacking                 # 24 x 20 mesh (480 neurons), random weights
 neurohacking --columns 8 --rows 6
 neurohacking --seed 42       # repeat a particular random mesh
 neurohacking --weight 1      # a fixed weight on every connection instead
+neurohacking --omega 0.1     # one connection in ten is a small-world shortcut
 neurohacking --weight 0.2 --show   # signal dies at the origin
 python -m neurohacking       # same thing without the installed command
 ```
@@ -77,6 +78,15 @@ Connections are one-way and weighted. Each neighbouring pair gets two
 flag. The grid keeps every connection in `grid.connections`, a dictionary
 keyed by ID starting from 1. A neuron lists the connections it sends along in
 `outgoing` and the ones it receives from in `incoming`.
+
+**Small-world shortcuts.** `omega` (0 up to but not including 1) is the
+proportion of all connections that are long-range shortcuts. After the local
+mesh is built with L connections, `omega * L / (1 - omega)` extra connections
+are added, each running one way from a random neuron to a random neuron that
+is not one of its six neighbours and not already a target of it. Shortcuts
+are marked `kind == "small_world"` (local ones are `"local"`), listed by
+`grid.small_world_connections()`, and get weights like any other connection.
+The same `seed` reproduces both the shortcuts and the weights.
 
 **Firing rule.** Every neuron has a `threshold` (default 0.25) and a running
 `potential`. When a neuron fires, each of its active outgoing connections adds
@@ -138,7 +148,7 @@ pytest
 
 ```
 src/neurohacking/
-  connection.py Connection: ID, source and target neurons, weight, is_active
+  connection.py Connection: ID, source and target neurons, weight, is_active, kind
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
   propagation.py Signal queue and wave-by-wave propagate()
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up neighbours

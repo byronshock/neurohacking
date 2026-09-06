@@ -21,6 +21,7 @@ class Connection:
         target: Neuron,
         weight: float = 1.0,
         is_active: bool = True,
+        kind: str = "local",
     ):
         if source is target:
             raise ValueError(f"{source.name} cannot connect to itself")
@@ -29,6 +30,7 @@ class Connection:
         self.target = target  # ...to here, never the other way
         self.weight = float(weight)
         self.is_active = is_active
+        self.kind = kind  # "local" (to a grid neighbour) or "small_world" (a long-range shortcut)
 
     def joins(self, source: Neuron, target: Neuron) -> bool:
         """True if this connection runs from `source` to `target` (direction matters)."""
@@ -36,4 +38,5 @@ class Connection:
 
     def __repr__(self) -> str:
         state = "active" if self.is_active else "inactive"
-        return f"Connection({self.id}: {self.source.name} -> {self.target.name}, weight {self.weight:g}, {state})"
+        kind = "" if self.kind == "local" else f", {self.kind}"
+        return f"Connection({self.id}: {self.source.name} -> {self.target.name}, weight {self.weight:g}, {state}{kind})"

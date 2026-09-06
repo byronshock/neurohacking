@@ -52,6 +52,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="fixed weight for every connection (default: random, uniform between -1 and 1)",
     )
     parser.add_argument(
+        "-o",
+        "--omega",
+        type=float,
+        default=0.0,
+        help="proportion of connections that are small-world shortcuts, 0 to <1 (default: 0)",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -93,16 +100,34 @@ def cli_main(argv: list[str] | None = None) -> int:
                 return 2
         width, height = args.window
         seed = args.seed if args.seed is not None else random.randrange(2**31)
-        settings = dict(columns=args.columns, rows=args.rows, weight=args.weight, threshold=args.threshold, seed=seed)
-        if args.weight is None:
-            print(f"random weights uniform in [-1, 1], seed {seed}", file=sys.stderr)
+        settings = dict(
+            columns=args.columns,
+            rows=args.rows,
+            weight=args.weight,
+            threshold=args.threshold,
+            seed=seed,
+            omega=args.omega,
+        )
+        if args.weight is None or args.omega > 0:
+            print(f"seed {seed}", file=sys.stderr)
 
-        if args.show:
-            # Show the mesh as soon as it exists; firing happens from the keyboard.
-            grid = GridOfNeurons(**settings)
-            visualizer.show(grid, width, height)
-        else:
-            grid = main(**settings)
+        try:
+            if args.show:
+                # Show the mesh as soon as it exists; firing happens from the keyboard.
+                grid = GridOfNeurons(**settings)
+                visualizer.show(grid, width, height)
+            else:
+                grid = main(**settings)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+
+        if args.omega > 0:
+            print(
+                f"omega {args.omega:g}: {len(grid.small_world_connections())} small-world "
+                f"connections among {len(grid.connections)}",
+                file=sys.stderr,
+            )
 
         print(
             f"{len(grid.fired_neurons())} of {len(grid.neurons)} neurons fired in {len(grid.waves)} waves",

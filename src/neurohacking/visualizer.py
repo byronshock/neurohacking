@@ -113,7 +113,8 @@ def save(grid: GridOfNeurons, path: str, width: int = 800, height: int = 600) ->
 def caption(grid: GridOfNeurons) -> str:
     fired = len(grid.fired_neurons())
     state = f"{fired} of {len(grid.neurons)} fired in {len(grid.waves)} waves" if fired else "unfired"
-    return f"neurohacking {grid.columns}x{grid.rows}: {state}   [Space] fire origin  [R] reset  [Esc] quit"
+    omega = f" omega {grid.omega:g}" if grid.omega else ""
+    return f"neurohacking {grid.columns}x{grid.rows}{omega}: {state}   [Space] fire origin  [R] reset  [Esc] quit"
 
 
 def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, bool]:

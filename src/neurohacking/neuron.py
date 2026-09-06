@@ -14,13 +14,15 @@ class Neuron:
         self.has_fired = False
         self.fired_in_wave: int | None = None  # set by fire(); None until it fires
 
-    def connect(self, target: Neuron, connection_id: int = 0, weight: float = 1.0) -> Connection:
+    def connect(
+        self, target: Neuron, connection_id: int = 0, weight: float = 1.0, kind: str = "local"
+    ) -> Connection:
         """Create a one-way connection from this neuron to `target`.
 
         The Connection is stored in this neuron's outgoing list and the target's
         incoming list. Returns it so a registry can record it by ID.
         """
-        connection = Connection(connection_id, self, target, weight)
+        connection = Connection(connection_id, self, target, weight, kind=kind)
         self.outgoing.append(connection)
         target.incoming.append(connection)
         return connection

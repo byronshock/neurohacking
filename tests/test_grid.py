@@ -211,3 +211,89 @@ def test_default_threshold_is_a_quarter():
     grid = GridOfNeurons(columns=3, rows=3)
     assert grid.threshold == 0.25
     assert all(n.threshold == 0.25 for n in grid.neurons.values())
+
+
+
+# --- omega: small-world shortcuts ---------------------------------------------
+
+
+def hex_neighbours(a, b):
+    (q1, r1), (q2, r2) = a.position, b.position
+    return (q2 - q1, r2 - r1) in DIRECTIONS
+
+
+def test_omega_zero_adds_no_shortcuts(grid):
+    assert grid.omega == 0.0
+    assert grid.small_world_connections() == []
+    assert len(grid.local_connections()) == len(grid.connections)
+
+
+@pytest.mark.parametrize("omega", [0.1, 0.25, 0.5])
+def test_omega_is_the_fraction_of_all_connections(omega):
+    grid = GridOfNeurons(columns=10, rows=8, omega=omega, seed=1)
+    local = len(grid.local_connections())
+    shortcuts = len(grid.small_world_connections())
+    assert local == len(GridOfNeurons(columns=10, rows=8).connections)  # the mesh itself is untouched
+    assert shortcuts == round(omega * local / (1 - omega))
+    assert shortcuts / len(grid.connections) == pytest.approx(omega, abs=0.01)
+
+
+def test_shortcuts_go_to_non_neighbours_without_duplicates():
+    grid = GridOfNeurons(columns=10, rows=8, omega=0.3, seed=2)
+    seen = set()
+    for c in grid.small_world_connections():
+        assert c.kind == "small_world"
+        assert c.source is not c.target
+        assert not hex_neighbours(c.source, c.target)
+        assert (c.source, c.target) not in seen
+        seen.add((c.source, c.target))
+        assert c in c.source.outgoing and c in c.target.incoming
+
+
+def test_shortcut_ids_continue_after_local_ones():
+    grid = GridOfNeurons(columns=6, rows=6, omega=0.2, seed=3)
+    local_ids = [c.id for c in grid.local_connections()]
+    shortcut_ids = [c.id for c in grid.small_world_connections()]
+    assert shortcut_ids == list(range(max(local_ids) + 1, len(grid.connections) + 1))
+
+
+def test_same_seed_gives_same_shortcuts_and_weights():
+    a = GridOfNeurons(columns=8, rows=6, weight=None, omega=0.2, seed=9)
+    b = GridOfNeurons(columns=8, rows=6, weight=None, omega=0.2, seed=9)
+    pairs = lambda g: [(c.source.name, c.target.name, c.weight) for c in g.connections.values()]
+    assert pairs(a) == pairs(b)
+    assert pairs(a) != pairs(GridOfNeurons(columns=8, rows=6, weight=None, omega=0.2, seed=10))
+
+
+def test_shortcuts_get_random_weights_too():
+    grid = GridOfNeurons(columns=8, rows=6, weight=None, omega=0.2, seed=4)
+    weights = {c.weight for c in grid.small_world_connections()}
+    assert len(weights) > 1 and all(-1 <= w <= 1 for w in weights)
+
+
+def test_shortcuts_never_lengthen_the_epoch_and_usually_shorten_it(capsys):
+    plain = GridOfNeurons(columns=24, rows=20, weight=1.0)
+    plain.activate_origin()
+    shortcut = GridOfNeurons(columns=24, rows=20, weight=1.0, omega=0.1, seed=5)
+    shortcut.activate_origin()
+    assert len(shortcut.fired_neurons()) == len(shortcut.neurons)
+    assert len(shortcut.waves) < len(plain.waves)
+
+
+@pytest.mark.parametrize("omega", [-0.1, 1.0, 1.5])
+def test_grid_rejects_omega_out_of_range(omega):
+    with pytest.raises(ValueError):
+        GridOfNeurons(columns=3, rows=3, omega=omega)
+
+
+@pytest.mark.parametrize("columns, rows", [(1, 1), (2, 2), (3, 3)])
+def test_tiny_meshes_with_omega_do_not_hang(columns, rows):
+    grid = GridOfNeurons(columns=columns, rows=rows, omega=0.5, seed=6)
+    for c in grid.small_world_connections():
+        assert not hex_neighbours(c.source, c.target)
+
+
+def test_repr_marks_small_world_connections():
+    grid = GridOfNeurons(columns=6, rows=6, omega=0.2, seed=7)
+    assert repr(grid.small_world_connections()[0]).endswith(", small_world)")
+    assert repr(grid.local_connections()[0]).endswith(", active)")

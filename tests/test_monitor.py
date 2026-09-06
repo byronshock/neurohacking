@@ -20,7 +20,7 @@ def test_cli_runs_and_returns_zero(capsys):
 def test_cli_defaults_to_random_weights_and_reports_the_seed(capsys):
     assert cli_main(["--columns", "5", "--rows", "5"]) == 0
     err = capsys.readouterr().err
-    assert "random weights uniform in [-1, 1], seed " in err
+    assert "seed " in err
     assert "of 25 neurons fired" in err
 
 
@@ -64,3 +64,19 @@ def test_main_random_weights_are_reproducible_by_seed(capsys):
     b = main(columns=5, rows=5, seed=5)
     assert [n.has_fired for n in a.neurons.values()] == [n.has_fired for n in b.neurons.values()]
     assert [c.weight for c in a.connections.values()] == [c.weight for c in b.connections.values()]
+
+
+def test_cli_omega_option_reports_shortcuts(capsys):
+    assert cli_main(["--columns", "6", "--rows", "6", "--weight", "1", "--omega", "0.2", "--seed", "1"]) == 0
+    err = capsys.readouterr().err
+    assert "omega 0.2:" in err and "small-world connections" in err and "seed 1" in err
+
+
+def test_cli_rejects_omega_out_of_range(capsys):
+    assert cli_main(["--columns", "3", "--rows", "3", "--omega", "1"]) == 2
+    assert "omega" in capsys.readouterr().err
+
+
+def test_main_passes_omega_through(capsys):
+    grid = main(columns=6, rows=6, weight=1.0, omega=0.25, seed=2)
+    assert grid.omega == 0.25 and len(grid.small_world_connections()) > 0
