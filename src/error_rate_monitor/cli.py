@@ -13,18 +13,6 @@ def build_parser() -> argparse.ArgumentParser:
         prog="error-rate-monitor",
         description="Continuously display an error rate until Ctrl+C.",
     )
-    parser.add_argument(
-        "error_rate",
-        type=float,
-        help="error rate as a fraction between 0 and 1 (e.g. 0.05 for 5%%)",
-    )
-    parser.add_argument(
-        "-i",
-        "--interval",
-        type=float,
-        default=1.0,
-        help="seconds between updates (default: 1.0)",
-    )
     return parser
 
 
@@ -33,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     try:
-        monitor = ErrorRateMonitor(args.error_rate, interval=args.interval)
+        monitor = ErrorRateMonitor()
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
