@@ -159,6 +159,27 @@ def test_cli_quiet_suppresses_neuron_lines_but_keeps_the_epoch_line(capsys):
     assert cli_main(["--columns", "6", "--rows", "3", "--weight", "1", "--quiet"]) == 0
     out = capsys.readouterr().out
     assert "fired in wave" not in out and "epoch 1: input" in out
-    assert Neuron.verbose is False
+    assert Neuron.verbose is True  # restored once the command finishes
     cli_main(["--columns", "6", "--rows", "3", "--weight", "1"])
-    assert Neuron.verbose is True and "fired in wave" in capsys.readouterr().out
+    assert "fired in wave" in capsys.readouterr().out
+
+
+def test_cli_learn_runs_epochs_and_reports_accuracy(capsys):
+    args = ["--columns", "8", "--rows", "4", "--seed", "1", "--quiet", "--learn", "--target", "all-off", "--epochs", "300"]
+    assert cli_main(args) == 0
+    err = capsys.readouterr().err
+    assert "learning all-off (lr 0.05): accuracy" in err
+    assert "after 300 epochs:" in err
+    final = float(err.rsplit("accuracy ", 1)[1].split("%")[0])
+    assert final > 90
+
+
+def test_cli_epochs_without_learn_just_runs_them(capsys):
+    assert cli_main(["--columns", "8", "--rows", "4", "--seed", "1", "--quiet", "--epochs", "5"]) == 0
+    out = capsys.readouterr().out
+    assert out.count("epoch ") == 5 and "epoch 5:" in out
+
+
+def test_cli_rejects_unknown_target():
+    with pytest.raises(SystemExit):
+        cli_main(["--learn", "--target", "sideways"])

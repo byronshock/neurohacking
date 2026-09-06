@@ -7,7 +7,8 @@ import random
 import sys
 
 from .inputs import parse_bits
-from .monitor import main
+from .learning import TARGETS, Teacher
+from .monitor import main, run_epoch
 from .neuron import Neuron
 
 
@@ -83,6 +84,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="free-run: the system runs epochs as fast as it can and the window monitors it at 30 Hz (implies --show)",
     )
     parser.add_argument(
+        "--learn",
+        action="store_true",
+        help="teach the network after every epoch: the top row should show the target pattern",
+    )
+    parser.add_argument(
+        "--target",
+        choices=sorted(TARGETS),
+        default="reversed",
+        help="what the top row should show, derived from the input row (default: reversed)",
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=0.05,
+        help="learning rate for --learn (default: 0.05)",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=1,
+        help="without a window: how many epochs to run, printing accuracy along the way (default: 1)",
+    )
+    parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
@@ -101,8 +125,15 @@ def cli_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.fast:
         args.show = True
+    was_verbose = Neuron.verbose
     Neuron.verbose = not (args.quiet or args.fast)
+    try:
+        return _run(args)
+    finally:
+        Neuron.verbose = was_verbose
 
+
+def _run(args: argparse.Namespace) -> int:
     try:
         if args.show or args.save:
             try:
@@ -129,9 +160,20 @@ def cli_main(argv: list[str] | None = None) -> int:
         try:
             input_bits = parse_bits(args.input) if args.input is not None else None
             grid = main(**settings, input_bits=input_bits)
+            teacher = Teacher(grid, target=args.target, lr=args.lr) if args.learn else None
+            if teacher:
+                teacher.step()
             if args.show:
                 # Space runs a new epoch; with --fast the system free-runs and the window monitors it.
-                visualizer.show(grid, width, height, fast=args.fast)
+                visualizer.show(grid, width, height, fast=args.fast, teacher=teacher)
+            else:
+                report_every = max(1, args.epochs // 10)
+                for epoch in range(2, args.epochs + 1):
+                    run_epoch(grid)  # --quiet drops the per-neuron lines, not the per-epoch line
+                    if teacher:
+                        teacher.step()
+                        if epoch % report_every == 0 or epoch == args.epochs:
+                            print(f"epoch {epoch}: {teacher.status()}", file=sys.stderr)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
@@ -142,6 +184,8 @@ def cli_main(argv: list[str] | None = None) -> int:
                 f"connections among {len(grid.connections)}",
                 file=sys.stderr,
             )
+        if teacher:
+            print(f"after {teacher.epochs} epochs: {teacher.status()}", file=sys.stderr)
 
         print(
             f"{len(grid.fired_neurons())} of {len(grid.neurons)} neurons fired in {len(grid.waves)} waves",

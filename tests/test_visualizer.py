@@ -164,7 +164,7 @@ def test_cli_show_opens_on_an_already_fired_mesh(monkeypatch, capsys):
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     shown = []
 
-    def fake_show(grid, width, height, fast=False):
+    def fake_show(grid, width, height, fast=False, **kwargs):
         shown.append((grid.epoch, len(grid.fired_neurons())))
 
     monkeypatch.setattr(viz, "show", fake_show)
@@ -226,9 +226,24 @@ def test_fast_caption_reports_the_rate(capsys):
 
 def test_cli_fast_implies_show_and_passes_fast_through(monkeypatch, capsys):
     calls = []
-    monkeypatch.setattr(viz, "show", lambda grid, w, h, fast=False: calls.append(fast))
+    monkeypatch.setattr(viz, "show", lambda grid, w, h, fast=False, **kw: calls.append(fast))
     assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--fast"]) == 0
     assert calls == [True]
     calls.clear()
     assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--show"]) == 0
     assert calls == [False]
+
+
+def test_window_teaches_after_each_epoch_and_shows_accuracy(monkeypatch, capsys):
+    from neurohacking.learning import Teacher
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    grid = main(columns=8, rows=4, weight=None, seed=1)
+    teacher = Teacher(grid, target="all-off", lr=0.05)
+    teacher.step()  # teach from the first epoch, as the command line does
+    assert viz.handle_event(key(pygame.K_SPACE), grid, teacher) == (True, True)
+    assert teacher.epochs == 2
+    assert "learning all-off" in viz.caption(grid, teacher)
+    scripted = [[], [pygame.event.Event(pygame.QUIT)]]
+    monkeypatch.setattr(pygame.event, "get", lambda: scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)])
+    viz.show(grid, 200, 150, fast=True, fps=50, teacher=teacher)
+    assert teacher.epochs == grid.epoch  # one teaching step per epoch, in fast mode too

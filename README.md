@@ -44,6 +44,8 @@ neurohacking --columns 8 --rows 6 --save grid.png
 neurohacking --window 1200 800 --show
 neurohacking --fast                       # free-run the system; the window monitors it at 30 Hz
 neurohacking --quiet                      # no line per firing neuron
+neurohacking --fast --learn               # teach it after every epoch; accuracy in the title bar
+neurohacking --learn --epochs 3000 -q     # headless training run, accuracy printed as it goes
 ```
 
 With `--show` the window opens on the mesh after its first epoch has run.
@@ -157,6 +159,38 @@ grid.connection_between(origin, right)   # origin -> right
 grid.connection_between(right, origin)   # right -> origin, a different connection
 ```
 
+## Teaching the network
+
+The top row is the output. For each epoch the network is told what the top
+row should have shown, by default a **reversed** copy of the bottom-row
+input (`--target reversed`; `copy`, `all-off` and `all-on` also exist).
+Accuracy is the fraction of the 24 output neurons that match. Because the
+input is complement-coded, exactly half the outputs should fire, so an output
+row that never fires already scores 50%; that is the number to beat.
+
+The teaching rule (`learning.teach`) backpropagates the output error through
+the epoch's waves, treating each threshold as if it passed the error straight
+through. Connections from fired sources into erring neurons move by
+`lr * error`, and the error is passed upstream so earlier neurons learn too.
+Inputs are never adjusted and weights stay within [-1, 1]. `Teacher` wraps
+this with a running accuracy that the window shows in its title bar.
+
+**Where this stands.** The rule reliably learns the input-independent
+targets (`all-off`, `all-on` reach 100% within a few hundred epochs) but
+has not yet learned `reversed` or `copy`: after 3000 epochs accuracy sits
+between 50% and 60%. Any mapping that depends on the input is still beyond
+it; see the discussion in the project history for the likely reasons.
+
+```python
+from neurohacking.learning import Teacher
+grid = main(columns=24, rows=20, seed=1)
+teacher = Teacher(grid, target="reversed", lr=0.05)
+for _ in range(1000):
+    run_epoch(grid, verbose=False)
+    teacher.step()
+print(teacher.status())
+```
+
 ## Tests
 
 ```bash
@@ -173,6 +207,7 @@ src/neurohacking/
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up neighbours
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input
+  learning.py  output targets, accuracy, the teaching rule, and Teacher
   visualizer.py hex geometry and pygame drawing: show() and save()
   cli.py       argument parsing and the `neurohacking` command
   __main__.py  lets you run `python -m neurohacking`

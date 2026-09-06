@@ -15,6 +15,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402  (import after the env var so pygame stays quiet)
 
 from .grid import GridOfNeurons
+from .learning import Teacher
 from .monitor import run_epoch
 
 SQRT3 = math.sqrt(3)
@@ -118,21 +119,24 @@ def save(grid: GridOfNeurons, path: str, width: int = 800, height: int = 600) ->
     pygame.image.save(surface, path)
 
 
-def caption(grid: GridOfNeurons) -> str:
+def caption(grid: GridOfNeurons, teacher: Teacher | None = None) -> str:
     fired = len(grid.fired_neurons())
     state = f"{fired} of {len(grid.neurons)} fired in {len(grid.waves)} waves" if fired else "unfired"
     omega = f" omega {grid.omega:g}" if grid.omega else ""
     epoch = f" epoch {grid.epoch}:" if grid.epoch else ":"
-    return f"neurohacking {grid.columns}x{grid.rows}{omega}{epoch} {state}   [Space] new input  [Esc] quit"
+    learning = f"   {teacher.status()}" if teacher else ""
+    return f"neurohacking {grid.columns}x{grid.rows}{omega}{epoch} {state}{learning}   [Space] new input  [Esc] quit"
 
 
-def caption_fast(grid: GridOfNeurons, epochs_per_second: float, fps: int) -> str:
-    return caption(grid).replace(
+def caption_fast(grid: GridOfNeurons, epochs_per_second: float, fps: int, teacher: Teacher | None = None) -> str:
+    return caption(grid, teacher).replace(
         "[Space] new input", f"free-running at {epochs_per_second:,.0f} epochs/s, monitored at {fps} Hz"
     )
 
 
-def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, bool]:
+def handle_event(
+    event: pygame.event.Event, grid: GridOfNeurons, teacher: Teacher | None = None
+) -> tuple[bool, bool]:
     """Apply one event to the grid. Returns (keep_running, needs_redraw)."""
     if event.type == pygame.QUIT:
         return False, False
@@ -142,15 +146,25 @@ def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, 
         return False, False
     if event.key == pygame.K_SPACE:
         run_epoch(grid)  # clear every neuron, draw a new random input, propagate
+        if teacher:
+            teacher.step()
         return True, True
     return True, False
 
 
-def show(grid: GridOfNeurons, width: int = 800, height: int = 600, fast: bool = False, fps: int = 30) -> None:
+def show(
+    grid: GridOfNeurons,
+    width: int = 800,
+    height: int = 600,
+    fast: bool = False,
+    fps: int = 30,
+    teacher: Teacher | None = None,
+) -> None:
     """Open a window on the grid and let the keyboard drive it.
 
     Space resets every neuron and runs a new epoch with a fresh random input.
-    Esc or Q closes the window.
+    Esc or Q closes the window. With a `teacher`, every epoch is followed by a
+    teaching step and the title bar reports the running accuracy.
 
     With `fast` the window becomes a monitor: the system runs epoch after
     epoch as fast as it can, silently, and the window samples its state `fps`
@@ -174,11 +188,13 @@ def show(grid: GridOfNeurons, width: int = 800, height: int = 600, fast: bool = 
         while running:
             if needs_redraw:
                 draw_grid(screen, grid)
-                pygame.display.set_caption(caption_fast(grid, epochs_per_second, fps) if fast else caption(grid))
+                pygame.display.set_caption(
+                    caption_fast(grid, epochs_per_second, fps, teacher) if fast else caption(grid, teacher)
+                )
                 pygame.display.flip()
                 needs_redraw = False
             for event in pygame.event.get():
-                running, changed = handle_event(event, grid)
+                running, changed = handle_event(event, grid, teacher)
                 needs_redraw = needs_redraw or changed
                 if not running:
                     break
@@ -189,6 +205,8 @@ def show(grid: GridOfNeurons, width: int = 800, height: int = 600, fast: bool = 
                 count = 0
                 while time.perf_counter() < next_frame:
                     run_epoch(grid, verbose=False)
+                    if teacher:
+                        teacher.step()
                     count += 1
                 epochs_per_second = 0.8 * epochs_per_second + 0.2 * count * fps if epochs_per_second else count * fps
                 next_frame += frame_time
