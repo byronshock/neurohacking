@@ -49,3 +49,12 @@ class GridOfNeurons:
     def get_origin_neuron(self):
         """Return the neuron at the origin (0, 0)."""
         return self.neurons.get((0, 0))
+
+    def reset(self):
+        """Clear every neuron's has_fired flag so a signal can be sent again."""
+        for neuron in self.neurons.values():
+            neuron.reset()
+
+    def fired_neurons(self) -> list:
+        """Return the neurons that have fired since the last reset."""
+        return [n for n in self.neurons.values() if n.has_fired]
