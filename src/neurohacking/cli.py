@@ -10,6 +10,7 @@ from .inputs import parse_bits
 from .learning import ELIGIBILITIES, TARGETS, Teacher
 from .monitor import main, run_epoch
 from .neuron import Neuron
+from .persistence import checkpoint, restore, resume_teacher
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -140,6 +141,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not print a line for every neuron that fires (free-running is always quiet)",
     )
     parser.add_argument(
+        "--save-weights",
+        metavar="FILE",
+        help="write a checkpoint of the learned weights here at every progress report and on exit",
+    )
+    parser.add_argument(
+        "--load-weights",
+        metavar="FILE",
+        help="start from a checkpoint: rebuilds its mesh (size, omega, seed, permutation) and loads its weights",
+    )
+    parser.add_argument(
         "--save",
         metavar="PATH",
         help="write a picture of the grid to PATH (e.g. grid.png)",
@@ -173,6 +184,23 @@ def _run(args: argparse.Namespace) -> int:
                 )
                 return 2
         width, height = args.window
+        loaded = None
+        if args.load_weights:
+            try:
+                loaded = restore(args.load_weights)
+            except (OSError, ValueError, KeyError) as exc:
+                print(f"error: cannot load {args.load_weights}: {exc}", file=sys.stderr)
+                return 2
+            grid_from_file, data = loaded
+            args.seed = data["seed"]
+            args.columns, args.rows, args.omega = data["columns"], data["rows"], data["omega"]
+            args.threshold = data["threshold"]
+            args.weight = None if data["random_weights"] else data["weight"]
+            print(
+                f"loaded {args.load_weights}: {args.columns}x{args.rows}, seed {args.seed}, "
+                f"{data['epoch']:,} epochs so far",
+                file=sys.stderr,
+            )
         seed = args.seed if args.seed is not None else random.randrange(2**31)
         settings = dict(
             columns=args.columns,
@@ -188,19 +216,32 @@ def _run(args: argparse.Namespace) -> int:
 
         try:
             input_bits = parse_bits(args.input) if args.input is not None else None
-            grid = main(**settings, input_bits=input_bits)
-            if not args.no_permute:
+            if loaded:
+                grid, data = loaded
+                run_epoch(grid, input_bits)  # first epoch on the restored weights
+            else:
+                grid = main(**settings, input_bits=input_bits)
+            if not args.no_permute or loaded:
                 print(f"input permutation: bottom-row column i shows coded bit {grid.permutation}", file=sys.stderr)
             teacher = None
             if args.learn:
                 teacher = Teacher(
                     grid, target=args.target, lr=args.lr, sigma=args.sigma, eligibility=args.eligibility, seed=seed
                 )
+                if loaded:
+                    resume_teacher(teacher, data)
                 teacher.step()  # the first epoch ran without exploration; still score and learn from it
+
+            def save_checkpoint():
+                if args.save_weights:
+                    checkpoint(grid, args.save_weights, teacher)
             if args.show:
                 # Free-running: the system runs and learns on its own and the window monitors it.
                 # --step: nothing happens until Space is pressed.
-                visualizer.show(grid, width, height, fast=args.fast, teacher=teacher, report_seconds=args.report)
+                visualizer.show(
+                    grid, width, height, fast=args.fast, teacher=teacher, report_seconds=args.report,
+                    on_report=save_checkpoint,
+                )
             else:
                 report_every = max(1, args.epochs // 10)
                 for epoch in range(2, args.epochs + 1):
@@ -208,6 +249,7 @@ def _run(args: argparse.Namespace) -> int:
                         teacher.epoch()  # --quiet drops the per-neuron lines, not the per-epoch line
                         if epoch % report_every == 0 or epoch == args.epochs:
                             print(f"epoch {epoch}: {teacher.status()}", file=sys.stderr)
+                            save_checkpoint()
                     else:
                         run_epoch(grid)
         except ValueError as exc:
@@ -222,6 +264,9 @@ def _run(args: argparse.Namespace) -> int:
             )
         if teacher:
             print(f"after {teacher.epochs} epochs: {teacher.status()}", file=sys.stderr)
+        if args.save_weights:
+            save_checkpoint()
+            print(f"saved weights to {args.save_weights}", file=sys.stderr)
 
         print(
             f"{len(grid.fired_neurons())} of {len(grid.neurons)} neurons fired in {len(grid.waves)} waves",

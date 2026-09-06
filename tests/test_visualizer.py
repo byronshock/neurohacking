@@ -272,3 +272,16 @@ def test_free_run_logs_progress_with_accuracy_to_date(monkeypatch, capsys):
     assert len(lines) >= 2  # one line per frame when report_seconds is 0
     assert lines[-1].startswith("[0:00:0") and "to date over" in lines[-1] and "epochs/s" in lines[-1]
     assert capsys.readouterr().err == ""  # the custom log took the lines, nothing leaked to stderr
+
+
+def test_free_run_calls_on_report_after_each_report(monkeypatch, capsys):
+    from neurohacking.learning import Teacher
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    grid = main(columns=8, rows=4, weight=None, seed=1)
+    teacher = Teacher(grid, seed=1)
+    reports, saves = [], []
+    scripted = [[], [], [pygame.event.Event(pygame.QUIT)]]
+    monkeypatch.setattr(pygame.event, "get", lambda: scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)])
+    viz.show(grid, 200, 150, fast=True, fps=50, teacher=teacher, report_seconds=0,
+             log=reports.append, on_report=lambda: saves.append(grid.epoch))
+    assert len(saves) == len(reports) >= 2

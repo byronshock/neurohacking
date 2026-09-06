@@ -214,3 +214,30 @@ def test_cli_eligibility_and_sigma_options(capsys):
             "--sigma", "0.3", "--lr", "0.02", "--epochs", "20"]
     assert cli_main(args) == 0
     assert "learning reversed (hebb, lr 0.02)" in capsys.readouterr().err
+
+
+def test_cli_saves_and_loads_weights(tmp_path, capsys):
+    from neurohacking.persistence import read_checkpoint
+    path = tmp_path / "weights.json"
+    args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "7", "-q", "--epochs", "200", "--save-weights", str(path)]
+    assert cli_main(args) == 0
+    err = capsys.readouterr().err
+    assert f"saved weights to {path}" in err
+    data = read_checkpoint(path)
+    assert data["epoch"] == 200 and data["seed"] == 7 and data["learning"]["epochs"] == 200
+
+    # resume: the mesh comes from the file, the epoch count carries on, and settings on the
+    # command line that describe the mesh are overridden by the checkpoint
+    args = ["--headless", "--columns", "3", "--rows", "3", "-q", "--epochs", "50",
+            "--load-weights", str(path), "--save-weights", str(path)]
+    assert cli_main(args) == 0
+    err = capsys.readouterr().err
+    assert "loaded" in err and "8x4, seed 7, 200 epochs so far" in err
+    assert "to date over 250 epochs" in err
+    assert read_checkpoint(path)["epoch"] == 250
+
+
+def test_cli_reports_a_bad_checkpoint(tmp_path, capsys):
+    path = tmp_path / "nope.json"
+    assert cli_main(["--headless", "--load-weights", str(path)]) == 2
+    assert "cannot load" in capsys.readouterr().err

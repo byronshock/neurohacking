@@ -169,6 +169,7 @@ def show(
     teacher: Teacher | None = None,
     report_seconds: float | None = 30.0,
     log=None,
+    on_report=None,
 ) -> None:
     """Open a window on the grid and let the keyboard drive it.
 
@@ -176,7 +177,8 @@ def show(
     Esc or Q closes the window. With a `teacher`, every epoch is followed by a
     teaching step and the title bar reports the running accuracy. While
     free-running with a teacher, a progress line goes to `log` (default:
-    stderr) every `report_seconds`; None disables it.
+    stderr) every `report_seconds`, and `on_report`, if given, is called
+    right after it (used to write checkpoints); None disables both.
 
     With `fast` the window becomes a monitor: the system runs epoch after
     epoch as fast as it can, silently, and the window samples its state `fps`
@@ -229,6 +231,8 @@ def show(
                 if teacher and report_seconds is not None and now - last_report >= report_seconds:
                     last_report = now
                     log(f"[{format_elapsed(now - started)}] epoch {grid.epoch:,}: {teacher.status()}, {epochs_per_second:,.0f} epochs/s")
+                    if on_report:
+                        on_report()
                 next_frame += frame_time
                 if time.perf_counter() > next_frame:  # drawing took longer than a frame; don't try to catch up
                     next_frame = time.perf_counter() + frame_time

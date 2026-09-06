@@ -50,6 +50,8 @@ mesh and presents the next input.
 neurohacking                              # the default: free-running window with learning
 neurohacking --window 1200 800            # a bigger window
 neurohacking --report 300                 # a progress line every 5 minutes instead of 30 s
+neurohacking --save-weights run1.json     # checkpoint the learned weights at every report and on exit
+neurohacking --load-weights run1.json     # continue from a checkpoint (same mesh, seed and permutation)
 neurohacking --step                       # one epoch per Space press
 neurohacking --columns 24 --rows 20 --headless --save grid.png
 ```
@@ -199,6 +201,17 @@ and weights stay within [-1, 1]. `Teacher` wraps all this; use
 `teacher.epoch()` instead of `run_epoch(grid)` so the exploration noise is
 injected.
 
+**Saving what it learned.** `--save-weights FILE` writes a JSON checkpoint
+at every progress report and on exit: every weight by connection ID, plus
+the mesh size, omega, threshold, seed, input permutation, epoch count and
+the learning statistics. `--load-weights FILE` rebuilds that exact mesh from
+the stored seed and settings, restores the weights, and carries on counting
+epochs and accuracy to date from where the file left off. The sequence of
+random inputs starts afresh, so a resumed run is not epoch-for-epoch
+identical to an uninterrupted one, but the learned weights are the same.
+From Python: `persistence.checkpoint(grid, path, teacher)` and
+`grid, data = persistence.restore(path)`.
+
 Accuracy **to date** is the mean over every epoch since the start; the
 **recent** figure is an exponential average over roughly the last 200.
 
@@ -237,6 +250,7 @@ src/neurohacking/
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input
   learning.py  output targets, reward, the global-reinforcement rule, and Teacher
+  persistence.py checkpoint() and restore() for learned weights
   visualizer.py hex geometry and pygame drawing: show() and save()
   cli.py       argument parsing and the `neurohacking` command
   __main__.py  lets you run `python -m neurohacking`
