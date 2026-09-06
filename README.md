@@ -28,20 +28,24 @@ python -m neurohacking       # same thing without the installed command
 ## Seeing the grid
 
 ```bash
-neurohacking --show                  # open an 800x600 window; close it or press Esc/Q
+neurohacking --show                  # open an 800x600 window on the fresh mesh
 neurohacking --columns 8 --rows 6 --save grid.png
 neurohacking --window 1200 800 --show
 ```
 
-Fired neurons are coloured, shading from yellow in wave 0 to orange in the
-last wave, unfired neurons are grey, and the origin carries a white ring.
+With `--show` the window opens as soon as the mesh is built, before anything
+has fired. Press **Space** to fire the origin, **R** to reset the mesh, and
+**Esc** or **Q** to close the window. Fired neurons are coloured, shading from
+yellow in wave 0 to orange in the last wave, unfired neurons are grey, and the
+origin carries a white ring. Adding `--save PATH` writes whatever state the
+mesh is in when the window closes.
 
 ```python
 from neurohacking import main, visualizer
 
 grid = main(columns=8, rows=6)
 visualizer.save(grid, "grid.png")   # write a picture, no window needed
-visualizer.show(grid, 1200, 800)    # or open a window of a chosen size
+visualizer.show(grid, 1200, 800)    # or open a window; Space fires, R resets, Esc quits
 ```
 
 ## From Python

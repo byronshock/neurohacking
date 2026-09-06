@@ -97,3 +97,64 @@ def test_cli_window_option_sets_image_size(tmp_path, capsys):
     out = tmp_path / "wide.png"
     assert cli_main(["--columns", "3", "--rows", "3", "--save", str(out), "--window", "320", "200"]) == 0
     assert pygame.image.load(str(out)).get_size() == (320, 200)
+
+
+# --- the interactive window ---------------------------------------------------
+
+
+def key(k):
+    return pygame.event.Event(pygame.KEYDOWN, key=k)
+
+
+def test_space_fires_origin_and_r_resets(capsys):
+    grid = GridOfNeurons(columns=3, rows=3)
+    assert viz.handle_event(key(pygame.K_SPACE), grid) == (True, True)
+    assert len(grid.fired_neurons()) == 9
+    assert viz.handle_event(key(pygame.K_SPACE), grid) == (True, False)  # already fired: nothing to do
+    assert viz.handle_event(key(pygame.K_r), grid) == (True, True)
+    assert grid.fired_neurons() == [] and grid.waves == []
+
+
+def test_quit_keys_and_window_close_stop_the_loop():
+    grid = GridOfNeurons(columns=3, rows=3)
+    assert viz.handle_event(key(pygame.K_ESCAPE), grid) == (False, False)
+    assert viz.handle_event(key(pygame.K_q), grid) == (False, False)
+    assert viz.handle_event(pygame.event.Event(pygame.QUIT), grid) == (False, False)
+    assert viz.handle_event(key(pygame.K_x), grid) == (True, False)  # unknown key ignored
+    assert grid.fired_neurons() == []
+
+
+def test_caption_reports_state(capsys):
+    grid = GridOfNeurons(columns=3, rows=3)
+    assert viz.caption(grid).startswith("neurohacking 3x3: unfired")
+    grid.activate_origin()
+    assert "9 of 9 fired in 4 waves" in viz.caption(grid)  # waves 0-2 fire; wave 3 delivers to already-fired cells
+
+
+def test_show_opens_on_the_unfired_mesh_and_returns_on_quit(monkeypatch, capsys):
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    grid = GridOfNeurons(columns=3, rows=3)
+    seen = []
+    scripted = [[key(pygame.K_SPACE)], [pygame.event.Event(pygame.QUIT)]]
+
+    def fake_get():
+        seen.append(viz.caption(grid))
+        return scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)]
+
+    monkeypatch.setattr(pygame.event, "get", fake_get)
+    viz.show(grid, 200, 150)
+    assert seen[0].startswith("neurohacking 3x3: unfired")  # first frame drawn before any key
+    assert len(grid.fired_neurons()) == 9  # Space fired it; state survives closing
+
+
+def test_cli_show_opens_before_firing(monkeypatch, capsys):
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    fired_when_shown = []
+
+    def fake_show(grid, width, height):
+        fired_when_shown.append(len(grid.fired_neurons()))
+
+    monkeypatch.setattr(viz, "show", fake_show)
+    assert cli_main(["--columns", "3", "--rows", "3", "--show"]) == 0
+    assert fired_when_shown == [0]
+    assert "0 of 9 neurons fired in 0 waves" in capsys.readouterr().err

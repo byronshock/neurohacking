@@ -110,26 +110,54 @@ def save(grid: GridOfNeurons, path: str, width: int = 800, height: int = 600) ->
     pygame.image.save(surface, path)
 
 
+def caption(grid: GridOfNeurons) -> str:
+    fired = len(grid.fired_neurons())
+    state = f"{fired} of {len(grid.neurons)} fired in {len(grid.waves)} waves" if fired else "unfired"
+    return f"neurohacking {grid.columns}x{grid.rows}: {state}   [Space] fire origin  [R] reset  [Esc] quit"
+
+
+def handle_event(event: pygame.event.Event, grid: GridOfNeurons) -> tuple[bool, bool]:
+    """Apply one event to the grid. Returns (keep_running, needs_redraw)."""
+    if event.type == pygame.QUIT:
+        return False, False
+    if event.type != pygame.KEYDOWN:
+        return True, False
+    if event.key in (pygame.K_ESCAPE, pygame.K_q):
+        return False, False
+    if event.key == pygame.K_SPACE:
+        if grid.get_origin_neuron() is not None and not grid.get_origin_neuron().has_fired:
+            grid.activate_origin()
+            return True, True
+        return True, False
+    if event.key == pygame.K_r:
+        grid.reset()
+        return True, True
+    return True, False
+
+
 def show(grid: GridOfNeurons, width: int = 800, height: int = 600) -> None:
-    """Open a window showing the grid. Close it, or press Esc or Q, to return."""
+    """Open a window showing the grid as it is now, and let the keyboard drive it.
+
+    Space fires the origin, R resets the grid, Esc or Q closes the window.
+    Returns when the window is closed; the grid keeps whatever state it reached.
+    """
     pygame.init()
     try:
         screen = pygame.display.set_mode((width, height))
-        fired = len(grid.fired_neurons())
-        pygame.display.set_caption(
-            f"neurohacking: {grid.columns}x{grid.rows}, {fired} of {len(grid.neurons)} neurons fired"
-        )
-        draw_grid(screen, grid)
-        pygame.display.flip()
-
+        needs_redraw = True
         clock = pygame.time.Clock()
         running = True
         while running:
+            if needs_redraw:
+                draw_grid(screen, grid)
+                pygame.display.set_caption(caption(grid))
+                pygame.display.flip()
+                needs_redraw = False
             for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                elif event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_q):
-                    running = False
+                running, changed = handle_event(event, grid)
+                needs_redraw = needs_redraw or changed
+                if not running:
+                    break
             clock.tick(30)
     finally:
         pygame.quit()
