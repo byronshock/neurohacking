@@ -42,7 +42,7 @@ class GridOfNeurons:
         weight: float | None = 1.0,
         threshold: float = 0.25,
         seed: int | None = None,
-        omega: float = 0.0,
+        omega: float = 0.05,
     ):
         """Build the mesh.
 

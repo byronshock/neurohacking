@@ -5,7 +5,7 @@ from neurohacking.grid import DIRECTIONS, GridOfNeurons, axial_to_offset, offset
 
 @pytest.fixture
 def grid():
-    return GridOfNeurons(columns=7, rows=5)
+    return GridOfNeurons(columns=7, rows=5, omega=0)  # a plain mesh, no shortcuts
 
 
 def test_grid_has_one_neuron_per_cell(grid):
@@ -58,7 +58,7 @@ def test_neuron_names_and_positions_match_coordinates(grid):
 
 
 def test_single_cell_grid_has_no_connections():
-    grid = GridOfNeurons(columns=1, rows=1)
+    grid = GridOfNeurons(columns=1, rows=1, omega=0)
     assert len(grid.neurons) == 1 and grid.connections == {}
     assert grid.get_origin_neuron() is not None
 
@@ -208,7 +208,7 @@ def test_fixed_weight_is_still_the_library_default(grid):
 
 
 def test_default_threshold_is_a_quarter():
-    grid = GridOfNeurons(columns=3, rows=3)
+    grid = GridOfNeurons(columns=3, rows=3, omega=0)
     assert grid.threshold == 0.25
     assert all(n.threshold == 0.25 for n in grid.neurons.values())
 
@@ -233,7 +233,7 @@ def test_omega_is_the_fraction_of_all_connections(omega):
     grid = GridOfNeurons(columns=10, rows=8, omega=omega, seed=1)
     local = len(grid.local_connections())
     shortcuts = len(grid.small_world_connections())
-    assert local == len(GridOfNeurons(columns=10, rows=8).connections)  # the mesh itself is untouched
+    assert local == len(GridOfNeurons(columns=10, rows=8, omega=0).connections)  # the mesh itself is untouched
     assert shortcuts == round(omega * local / (1 - omega))
     assert shortcuts / len(grid.connections) == pytest.approx(omega, abs=0.01)
 
@@ -272,7 +272,7 @@ def test_shortcuts_get_random_weights_too():
 
 
 def test_shortcuts_never_lengthen_the_epoch_and_usually_shorten_it(capsys):
-    plain = GridOfNeurons(columns=24, rows=20, weight=1.0)
+    plain = GridOfNeurons(columns=24, rows=20, weight=1.0, omega=0)
     plain.activate_origin()
     shortcut = GridOfNeurons(columns=24, rows=20, weight=1.0, omega=0.1, seed=5)
     shortcut.activate_origin()
@@ -297,3 +297,9 @@ def test_repr_marks_small_world_connections():
     grid = GridOfNeurons(columns=6, rows=6, omega=0.2, seed=7)
     assert repr(grid.small_world_connections()[0]).endswith(", small_world)")
     assert repr(grid.local_connections()[0]).endswith(", active)")
+
+
+def test_default_omega_is_five_percent():
+    grid = GridOfNeurons(columns=10, rows=8, seed=1)
+    assert grid.omega == 0.05
+    assert len(grid.small_world_connections()) == round(0.05 * len(grid.local_connections()) / 0.95)

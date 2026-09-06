@@ -93,7 +93,7 @@ def test_empty_stimulus_gives_one_empty_wave():
 
 
 def test_grid_waves_match_hex_distance_from_origin(capsys):
-    grid = GridOfNeurons(columns=9, rows=7)
+    grid = GridOfNeurons(columns=9, rows=7, omega=0)  # shortcuts would let waves jump
     waves = grid.activate_origin()
     assert grid.waves is waves
     assert waves[0].fired == [grid.get_origin_neuron()]
@@ -119,7 +119,7 @@ def test_grid_reset_clears_waves(capsys):
 
 
 def test_large_grid_has_no_recursion_limit(capsys):
-    grid = GridOfNeurons(columns=80, rows=60)  # 4800 neurons; recursion died near 1000
+    grid = GridOfNeurons(columns=80, rows=60, omega=0)  # 4800 neurons; recursion died near 1000
     grid.activate_origin()
     assert len(grid.fired_neurons()) == len(grid.neurons)
     assert len(grid.waves) > 40

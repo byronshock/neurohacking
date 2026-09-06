@@ -15,7 +15,7 @@ def main(
     weight: float | None = None,
     threshold: float = 0.25,
     seed: int | None = None,
-    omega: float = 0.0,
+    omega: float = 0.05,
 ) -> GridOfNeurons:
     """Build a columns x rows grid, fire the origin neuron, and return the grid.
 

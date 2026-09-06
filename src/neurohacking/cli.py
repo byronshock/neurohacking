@@ -55,8 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         "--omega",
         type=float,
-        default=0.0,
-        help="proportion of connections that are small-world shortcuts, 0 to <1 (default: 0)",
+        default=0.05,
+        help="proportion of connections that are small-world shortcuts, 0 to <1 (default: 0.05)",
     )
     parser.add_argument(
         "--seed",

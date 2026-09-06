@@ -126,7 +126,7 @@ def test_quit_keys_and_window_close_stop_the_loop():
 
 def test_caption_reports_state(capsys):
     grid = GridOfNeurons(columns=3, rows=3)
-    assert viz.caption(grid).startswith("neurohacking 3x3: unfired")
+    assert viz.caption(grid).startswith("neurohacking 3x3 omega 0.05: unfired")
     grid.activate_origin()
     assert "9 of 9 fired in 4 waves" in viz.caption(grid)  # waves 0-2 fire; wave 3 delivers to already-fired cells
 
@@ -143,7 +143,7 @@ def test_show_opens_on_the_unfired_mesh_and_returns_on_quit(monkeypatch, capsys)
 
     monkeypatch.setattr(pygame.event, "get", fake_get)
     viz.show(grid, 200, 150)
-    assert seen[0].startswith("neurohacking 3x3: unfired")  # first frame drawn before any key
+    assert seen[0].startswith("neurohacking 3x3 omega 0.05: unfired")  # first frame drawn before any key
     assert len(grid.fired_neurons()) == 9  # Space fired it; state survives closing
 
 
