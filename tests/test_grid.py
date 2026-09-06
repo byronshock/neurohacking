@@ -23,10 +23,47 @@ def test_get_neuron_outside_grid_returns_none(grid):
     assert grid.get_neuron(50, 50) is None
 
 
-def test_connections_are_symmetric(grid):
+def test_connections_are_shared_by_both_ends(grid):
     for neuron in grid.neurons.values():
-        for target, _ in neuron.connections:
-            assert any(back is neuron for back, _ in target.connections)
+        for connection in neuron.connections:
+            assert connection in connection.other(neuron).connections
+
+
+def test_connection_registry_ids_run_from_one_without_gaps(grid):
+    assert sorted(grid.connections) == list(range(1, len(grid.connections) + 1))
+    for connection_id, connection in grid.connections.items():
+        assert connection.id == connection_id
+        assert grid.get_connection(connection_id) is connection
+
+
+@pytest.mark.parametrize("size, expected", [(1, 12), (2, 42), (3, 90)])
+def test_connection_count_matches_hexagon_formula(size, expected):
+    # A hexagon of radius n has 9n^2 + 3n neighbouring pairs.
+    assert len(GridOfNeurons(size=size).connections) == expected
+
+
+def test_every_connection_joins_adjacent_neurons_exactly_once(grid):
+    seen = set()
+    for connection in grid.connections.values():
+        (q1, r1), (q2, r2) = connection.first.position, connection.second.position
+        assert (q2 - q1, r2 - r1) in grid.directions
+        pair = frozenset([connection.first, connection.second])
+        assert pair not in seen, "pair connected twice"
+        seen.add(pair)
+
+
+def test_connection_between_returns_the_registered_object(grid):
+    origin, neighbour = grid.get_neuron(0, 0), grid.get_neuron(1, 0)
+    connection = grid.connection_between(origin, neighbour)
+    assert connection is grid.get_connection(connection.id)
+    assert grid.connection_between(origin, grid.get_neuron(3, 0)) is None
+
+
+def test_deactivating_origin_connections_isolates_it(grid, capsys):
+    for connection in grid.get_origin_neuron().connections:
+        connection.is_active = False
+    grid.activate_origin()
+    assert grid.fired_neurons() == [grid.get_origin_neuron()]
 
 
 def test_neuron_names_and_positions_match_coordinates(grid):

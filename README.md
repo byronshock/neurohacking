@@ -57,8 +57,21 @@ grid.reset()                   # allow every neuron to fire again
 Neurons sit on a hexagonal grid addressed by axial coordinates `(q, r)`. A
 grid of size `n` contains every cell where the largest of `|q|`, `|r|` and
 `|q + r|` is at most `n`, which gives `3n² + 3n + 1` neurons. Each neuron is
-connected to its six neighbours. Activating a neuron marks it as fired and
-passes the signal to each connected neighbour that has not fired yet.
+connected to its six neighbours.
+
+Each neighbouring pair shares one `Connection` object, which holds references
+to both neurons and an `is_active` flag. The grid keeps every connection in
+`grid.connections`, a dictionary keyed by ID starting from 1, so a pathway
+can be looked up and switched off from either end. Activating a neuron marks
+it as fired and passes the signal along each active connection to a
+neighbour that has not fired yet.
+
+```python
+grid = main(grid_size=3)
+conn = grid.get_connection(1)          # Connection(1: Neuron_-3_0 <-> Neuron_-2_0, active)
+conn.is_active = False                 # cut that pathway
+grid.connection_between(grid.get_neuron(0, 0), grid.get_neuron(1, 0))
+```
 
 ## Tests
 
@@ -70,7 +83,8 @@ pytest
 
 ```
 src/neurohacking/
-  neuron.py    Neuron: connections, has_fired flag, activate() and reset()
+  connection.py Connection: ID, references to two neurons, is_active flag
+  neuron.py    Neuron: shared connections, has_fired flag, activate() and reset()
   grid.py      GridOfNeurons: builds the hexagon and wires up neighbours
   monitor.py   main(grid_size): build a grid, fire the origin, return the grid
   visualizer.py hex geometry and pygame drawing: show() and save()

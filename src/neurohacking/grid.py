@@ -1,9 +1,14 @@
+from __future__ import annotations
+
+from .connection import Connection
 from .neuron import Neuron
+
 
 class GridOfNeurons:
     def __init__(self, size: int = 5):
         self.size = size
         self.neurons = {}  # Maps (q, r) axial coordinates to Neuron instances
+        self.connections: dict[int, Connection] = {}  # Maps connection ID (from 1) to Connection
         self.directions = [
             (1, 0), (0, 1), (-1, 1),
             (-1, 0), (0, -1), (1, -1)
@@ -11,14 +16,17 @@ class GridOfNeurons:
         self.create_grid()  # Initialize the grid
 
     def _establish_connections(self):
-        """Establish connections between neurons without recursive references."""
-        visited = set()  # Track neurons already processed
+        """Create one Connection per pair of neighbouring neurons.
+
+        Each connection gets the next ID (starting from 1), is stored in
+        self.connections, and is attached to both neurons. A pair is only
+        connected once, however many times we visit it from either side.
+        """
         for neuron in self.neurons.values():
-            if neuron not in visited:
-                neighbors = self.get_neighbors(neuron)
-                for neighbor in neighbors:
-                    neuron.connect(neighbor)
-                visited.add(neuron)
+            for neighbor in self.get_neighbors(neuron):
+                if neuron.connection_to(neighbor) is None:
+                    connection_id = len(self.connections) + 1
+                    self.connections[connection_id] = neuron.connect(neighbor, connection_id)
 
     def create_grid(self):
         """Generate a hexagonal grid of neurons within the given size."""
@@ -31,6 +39,7 @@ class GridOfNeurons:
                     self.neurons[(q, r)] = neuron
 
         self._establish_connections()  # Call once after grid is fully initialized
+
     def get_neighbors(self, neuron: "Neuron") -> list:
         """Return the list of neighboring neurons in the grid."""
         q, r = neuron.position
@@ -44,6 +53,14 @@ class GridOfNeurons:
     def get_neuron(self, q: int, r: int) -> "Neuron":
         """Retrieve a neuron at specific axial coordinates."""
         return self.neurons.get((q, r))
+
+    def get_connection(self, connection_id: int) -> Connection | None:
+        """Retrieve a connection by its ID."""
+        return self.connections.get(connection_id)
+
+    def connection_between(self, a: Neuron, b: Neuron) -> Connection | None:
+        """The connection joining neurons a and b, or None if they are not neighbours."""
+        return a.connection_to(b)
 
     def activate_origin(self):
         """Activate the origin neuron to start signal propagation."""
