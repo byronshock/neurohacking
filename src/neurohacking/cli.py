@@ -28,6 +28,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="update interval in seconds (accepted but not used yet)",
     )
     parser.add_argument(
+        "-w",
+        "--weight",
+        type=float,
+        default=1.0,
+        help="weight of every connection (default: 1.0)",
+    )
+    parser.add_argument(
+        "-t",
+        "--threshold",
+        type=float,
+        default=1.0,
+        help="input a neuron needs before it fires (default: 1.0)",
+    )
+    parser.add_argument(
         "--show",
         action="store_true",
         help="open a window showing the grid after the signal has spread",
@@ -45,7 +59,11 @@ def cli_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     try:
-        grid = main(grid_size=args.size)
+        grid = main(grid_size=args.size, weight=args.weight, threshold=args.threshold)
+        print(
+            f"{len(grid.fired_neurons())} of {len(grid.neurons)} neurons fired in {len(grid.waves)} waves",
+            file=sys.stderr,
+        )
         if args.show or args.save:
             try:
                 from . import visualizer

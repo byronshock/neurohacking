@@ -20,8 +20,8 @@ SQRT3 = math.sqrt(3)
 BACKGROUND = (24, 24, 28)
 OUTLINE = (12, 12, 14)
 UNFIRED = (70, 74, 84)
-FIRED_CENTRE = (255, 224, 96)  # fired neurons shade from this at the origin...
-FIRED_EDGE = (214, 84, 28)  # ...to this at the rim
+FIRED_CENTRE = (255, 224, 96)  # fired neurons shade from this in wave 0...
+FIRED_EDGE = (214, 84, 28)  # ...to this in the last wave
 ORIGIN_RING = (255, 255, 255)
 
 # --- geometry (no pygame needed) -------------------------------------------
@@ -59,20 +59,15 @@ def fit_hex_radius(grid_size: int, width: int, height: int, margin: int = 24) ->
     return min(by_width, by_height)
 
 
-def ring_distance(q: int, r: int) -> int:
-    """How many rings out from the origin cell (0, 0) is (q, r)."""
-    return max(abs(q), abs(r), abs(q + r))
-
-
 def _lerp_colour(a, b, t: float):
     return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-def neuron_colour(q: int, r: int, has_fired: bool, grid_size: int):
-    """Grey if the neuron has not fired; otherwise a shade based on ring distance."""
-    if not has_fired:
+def neuron_colour(fired_in_wave: int | None, last_wave: int):
+    """Grey if the neuron has not fired; otherwise a shade based on the wave it fired in."""
+    if fired_in_wave is None:
         return UNFIRED
-    t = ring_distance(q, r) / grid_size if grid_size else 0.0
+    t = fired_in_wave / last_wave if last_wave else 0.0
     return _lerp_colour(FIRED_CENTRE, FIRED_EDGE, t)
 
 
@@ -85,11 +80,14 @@ def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) ->
     hex_radius = fit_hex_radius(grid.size, width, height, margin)
     centre_x, centre_y = width / 2, height / 2
 
+    waves = [n.fired_in_wave for n in grid.neurons.values() if n.fired_in_wave is not None]
+    last_wave = max(waves) if waves else 0
+
     surface.fill(BACKGROUND)
     for (q, r), neuron in grid.neurons.items():
         dx, dy = axial_to_pixel(q, r, hex_radius)
         points = hexagon_points(centre_x + dx, centre_y + dy, hex_radius)
-        pygame.draw.polygon(surface, neuron_colour(q, r, neuron.has_fired, grid.size), points)
+        pygame.draw.polygon(surface, neuron_colour(neuron.fired_in_wave, last_wave), points)
         pygame.draw.polygon(surface, OUTLINE, points, width=max(1, round(hex_radius / 12)))
 
     # Mark the origin so the eye can find where the signal started.

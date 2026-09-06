@@ -37,10 +37,11 @@ def test_fitted_grid_stays_inside_the_surface():
             assert 10 <= y <= height - 10 + 1e-6
 
 
-def test_unfired_is_grey_and_fired_shades_outward():
-    assert viz.neuron_colour(0, 0, False, 3) == viz.UNFIRED
-    assert viz.neuron_colour(0, 0, True, 3) == viz.FIRED_CENTRE
-    assert viz.neuron_colour(3, 0, True, 3) == viz.FIRED_EDGE
+def test_unfired_is_grey_and_fired_shades_by_wave():
+    assert viz.neuron_colour(None, 3) == viz.UNFIRED
+    assert viz.neuron_colour(0, 3) == viz.FIRED_CENTRE
+    assert viz.neuron_colour(3, 3) == viz.FIRED_EDGE
+    assert viz.neuron_colour(0, 0) == viz.FIRED_CENTRE  # a single wave must not divide by zero
 
 
 def test_draw_grid_paints_fired_and_unfired_neurons(capsys):

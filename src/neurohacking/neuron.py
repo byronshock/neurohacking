@@ -4,54 +4,78 @@ from .connection import Connection
 
 
 class Neuron:
-    def __init__(self, name: str = "Neuron"):
+    def __init__(self, name: str = "Neuron", threshold: float = 1.0):
         self.name = name
         self.position = None  # (q, r) axial coordinates, set by the grid
-        self.connections: list[Connection] = []  # shared with the neuron at the other end
+        self.outgoing: list[Connection] = []  # connections this neuron sends signals along
+        self.incoming: list[Connection] = []  # connections that deliver signals to this neuron
+        self.threshold = float(threshold)  # total weighted input needed to fire
+        self.potential = 0.0  # weighted input received since the last reset
         self.has_fired = False
+        self.fired_in_wave: int | None = None  # set by fire(); None until it fires
 
-    def connect(self, target: Neuron, connection_id: int = 0) -> Connection:
-        """Create an active two-way connection to target.
+    def connect(self, target: Neuron, connection_id: int = 0, weight: float = 1.0) -> Connection:
+        """Create a one-way connection from this neuron to `target`.
 
-        The same Connection object is stored on both neurons, so either side can
-        switch it off. Returns it so a registry can record it by ID.
+        The Connection is stored in this neuron's outgoing list and the target's
+        incoming list. Returns it so a registry can record it by ID.
         """
-        connection = Connection(connection_id, self, target)
-        self.connections.append(connection)
-        target.connections.append(connection)
+        connection = Connection(connection_id, self, target, weight)
+        self.outgoing.append(connection)
+        target.incoming.append(connection)
         return connection
 
-    def connection_to(self, other: Neuron) -> Connection | None:
-        """The connection joining this neuron to `other`, or None if there is none."""
-        for connection in self.connections:
-            if connection.other(self) is other:
+    def connection_to(self, target: Neuron) -> Connection | None:
+        """The outgoing connection to `target`, or None if there is none."""
+        for connection in self.outgoing:
+            if connection.target is target:
                 return connection
         return None
 
-    def neighbours(self) -> list[Neuron]:
-        """The neurons at the far end of each connection."""
-        return [connection.other(self) for connection in self.connections]
+    def targets(self) -> list[Neuron]:
+        """The neurons this neuron can send a signal to."""
+        return [connection.target for connection in self.outgoing]
 
-    def activate(self):
-        """Receive a signal and pass it on along active connections, once only.
+    def sources(self) -> list[Neuron]:
+        """The neurons that can send a signal to this neuron."""
+        return [connection.source for connection in self.incoming]
 
-        A neuron that has already fired ignores further signals. Without this
-        guard, neighbouring neurons would re-trigger each other forever.
+    def receive(self, amount: float) -> None:
+        """Take in weighted input. A neuron that has already fired ignores it.
+
+        Receiving never fires the neuron by itself; the propagation loop checks
+        `ready` once every signal in the wave has been delivered. Negative
+        weights push the potential down (an inhibitory connection).
         """
         if self.has_fired:
             return
+        self.potential += amount
+
+    @property
+    def ready(self) -> bool:
+        """True if this neuron has enough input to fire and has not fired yet."""
+        return not self.has_fired and self.potential >= self.threshold
+
+    def fire(self, wave: int = 0) -> list[Connection]:
+        """Mark this neuron as fired in `wave` and return the connections to signal along.
+
+        This does not deliver anything: the caller (see propagation.py) queues
+        the returned connections so that all of a wave's signals are delivered
+        before any neuron in the next wave decides whether to fire.
+        """
         self.has_fired = True
-        print(f"{self.name} received a signal.")
-        for connection in self.connections:
-            if connection.is_active:
-                connection.other(self).activate()
+        self.fired_in_wave = wave
+        print(f"{self.name} fired in wave {wave}.")
+        return [connection for connection in self.outgoing if connection.is_active]
 
-    def reset(self):
-        """Allow this neuron to fire again."""
+    def reset(self) -> None:
+        """Clear accumulated input and allow this neuron to fire again."""
         self.has_fired = False
+        self.fired_in_wave = None
+        self.potential = 0.0
 
-    def list_connections(self):
-        print(f"I am {self.name}, and I am connected to:")
-        for connection in self.connections:
+    def list_connections(self) -> None:
+        print(f"I am {self.name}, and I send signals to:")
+        for connection in self.outgoing:
             state = "" if connection.is_active else " (inactive)"
-            print(f"    #{connection.id} {connection.other(self).name}{state}")
+            print(f"    #{connection.id} {connection.target.name}, weight {connection.weight:g}{state}")
