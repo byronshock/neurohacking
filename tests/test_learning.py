@@ -143,7 +143,7 @@ def test_teacher_validates_tracks_and_reports():
     second = teacher.epoch(verbose=False)
     assert teacher.epochs == 2 and 0 <= teacher.average <= 1 and 0 <= second <= 1
     assert grid.epoch == 2
-    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-05 toward 0.4 in [-5, 5]): accuracy" in teacher.status()
+    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-06 toward 0.4 in [-5, 5]): accuracy" in teacher.status()
     hebb = Teacher(grid, eligibility="hebb")
     assert hebb.sigma == 0.0  # no exploration noise for the Hebbian variant
 
@@ -245,8 +245,8 @@ def test_teacher_validates_homeostasis_and_reports_it():
     assert "homeostasis 0.01 toward 0.4 in [-5, 5]" in teacher.status() and "stuck" in teacher.status()
     default = Teacher(grid, seed=1)
     default.step()
-    assert "homeostasis 1e-05 toward 0.4" in default.status() and "sigma 0.1" in default.status()
-    assert default.homeostasis == 1e-5 and default.target_rate == 0.4
+    assert "homeostasis 1e-06 toward 0.4" in default.status() and "sigma 0.1" in default.status()
+    assert default.homeostasis == 1e-6 and default.target_rate == 0.4
     off = Teacher(grid, seed=1, homeostasis=0)
     off.step()
     assert "homeostasis" not in off.status()

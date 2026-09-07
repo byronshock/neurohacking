@@ -248,7 +248,7 @@ threshold is never flipped by the exploration noise, so it gets no learning
 signal and stays "stuck" always on or always off; on a long run most hidden
 neurons end up that way. The status line counts them. To counter it, every
 neuron outside the input row tracks its own firing rate and slowly moves its
-threshold toward a target rate (`--homeostasis`, default 1e-5 per epoch,
+threshold toward a target rate (`--homeostasis`, default 1e-6 per epoch,
 `--target-rate`, default 0.4); firing too often raises the threshold, too
 rarely lowers it. `--homeostasis 0` switches it off. Per-neuron thresholds
 are saved in checkpoints.

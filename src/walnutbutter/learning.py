@@ -32,9 +32,9 @@ flipped by the exploration noise, gets no learning signal, and stays "stuck"
 on or off. Every neuron outside the input row therefore tracks its own
 firing rate and nudges its threshold toward a target rate each epoch:
 firing too often raises the threshold, too rarely lowers it. The default
-rate of 1e-5 toward a target of 0.4 is a slow drift (a fully stuck neuron
-moves its threshold by about 0.006 per thousand epochs); a rate of 0
-switches it off. Thresholds may go negative, within `THRESHOLD_RANGE`.
+rate of 1e-6 toward a target of 0.4 is a very slow drift (a fully stuck
+neuron moves its threshold by about 0.0006 per thousand epochs, so the
+effect belongs to runs of millions of epochs); a rate of 0 switches it off. Thresholds may go negative, within `THRESHOLD_RANGE`.
 """
 
 from __future__ import annotations
@@ -181,7 +181,7 @@ class Teacher:
         baseline_rate: float = 0.05,
         window: int = 200,
         seed: int | None = None,
-        homeostasis: float = 1e-5,
+        homeostasis: float = 1e-6,
         target_rate: float = 0.4,
         threshold_range: tuple[float, float] = THRESHOLD_RANGE,
         carry_over: bool = False,

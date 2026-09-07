@@ -154,9 +154,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--homeostasis",
         type=float,
-        default=1e-5,
+        default=1e-6,
         metavar="RATE",
-        help="per-epoch rate at which each neuron's threshold moves toward its target firing rate (default: 1e-5; 0 = off)",
+        help="per-epoch rate at which each neuron's threshold moves toward its target firing rate (default: 1e-6; 0 = off)",
     )
     parser.add_argument(
         "--target-rate",
