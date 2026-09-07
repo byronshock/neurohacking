@@ -165,6 +165,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="firing rate homeostasis aims for, 0 to 1 (default: 0.4)",
     )
     parser.add_argument(
+        "--unstick",
+        type=float,
+        default=1e-3,
+        metavar="RATE",
+        help="per-epoch rate at which a stuck output neuron's threshold moves toward --unstick-target; only "
+        "output neurons firing >99%% or <1%% of the time are touched, only while stuck (default: 0.001; 0 = off)",
+    )
+    parser.add_argument(
+        "--unstick-target",
+        type=float,
+        default=0.5,
+        help="firing rate the output un-sticking aims for (default: 0.5)",
+    )
+    parser.add_argument(
         "--threshold-range",
         type=float,
         nargs=2,
@@ -306,6 +320,8 @@ def _run(args: argparse.Namespace) -> int:
                     target_rate=args.target_rate,
                     threshold_range=tuple(args.threshold_range),
                     carry_over=args.carry_over,
+                    unstick=args.unstick,
+                    unstick_target=args.unstick_target,
                 )
                 if loaded:
                     resume_teacher(teacher, data)

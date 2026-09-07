@@ -141,3 +141,12 @@ def test_checkpoint_without_a_floor_restores_without_one(tmp_path):
     path.write_text(json.dumps(data))
     restored, _ = restore(path)
     assert all(n.minimum_potential == float("-inf") for n in restored.neurons.values())
+
+
+def test_checkpoint_records_the_unstick_settings(tmp_path):
+    grid = main(columns=8, rows=4, seed=1)
+    teacher = Teacher(grid, seed=1, unstick=0.005, unstick_target=0.45)
+    teacher.step()
+    path = tmp_path / "w.json"
+    data = checkpoint(grid, path, teacher)
+    assert data["learning"]["unstick"] == 0.005 and data["learning"]["unstick_target"] == 0.45

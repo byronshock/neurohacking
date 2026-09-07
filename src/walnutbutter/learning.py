@@ -120,6 +120,32 @@ def homeostasis(
     return moved
 
 
+def unstick_outputs(
+    grid: GridOfNeurons,
+    rate: float,
+    target: float = 0.5,
+    threshold_range: tuple[float, float] = THRESHOLD_RANGE,
+) -> list[Neuron]:
+    """Nudge the threshold of every *stuck* output neuron toward a target firing rate.
+
+    Only output neurons whose running rate is beyond the stuck band (almost
+    always on, or almost always off) are touched, and only while they are.
+    A saturated output gets no learning signal because the exploration noise
+    never changes whether it fires; moving its threshold back toward the
+    region where the noise matters gives the rule a gradient there, and
+    nothing else in the mesh is disturbed. Returns the neurons nudged.
+    """
+    if rate <= 0:
+        return []
+    low, high = threshold_range
+    nudged = []
+    for neuron in output_row(grid):
+        if neuron.rate > STUCK_ABOVE or neuron.rate < STUCK_BELOW:
+            neuron.threshold = max(low, min(high, neuron.threshold + rate * (neuron.rate - target)))
+            nudged.append(neuron)
+    return nudged
+
+
 def delivered_connections(grid: GridOfNeurons) -> list:
     """Every connection that carried a signal in the last epoch, each exactly once.
 
@@ -185,13 +211,20 @@ class Teacher:
         target_rate: float = 0.4,
         threshold_range: tuple[float, float] = THRESHOLD_RANGE,
         carry_over: bool = False,
+        unstick: float = 1e-3,
+        unstick_target: float = 0.5,
     ):
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")
         if eligibility not in ELIGIBILITIES:
             raise ValueError(f"unknown eligibility {eligibility!r}; choose from {', '.join(ELIGIBILITIES)}")
-        if lr < 0 or sigma < 0 or homeostasis < 0:
-            raise ValueError("learning rate, sigma and homeostasis rate must not be negative")
+        if lr < 0 or sigma < 0 or homeostasis < 0 or unstick < 0:
+            raise ValueError("learning rate, sigma, homeostasis and unstick rates must not be negative")
+        if not 0.0 < unstick_target < 1.0:
+            raise ValueError(f"unstick target firing rate must be between 0 and 1, got {unstick_target}")
+        self.unstick = unstick
+        self.unstick_target = unstick_target
+        self.unstuck_count = 0  # how many epoch-nudges the output un-sticking has applied
         if not 0.0 < target_rate < 1.0:
             raise ValueError(f"target firing rate must be between 0 and 1, got {target_rate}")
         low, high = threshold_range
@@ -229,6 +262,7 @@ class Teacher:
         reinforce(self.grid, advantage, self.lr, self.sigma, self.eligibility)
         update_rates(self.grid)
         homeostasis(self.grid, self.homeostasis, self.target_rate, self.threshold_range)
+        self.unstuck_count += len(unstick_outputs(self.grid, self.unstick, self.unstick_target, self.threshold_range))
         self.baseline += self.baseline_rate * (reward - self.baseline)
         self.epochs += 1
         self.total_reward += reward
@@ -258,6 +292,8 @@ class Teacher:
         if self.homeostasis:
             low, high = self.threshold_range
             settings += f", homeostasis {self.homeostasis:g} toward {self.target_rate:g} in [{low:g}, {high:g}]"
+        if self.unstick:
+            settings += f", unstick {self.unstick:g}"
         if self.carry_over:
             settings += ", carry-over"
         return (

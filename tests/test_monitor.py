@@ -185,7 +185,7 @@ def test_cli_learn_runs_epochs_and_reports_accuracy(capsys):
             "--lr", "0.1", "--epochs", "2000"]
     assert cli_main(args) == 0
     err = capsys.readouterr().err
-    assert "learning all-off (perturb, lr 0.1, sigma 0.1, homeostasis 1e-06 toward 0.4 in [-5, 5]): accuracy" in err
+    assert "learning all-off (perturb, lr 0.1, sigma 0.1, homeostasis 1e-06 toward 0.4 in [-5, 5], unstick 0.001): accuracy" in err
     assert "after 2000 epochs:" in err and "to date over 2,000 epochs" in err
     final = float(err.rsplit("% recent", 1)[0].rsplit(" ", 1)[1])
     assert final > 85
@@ -213,7 +213,7 @@ def test_cli_eligibility_and_sigma_options(capsys):
     args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--eligibility", "hebb",
             "--sigma", "0.3", "--lr", "0.02", "--epochs", "20"]
     assert cli_main(args) == 0
-    assert "learning reversed (hebb, lr 0.02, sigma 0, homeostasis 1e-06 toward 0.4 in [-5, 5])" in capsys.readouterr().err
+    assert "learning reversed (hebb, lr 0.02, sigma 0, homeostasis 1e-06 toward 0.4 in [-5, 5], unstick 0.001)" in capsys.readouterr().err
 
 
 def test_cli_saves_and_loads_weights(tmp_path, capsys):
@@ -312,3 +312,12 @@ def test_cli_minimum_potential_option(capsys):
                      "--minimum-potential", "-0.5"]) == 0
     assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--minimum-potential", "0.5"]) == 2
     assert "must be below the threshold" in capsys.readouterr().err
+
+
+def test_cli_unstick_options(capsys):
+    args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5",
+            "--unstick", "0.02", "--unstick-target", "0.4"]
+    assert cli_main(args) == 0
+    assert "unstick 0.02" in capsys.readouterr().err
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5", "--unstick", "0"]) == 0
+    assert "unstick" not in capsys.readouterr().err

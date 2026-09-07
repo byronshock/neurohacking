@@ -143,7 +143,7 @@ def test_teacher_validates_tracks_and_reports():
     second = teacher.epoch(verbose=False)
     assert teacher.epochs == 2 and 0 <= teacher.average <= 1 and 0 <= second <= 1
     assert grid.epoch == 2
-    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-06 toward 0.4 in [-5, 5]): accuracy" in teacher.status()
+    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-06 toward 0.4 in [-5, 5], unstick 0.001): accuracy" in teacher.status()
     hebb = Teacher(grid, eligibility="hebb")
     assert hebb.sigma == 0.0  # no exploration noise for the Hebbian variant
 
@@ -275,3 +275,59 @@ def test_discharge_is_the_default_and_carry_over_is_available():
     carrying = Teacher(grid, seed=1, carry_over=True)
     carrying.step()
     assert "carry-over" in carrying.status()
+
+
+
+# --- un-sticking from the output end -------------------------------------------
+
+
+def test_unstick_touches_only_stuck_output_neurons():
+    from walnutbutter.learning import unstick_outputs
+    grid = GridOfNeurons(columns=6, rows=4, omega=0)
+    outputs = output_row(grid)
+    hot, cold, fine = outputs[0], outputs[1], outputs[2]
+    hot.rate, cold.rate, fine.rate = 1.0, 0.0, 0.5
+    interior = grid.get_neuron_at(3, 1)
+    interior.rate = 1.0  # stuck, but not an output: must be left alone
+    before = {n: n.threshold for n in grid.neurons.values()}
+    nudged = unstick_outputs(grid, rate=0.1)
+    assert nudged == [hot, cold]
+    assert hot.threshold == pytest.approx(before[hot] + 0.05)
+    assert cold.threshold == pytest.approx(before[cold] - 0.05)
+    assert fine.threshold == before[fine] and interior.threshold == before[interior]
+    assert unstick_outputs(grid, rate=0.0) == []
+
+
+def test_unstick_stops_once_the_neuron_is_no_longer_stuck_and_respects_the_range():
+    from walnutbutter.learning import unstick_outputs
+    grid = GridOfNeurons(columns=6, rows=4, omega=0)
+    hot = output_row(grid)[0]
+    hot.rate = 1.0
+    for _ in range(300):
+        unstick_outputs(grid, rate=1.0, threshold_range=(-2.0, 2.0))
+    assert hot.threshold == 2.0
+    hot.rate = 0.6  # out of the stuck band: nothing more happens
+    assert unstick_outputs(grid, rate=1.0) == []
+    assert hot.threshold == 2.0
+
+
+def test_teacher_applies_unsticking_and_reports_it():
+    grid = main(columns=8, rows=4, weight=1.0, seed=1)  # weight 1: every output fires every epoch
+    teacher = Teacher(grid, seed=1, unstick=0.01, homeostasis=0)
+    for _ in range(600):
+        teacher.epoch(verbose=False)
+    assert teacher.unstuck_count > 0
+    assert any(n.threshold > 0.25 for n in output_row(grid))
+    assert "unstick 0.01" in teacher.status()
+    off = Teacher(grid, seed=1, unstick=0)
+    off.step()
+    assert "unstick" not in off.status() and off.unstuck_count == 0
+    with pytest.raises(ValueError):
+        Teacher(grid, unstick=-1)
+    with pytest.raises(ValueError):
+        Teacher(grid, unstick_target=0)
+
+
+def test_unstick_defaults_on_at_one_thousandth():
+    teacher = Teacher(main(columns=8, rows=4, seed=1))
+    assert teacher.unstick == 1e-3 and teacher.unstick_target == 0.5

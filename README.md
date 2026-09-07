@@ -253,6 +253,17 @@ threshold toward a target rate (`--homeostasis`, default 1e-6 per epoch,
 rarely lowers it. `--homeostasis 0` switches it off. Per-neuron thresholds
 are saved in checkpoints.
 
+**Un-sticking the outputs.** A saturated output neuron, one that fires on
+every input or on none, gets no learning signal at all, because the
+exploration noise never changes what it does. `--unstick RATE` (default
+0.001) moves the threshold of any output neuron that is stuck, firing more
+than 99% or less than 1% of the time, toward `--unstick-target` (default
+0.5), and stops the moment it is no longer stuck. Nothing else in the mesh
+is touched, so what the network has already learned is preserved. On a
+trained checkpoint this freed both stuck outputs without disturbing the
+six correct ones; routing the missing bit to them additionally needs the
+interior to loosen, which is the slow global homeostasis's job.
+
 Accuracy **to date** is the mean over every epoch since the start; the
 **recent** figure is an exponential average over roughly the last 200.
 

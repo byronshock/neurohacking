@@ -49,6 +49,8 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
             "homeostasis": teacher.homeostasis,
             "target_rate": teacher.target_rate,
             "threshold_range": list(teacher.threshold_range),
+            "unstick": teacher.unstick,
+            "unstick_target": teacher.unstick_target,
             "total_reward": teacher.total_reward,
             "baseline": teacher.baseline,
             "average": teacher.average,
