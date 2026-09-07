@@ -21,7 +21,7 @@ neurohacking                 # open the window, free-run, learn, report accuracy
 neurohacking --headless --epochs 20000 -q   # the same without a window, for a fixed number of epochs
 neurohacking --step          # window where each Space press runs one epoch
 neurohacking --no-learn      # just watch the untrained network
-neurohacking --columns 24 --rows 20       # a bigger mesh than the default 8 x 7: 12 input bits, coded to 24
+neurohacking --columns 24 --rows 20       # a bigger mesh than the default 8 x 10: 12 input bits, coded to 24
 neurohacking --input 1011                 # choose the 4 input bits
 neurohacking --no-permute                 # coded bits in order on the bottom row
 neurohacking --seed 42       # repeat a particular random mesh
@@ -78,7 +78,7 @@ writes whatever state the mesh is in when the window closes.
 ```python
 from neurohacking import main, visualizer
 
-grid = main(columns=8, rows=7)
+grid = main(columns=8, rows=10)
 visualizer.save(grid, "grid.png")   # write a picture, no window needed
 visualizer.show(grid, 1200, 800)    # or open a window; Space runs a new epoch, Esc quits
 ```
@@ -89,7 +89,7 @@ visualizer.show(grid, 1200, 800)    # or open a window; Space runs a new epoch, 
 from neurohacking import main
 from neurohacking.monitor import run_epoch
 
-grid = main(columns=8, rows=7)  # builds the grid and runs the first epoch on its bottom row
+grid = main(columns=8, rows=10)  # builds the grid and runs the first epoch on its bottom row
 run_epoch(grid)                 # reset every neuron and present a new random input
 print(len(grid.fired_neurons()))
 grid.reset()                   # allow every neuron to fire again
@@ -147,7 +147,7 @@ fired neurons by wave.
 ```python
 from neurohacking.propagation import propagate
 
-grid = GridOfNeurons(columns=8, rows=7)
+grid = GridOfNeurons(columns=8, rows=10)
 origin, corner = grid.get_origin_neuron(), grid.get_neuron_at(0, 0)
 waves = grid.propagate(fire=[origin, corner])          # two stimuli in one epoch
 waves = grid.propagate(inputs={origin: 0.6, corner: 0.6})  # external input amounts instead
@@ -173,7 +173,7 @@ than one fired neighbour. From Python, `GridOfNeurons(weight=None, seed=...)`
 or `grid.randomize_weights(low, high, seed)` do the same.
 
 ```python
-grid = main(columns=8, rows=7)
+grid = main(columns=8, rows=10)
 conn = grid.get_connection(1)   # the first registered connection
 conn.weight = 0.5
 conn.is_active = False          # cut that direction only

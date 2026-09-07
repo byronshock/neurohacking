@@ -33,8 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-r",
         "--rows",
         type=int,
-        default=7,
-        help="number of hexagon rows (default: 7)",
+        default=10,
+        help="number of hexagon rows (default: 10)",
     )
     parser.add_argument(
         "--nodes",

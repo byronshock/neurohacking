@@ -55,7 +55,7 @@ class GridOfNeurons:
     def __init__(
         self,
         columns: int = 8,
-        rows: int = 7,
+        rows: int = 10,
         weight: float | None = 1.0,
         threshold: float = 0.25,
         seed: int | None = None,
