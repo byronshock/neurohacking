@@ -27,12 +27,14 @@ injected, which is the classic reward-modulated Hebbian rule.
 Forced inputs are never adjusted and weights are kept within the grid's
 weight_range, [-1, 1] by default.
 
-**Homeostasis** (optional). A neuron whose input sits far from its threshold
-is never flipped by the exploration noise, gets no learning signal, and stays
-"stuck" on or off. With a homeostasis rate above zero, every neuron outside
-the input row tracks its own firing rate and nudges its threshold toward a
-target rate each epoch: firing too often raises the threshold, too rarely
-lowers it. Thresholds may go negative, within `THRESHOLD_RANGE`.
+**Homeostasis.** A neuron whose input sits far from its threshold is never
+flipped by the exploration noise, gets no learning signal, and stays "stuck"
+on or off. Every neuron outside the input row therefore tracks its own
+firing rate and nudges its threshold toward a target rate each epoch:
+firing too often raises the threshold, too rarely lowers it. The default
+rate of 1e-5 toward a target of 0.4 is a slow drift (a fully stuck neuron
+moves its threshold by about 0.006 per thousand epochs); a rate of 0
+switches it off. Thresholds may go negative, within `THRESHOLD_RANGE`.
 """
 
 from __future__ import annotations
@@ -100,7 +102,7 @@ def stuck_neurons(grid: GridOfNeurons) -> tuple[list[Neuron], list[Neuron]]:
     return on, off
 
 
-def homeostasis(grid: GridOfNeurons, rate: float, target: float = 0.5) -> int:
+def homeostasis(grid: GridOfNeurons, rate: float, target: float = 0.4) -> int:
     """Nudge each non-input neuron's threshold toward its target firing rate. Returns neurons moved."""
     if rate <= 0:
         return 0
@@ -177,8 +179,8 @@ class Teacher:
         baseline_rate: float = 0.05,
         window: int = 200,
         seed: int | None = None,
-        homeostasis: float = 0.0,
-        target_rate: float = 0.5,
+        homeostasis: float = 1e-5,
+        target_rate: float = 0.4,
     ):
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")

@@ -143,7 +143,7 @@ def test_teacher_validates_tracks_and_reports():
     second = teacher.epoch(verbose=False)
     assert teacher.epochs == 2 and 0 <= teacher.average <= 1 and 0 <= second <= 1
     assert grid.epoch == 2
-    assert "learning reversed (perturb, lr 0.01, sigma 0.1): accuracy" in teacher.status()
+    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-05 toward 0.4): accuracy" in teacher.status()
     hebb = Teacher(grid, eligibility="hebb")
     assert hebb.sigma == 0.0  # no exploration noise for the Hebbian variant
 
@@ -207,6 +207,14 @@ def test_homeostasis_moves_thresholds_toward_the_target_rate_and_stays_in_range(
     assert homeostasis(grid, rate=0.1, target=0.5) == 8  # 12 neurons minus the 4 in the input row
     assert hot.threshold == pytest.approx(before[hot] + 0.05)
     assert cold.threshold == pytest.approx(before[cold] - 0.05)
+    hot.threshold, cold.threshold = before[hot], before[cold]
+    homeostasis(grid, rate=0.1)  # the default target is 0.4
+    assert hot.threshold == pytest.approx(before[hot] + 0.06)
+    assert cold.threshold == pytest.approx(before[cold] - 0.04)
+    hot.threshold, cold.threshold = before[hot], before[cold]
+    homeostasis(grid, rate=0.1, target=0.5)
+    assert hot.threshold == pytest.approx(before[hot] + 0.05)
+    assert cold.threshold == pytest.approx(before[cold] - 0.05)
     assert all(n.threshold == before[n] for n in grid.input_row())
     assert homeostasis(grid, rate=0.0) == 0
     for _ in range(500):
@@ -218,7 +226,7 @@ def test_teacher_homeostasis_reduces_stuck_neurons():
     from neurohacking.learning import stuck_neurons
     def run(homeostasis):
         grid = GridOfNeurons(columns=8, rows=6, weight=None, seed=1)
-        teacher = Teacher(grid, seed=1, homeostasis=homeostasis)
+        teacher = Teacher(grid, seed=1, homeostasis=homeostasis, target_rate=0.5)
         for _ in range(3000):
             teacher.epoch(verbose=False)
         on, off = stuck_neurons(grid)
@@ -235,6 +243,10 @@ def test_teacher_validates_homeostasis_and_reports_it():
     teacher = Teacher(grid, homeostasis=0.01, target_rate=0.4, seed=1)
     teacher.step()
     assert "homeostasis 0.01 toward 0.4" in teacher.status() and "stuck" in teacher.status()
-    plain = Teacher(grid, seed=1)
-    plain.step()
-    assert "homeostasis" not in plain.status() and "sigma 0.1" in plain.status()
+    default = Teacher(grid, seed=1)
+    default.step()
+    assert "homeostasis 1e-05 toward 0.4" in default.status() and "sigma 0.1" in default.status()
+    assert default.homeostasis == 1e-5 and default.target_rate == 0.4
+    off = Teacher(grid, seed=1, homeostasis=0)
+    off.step()
+    assert "homeostasis" not in off.status()

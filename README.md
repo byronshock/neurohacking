@@ -243,6 +243,16 @@ identical to an uninterrupted one, but the learned weights are the same.
 From Python: `persistence.checkpoint(grid, path, teacher)` and
 `grid, data = persistence.restore(path)`.
 
+**Stuck neurons and homeostasis.** A neuron whose input sits far from its
+threshold is never flipped by the exploration noise, so it gets no learning
+signal and stays "stuck" always on or always off; on a long run most hidden
+neurons end up that way. The status line counts them. To counter it, every
+neuron outside the input row tracks its own firing rate and slowly moves its
+threshold toward a target rate (`--homeostasis`, default 1e-5 per epoch,
+`--target-rate`, default 0.4); firing too often raises the threshold, too
+rarely lowers it. `--homeostasis 0` switches it off. Per-neuron thresholds
+are saved in checkpoints.
+
 Accuracy **to date** is the mean over every epoch since the start; the
 **recent** figure is an exponential average over roughly the last 200.
 
