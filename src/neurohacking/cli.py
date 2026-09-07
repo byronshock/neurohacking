@@ -32,8 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-r",
         "--rows",
         type=int,
-        default=8,
-        help="number of hexagon rows (default: 8)",
+        default=6,
+        help="number of hexagon rows (default: 6)",
     )
     parser.add_argument(
         "--window",

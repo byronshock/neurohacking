@@ -48,7 +48,7 @@ def run_epoch(
 
 def main(
     columns: int = 8,
-    rows: int = 8,
+    rows: int = 6,
     weight: float | None = None,
     threshold: float = 0.25,
     seed: int | None = None,
