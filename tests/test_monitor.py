@@ -117,9 +117,9 @@ def test_cli_defaults_to_random_weights_and_reports_the_seed(capsys):
 
 
 def test_cli_seed_makes_runs_repeatable(capsys):
-    cli_main(["--headless", "--columns", "10", "--rows", "8", "--seed", "11"])
+    cli_main(["--headless", "--columns", "10", "--rows", "8", "--seed", "11", "--no-save"])  # no timestamped path in the output
     first = capsys.readouterr()
-    cli_main(["--headless", "--columns", "10", "--rows", "8", "--seed", "11"])
+    cli_main(["--headless", "--columns", "10", "--rows", "8", "--seed", "11", "--no-save"])
     second = capsys.readouterr()
     assert first.out == second.out and first.err == second.err
     assert "seed 11" in first.err

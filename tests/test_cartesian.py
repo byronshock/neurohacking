@@ -223,16 +223,17 @@ def test_show_nodes_returns_on_quit(monkeypatch):
 
 
 def test_connection_probability_follows_the_standard_gaussian():
-    assert gaussian_density(0.0) == pytest.approx(1 / (2 * math.pi))
+    assert gaussian_density(0.0, sigma=1.0) == pytest.approx(1 / (2 * math.pi))
     assert connection_probability(0.0) == 0.0  # the same position: never
     assert connection_probability(1e-6) == pytest.approx(1.0)  # but arbitrarily close: almost certain
-    assert connection_probability(1.0) == pytest.approx(math.exp(-0.5))  # 0.607
-    assert connection_probability(2.0) == pytest.approx(math.exp(-2.0))  # 0.135
-    assert connection_probability(3.0) == pytest.approx(math.exp(-4.5))  # 0.011
-    assert connection_probability(1.0, scale=0.5) == pytest.approx(0.5 * math.exp(-0.5))
+    assert connection_probability(1.0, sigma=1.0) == pytest.approx(math.exp(-0.5))  # 0.607
+    assert connection_probability(2.0, sigma=1.0) == pytest.approx(math.exp(-2.0))  # 0.135
+    assert connection_probability(3.0, sigma=1.0) == pytest.approx(math.exp(-4.5))  # 0.011
+    assert connection_probability(1.0, sigma=1.0, scale=0.5) == pytest.approx(0.5 * math.exp(-0.5))
+    assert connection_probability(1.5) == pytest.approx(math.exp(-0.5))  # the default sigma is 1.5
     assert connection_probability(0.01, scale=3.0) == 1.0  # never above one
     assert connection_probability(0.0, scale=3.0) == 0.0  # zero distance stays zero whatever the scale
-    assert connection_probability(50.0) == 0.0  # the density has underflowed: exactly zero, never connected
+    assert connection_probability(50.0, sigma=1.0) == 0.0  # the density has underflowed: exactly zero, never connected
 
 
 def test_connection_probability_sigma_sets_the_reach():
@@ -253,7 +254,7 @@ def test_connect_by_distance_sigma_changes_the_degree():
     n_default = default.connect_by_distance()
     n_wide = wide.connect_by_distance(sigma=2.0)
     assert n_tight < n_default < n_wide
-    assert wide.receptive_field_sigma == 2.0 and default.receptive_field_sigma == 1.0
+    assert wide.receptive_field_sigma == 2.0 and default.receptive_field_sigma == 1.5
     far = [c for c in wide.connections.values() if CartesianNodes.distance(c.source, c.target) > 3.5]
     assert far  # at sigma 2 connections reach several units
     with pytest.raises(ValueError):
@@ -287,13 +288,13 @@ def test_connect_by_distance_makes_independent_one_way_connections():
 
 def test_connect_by_distance_degree_matches_the_gaussian_on_the_lattice():
     nodes = CartesianNodes(columns=20, rows=20, seed=2)  # a big lattice so the interior dominates
-    nodes.connect_by_distance()
+    nodes.connect_by_distance(sigma=1.0)
     interior = [nodes.node_at(c, r) for r in range(5, 15) for c in range(5, 15)]
     degree = sum(len(n.outgoing) for n in interior) / len(interior)
     # expected out-degree: the six guaranteed neighbours plus exp(-d^2/2) over every farther lattice point
     centre = nodes.node_at(10, 10)
     expected = sum(
-        1.0 if CartesianNodes.distance(centre, n) <= 1 + 1e-6 else connection_probability(CartesianNodes.distance(centre, n))
+        1.0 if CartesianNodes.distance(centre, n) <= 1 + 1e-6 else connection_probability(CartesianNodes.distance(centre, n), sigma=1.0)
         for n in nodes if n is not centre
     )
     assert degree == pytest.approx(expected, rel=0.1)
@@ -337,7 +338,7 @@ def test_cli_nodes_reports_the_distance_wiring(capsys):
     from walnutbutter.cli import cli_main
     base = ["--headless", "--nodes", "--seed", "1", "--columns", "6", "--rows", "4", "-q", "--epochs", "2", "--no-save"]
     assert cli_main(base) == 0
-    assert "receptive field sigma 1)" in capsys.readouterr().err
+    assert "receptive field sigma 1.5)" in capsys.readouterr().err  # the default
     assert cli_main(base + ["--receptive-field-sigma", "2"]) == 0
     assert "receptive field sigma 2)" in capsys.readouterr().err
     assert cli_main(base + ["--receptive_field_sigma", "0.5"]) == 0  # underscore spelling works too
@@ -382,7 +383,7 @@ def test_teacher_learns_on_the_lattice():
     import statistics
     from walnutbutter.learning import Teacher, accuracy
     nodes = CartesianNodes(columns=8, rows=4, seed=1)
-    nodes.connect_by_distance(weight=None)
+    nodes.connect_by_distance(sigma=1.0, weight=None)  # sparse enough that all-off is reachable quickly
     teacher = Teacher(nodes, target="all-off", lr=0.1, seed=1)
     rewards = [teacher.epoch(verbose=False) for _ in range(1500)]
     # the sparse lattice starts high on all-off; learning should still take it to near perfection

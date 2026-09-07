@@ -223,9 +223,9 @@ certainty, both directions, so a neuron's six hex neighbours are always its
 neighbours in the wiring too (`kind == "local"`). Every other pair connects
 with probability proportional to a 2D Gaussian density at its separation,
 `exp(-d² / 2σ²)` with `sigma` the receptive field's standard deviation in unit
-distances (default 1; `--receptive-field-sigma`), each direction an independent
-draw (`kind == "gaussian"`): at sigma 1 two units gives 0.135, three units
-0.011. There are no small-world shortcuts on the lattice. Two neurons at the
+distances (default 1.5, the plateau found by sweeping; `--receptive-field-sigma`),
+each direction an independent draw (`kind == "gaussian"`): at sigma 1.5 two
+units gives 0.41, three units 0.14. There are no small-world shortcuts on the lattice. Two neurons at the
 same position are never connected. `weight` is given to every connection, or
 None draws each from `weight_range`.
 Connections are registered by ID in `nodes.connections`, as in the grid.

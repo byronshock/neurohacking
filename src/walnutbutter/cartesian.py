@@ -30,12 +30,12 @@ ROW_SPACING = math.sqrt(3) / 2  # distance between rows of a unit-spaced hexagon
 TOLERANCE = 1e-9  # lattice distances are 1 only up to rounding
 
 
-def gaussian_density(distance: float, sigma: float = 1.0) -> float:
+def gaussian_density(distance: float, sigma: float = 1.5) -> float:
     """The isotropic 2D Gaussian probability density with standard deviation `sigma`, at `distance` from the origin."""
     return math.exp(-0.5 * (distance / sigma) ** 2) / (2.0 * math.pi * sigma * sigma)
 
 
-def connection_probability(distance: float, sigma: float = 1.0, scale: float = 1.0) -> float:
+def connection_probability(distance: float, sigma: float = 1.5, scale: float = 1.0) -> float:
     """Probability of a forward connection between two neurons `distance` units apart.
 
     Proportional to the 2D Gaussian density with standard deviation `sigma`
@@ -194,7 +194,7 @@ class CartesianNodes(Network):
 
     def connect_by_distance(
         self,
-        sigma: float = 1.0,
+        sigma: float = 1.5,
         scale: float = 1.0,
         weight: float | None = 1.0,
         weight_range: tuple[float, float] = (-1.0, 1.0),

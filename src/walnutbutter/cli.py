@@ -59,10 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--receptive_field_sigma",
         dest="receptive_field_sigma",
         type=float,
-        default=1.0,
+        default=1.5,
         metavar="UNITS",
         help="with --nodes: standard deviation, in unit distances, of the Gaussian receptive field that sets "
-        "connection probability by distance (default: 1)",
+        "connection probability by distance (default: 1.5, from the sweeps)",
     )
     parser.add_argument(
         "--window",
