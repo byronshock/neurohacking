@@ -165,6 +165,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="firing rate homeostasis aims for, 0 to 1 (default: 0.4)",
     )
     parser.add_argument(
+        "--threshold-range",
+        type=float,
+        nargs=2,
+        metavar=("LOW", "HIGH"),
+        default=(-5.0, 5.0),
+        help="limits homeostasis may move a threshold to (default: -5 5)",
+    )
+    parser.add_argument(
         "--epochs",
         type=int,
         default=1,
@@ -280,6 +288,7 @@ def _run(args: argparse.Namespace) -> int:
                     seed=seed,
                     homeostasis=args.homeostasis,
                     target_rate=args.target_rate,
+                    threshold_range=tuple(args.threshold_range),
                 )
                 if loaded:
                     resume_teacher(teacher, data)

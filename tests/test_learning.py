@@ -143,7 +143,7 @@ def test_teacher_validates_tracks_and_reports():
     second = teacher.epoch(verbose=False)
     assert teacher.epochs == 2 and 0 <= teacher.average <= 1 and 0 <= second <= 1
     assert grid.epoch == 2
-    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-05 toward 0.4): accuracy" in teacher.status()
+    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-05 toward 0.4 in [-5, 5]): accuracy" in teacher.status()
     hebb = Teacher(grid, eligibility="hebb")
     assert hebb.sigma == 0.0  # no exploration noise for the Hebbian variant
 
@@ -242,7 +242,7 @@ def test_teacher_validates_homeostasis_and_reports_it():
         Teacher(grid, target_rate=1.5)
     teacher = Teacher(grid, homeostasis=0.01, target_rate=0.4, seed=1)
     teacher.step()
-    assert "homeostasis 0.01 toward 0.4" in teacher.status() and "stuck" in teacher.status()
+    assert "homeostasis 0.01 toward 0.4 in [-5, 5]" in teacher.status() and "stuck" in teacher.status()
     default = Teacher(grid, seed=1)
     default.step()
     assert "homeostasis 1e-05 toward 0.4" in default.status() and "sigma 0.1" in default.status()
@@ -250,3 +250,17 @@ def test_teacher_validates_homeostasis_and_reports_it():
     off = Teacher(grid, seed=1, homeostasis=0)
     off.step()
     assert "homeostasis" not in off.status()
+
+
+def test_threshold_range_is_configurable_and_validated():
+    from neurohacking.learning import homeostasis
+    grid = GridOfNeurons(columns=4, rows=3, omega=0)
+    hot = grid.get_neuron_at(0, 0)
+    hot.rate = 1.0
+    for _ in range(200):
+        homeostasis(grid, rate=1.0, threshold_range=(0.0, 1.5))
+    assert hot.threshold == 1.5
+    teacher = Teacher(grid, threshold_range=(0, 2), seed=1)
+    assert teacher.threshold_range == (0.0, 2.0) and "in [0, 2]" in teacher.status() or teacher.average is None
+    with pytest.raises(ValueError):
+        Teacher(grid, threshold_range=(3, 1))

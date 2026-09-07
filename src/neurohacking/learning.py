@@ -58,7 +58,7 @@ TARGETS: dict[str, Target] = {
 ELIGIBILITIES = ("perturb", "hebb")
 RATE_MEMORY = 0.01  # per-epoch update of a neuron's running firing rate (about the last 100 epochs)
 STUCK_BELOW, STUCK_ABOVE = 0.01, 0.99  # a neuron firing less or more often than this is "stuck"
-THRESHOLD_RANGE = (-5.0, 5.0)  # what homeostasis may move a threshold to
+THRESHOLD_RANGE = (-5.0, 5.0)  # default limits on what homeostasis may move a threshold to
 
 
 def output_row(grid: GridOfNeurons) -> list[Neuron]:
@@ -102,11 +102,13 @@ def stuck_neurons(grid: GridOfNeurons) -> tuple[list[Neuron], list[Neuron]]:
     return on, off
 
 
-def homeostasis(grid: GridOfNeurons, rate: float, target: float = 0.4) -> int:
+def homeostasis(
+    grid: GridOfNeurons, rate: float, target: float = 0.4, threshold_range: tuple[float, float] = THRESHOLD_RANGE
+) -> int:
     """Nudge each non-input neuron's threshold toward its target firing rate. Returns neurons moved."""
     if rate <= 0:
         return 0
-    low, high = THRESHOLD_RANGE
+    low, high = threshold_range
     inputs = set(grid.input_row())
     moved = 0
     for neuron in grid.neurons.values():
@@ -181,6 +183,7 @@ class Teacher:
         seed: int | None = None,
         homeostasis: float = 1e-5,
         target_rate: float = 0.4,
+        threshold_range: tuple[float, float] = THRESHOLD_RANGE,
     ):
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")
@@ -190,8 +193,12 @@ class Teacher:
             raise ValueError("learning rate, sigma and homeostasis rate must not be negative")
         if not 0.0 < target_rate < 1.0:
             raise ValueError(f"target firing rate must be between 0 and 1, got {target_rate}")
+        low, high = threshold_range
+        if not low < high:
+            raise ValueError(f"threshold range must run from low to high, got {threshold_range}")
         self.homeostasis = homeostasis
         self.target_rate = target_rate
+        self.threshold_range = (float(low), float(high))
         self.grid = grid
         self.target = target
         self.lr = lr
@@ -219,7 +226,7 @@ class Teacher:
         advantage = reward - self.baseline
         reinforce(self.grid, advantage, self.lr, self.sigma, self.eligibility)
         update_rates(self.grid)
-        homeostasis(self.grid, self.homeostasis, self.target_rate)
+        homeostasis(self.grid, self.homeostasis, self.target_rate, self.threshold_range)
         self.baseline += self.baseline_rate * (reward - self.baseline)
         self.epochs += 1
         self.total_reward += reward
@@ -247,7 +254,8 @@ class Teacher:
             return f"learning {self.target}: no epochs yet"
         settings = f"{self.eligibility}, lr {self.lr:g}, sigma {self.sigma:g}"
         if self.homeostasis:
-            settings += f", homeostasis {self.homeostasis:g} toward {self.target_rate:g}"
+            low, high = self.threshold_range
+            settings += f", homeostasis {self.homeostasis:g} toward {self.target_rate:g} in [{low:g}, {high:g}]"
         return (
             f"learning {self.target} ({settings}): "
             f"accuracy {self.accuracy_to_date:.1%} to date over {self.epochs:,} epochs, "
