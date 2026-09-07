@@ -100,15 +100,15 @@ def update_rates(grid: GridOfNeurons) -> None:
 
     A neuron forced this epoch is skipped: that firing says nothing about the network.
     """
-    for neuron in grid.neurons.values():
+    for neuron in grid.all_neurons():
         if not forced(neuron):
             neuron.rate += RATE_MEMORY * ((1.0 if neuron.has_fired else 0.0) - neuron.rate)
 
 
 def stuck_neurons(grid: GridOfNeurons) -> tuple[list[Neuron], list[Neuron]]:
     """Neurons whose running rate is (almost) always on, and always off."""
-    on = [n for n in grid.neurons.values() if n.rate > STUCK_ABOVE]
-    off = [n for n in grid.neurons.values() if n.rate < STUCK_BELOW]
+    on = [n for n in grid.all_neurons() if n.rate > STUCK_ABOVE]
+    off = [n for n in grid.all_neurons() if n.rate < STUCK_BELOW]
     return on, off
 
 
@@ -123,7 +123,7 @@ def homeostasis(
         return 0
     low, high = threshold_range
     moved = 0
-    for neuron in grid.neurons.values():
+    for neuron in grid.all_neurons():
         if forced(neuron):
             continue
         threshold = neuron.threshold + rate * (neuron.rate - target)

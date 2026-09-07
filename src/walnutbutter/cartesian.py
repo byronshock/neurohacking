@@ -22,6 +22,7 @@ import random
 from typing import Iterator
 
 from .connection import Connection
+from .network import Network
 from .neuron import Neuron
 
 
@@ -52,7 +53,7 @@ def connection_probability(distance: float, sigma: float = 1.0, scale: float = 1
     return min(1.0, scale * gaussian_density(distance, sigma) / gaussian_density(0.0, sigma))
 
 
-class CartesianNodes:
+class CartesianNodes(Network):
     """Neurons at (x, y) positions in unit distances: a hexagonal lattice by default, or random."""
 
     def __init__(
@@ -66,6 +67,8 @@ class CartesianNodes:
         seed: int | None = None,
         threshold: float = 0.25,
         minimum_potential: float = -1.0,
+        permute: bool = True,
+        weight_range: tuple[float, float] = (-1.0, 1.0),
     ):
         if layout not in ("hex", "random"):
             raise ValueError(f"layout must be 'hex' or 'random', got {layout!r}")
@@ -79,6 +82,7 @@ class CartesianNodes:
         self.neurons: list[Neuron] = []
         self.connections: dict[int, Connection] = {}  # by ID from 1, like the grid
         self._lattice: dict[tuple[int, int], Neuron] = {}
+        self._init_network(columns, weight_range)
         if layout == "hex":
             if columns < 1 or rows < 1:
                 raise ValueError(f"a lattice needs at least one column and one row, got {columns}x{rows}")
@@ -98,6 +102,8 @@ class CartesianNodes:
                 self.add()
         if not (self.width > 0 and self.height > 0):
             raise ValueError(f"the region needs a positive width and height, got {self.width} x {self.height}")
+        if permute and layout == "hex":
+            self._rng.shuffle(self.permutation)
 
     def _place_lattice(self) -> None:
         """Columns x rows neurons at unit spacing, odd rows shifted half a unit, centred on the origin."""
@@ -112,6 +118,13 @@ class CartesianNodes:
     def node_at(self, column: int, row: int) -> Neuron | None:
         """The lattice neuron at (column, row), counted from the bottom-left; None for random layouts."""
         return self._lattice.get((column, row))
+
+    def get_neuron_at(self, column: int, row: int) -> Neuron | None:
+        """The lattice neuron at (column, row) counted from the top-left, like the hex grid.
+
+        Row 0 is the top row (the output); row rows-1 is the bottom row (the input).
+        """
+        return self._lattice.get((column, self.rows - 1 - row))
 
     @property
     def region(self) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -221,15 +234,6 @@ class CartesianNodes:
 
     def mean_out_degree(self) -> float:
         return sum(len(n.outgoing) for n in self.neurons) / len(self.neurons) if self.neurons else 0.0
-
-    # --- state ------------------------------------------------------------
-
-    def reset(self, discharge: bool = True) -> None:
-        for neuron in self.neurons:
-            neuron.reset(discharge)
-
-    def fired_neurons(self) -> list[Neuron]:
-        return [n for n in self.neurons if n.has_fired]
 
     # --- container protocol -----------------------------------------------
 

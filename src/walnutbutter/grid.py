@@ -3,9 +3,9 @@ from __future__ import annotations
 import random
 
 from .connection import Connection
-from .inputs import complement_code
+from .network import Network
 from .neuron import Neuron
-from .propagation import Wave, propagate
+from .propagation import Wave
 
 # The six neighbours of a cell in axial coordinates (q, r).
 DIRECTIONS = [
@@ -42,7 +42,7 @@ def axial_to_offset(q: int, r: int) -> tuple[int, int]:
     return q + (r - (r & 1)) // 2, r
 
 
-class GridOfNeurons:
+class GridOfNeurons(Network):
     """A rectangle of `columns` x `rows` hexagonal cells, each holding a Neuron.
 
     Every neuron is connected to its six neighbours (kind "local") and to the
@@ -82,10 +82,6 @@ class GridOfNeurons:
             raise ValueError(f"grid needs at least one column and one row, got {columns}x{rows}")
         if not 0.0 <= omega < 1.0:
             raise ValueError(f"omega must be at least 0 and less than 1, got {omega}")
-        low, high = weight_range
-        if not low < high:
-            raise ValueError(f"weight range must run from low to high, got {weight_range}")
-        self.weight_range = (float(low), float(high))
         self.columns = columns
         self.rows = rows
         self.weight = weight  # fixed weight for every connection, or None for random
@@ -96,12 +92,7 @@ class GridOfNeurons:
         self._rng = random.Random(seed)  # one stream for shortcuts, then weights
         self.neurons: dict[tuple[int, int], Neuron] = {}  # Maps axial (q, r) to Neuron
         self.connections: dict[int, Connection] = {}  # Maps connection ID (from 1) to Connection
-        self.waves: list[Wave] = []  # Waves of the most recent propagation
-        self.input_pattern: list[bool] | None = None  # one bit per column, applied to the bottom row
-        self.input_bits: list[bool] | None = None  # the raw bits before complement coding
-        self.input_coded: list[bool] | None = None  # the complement-coded bits before permutation
-        self.permutation: list[int] = list(range(columns))  # bottom-row column i shows coded bit permutation[i]
-        self.epoch = 0  # how many inputs have been presented
+        self._init_network(columns, weight_range)
         self.directions = DIRECTIONS
         self.create_grid()  # Initialize the grid
         self._add_small_world_connections(omega)
@@ -205,11 +196,6 @@ class GridOfNeurons:
         for connection in self.connections.values():
             connection.weight = rng.uniform(low, high)
 
-    def clip_weight(self, weight: float) -> float:
-        """Keep a weight inside the grid's weight_range."""
-        low, high = self.weight_range
-        return max(low, min(high, weight))
-
     # --- lookup -----------------------------------------------------------
 
     def get_neighbors(self, neuron: Neuron) -> list:
@@ -248,59 +234,8 @@ class GridOfNeurons:
         """The connection running from `source` to `target`, or None if there is none."""
         return source.connection_to(target)
 
-    # --- input ------------------------------------------------------------
-
-    def input_row(self) -> list[Neuron]:
-        """The bottom row of neurons, left to right: the network's input."""
-        return [self.get_neuron_at(column, self.rows - 1) for column in range(self.columns)]
-
-    def set_input(self, pattern) -> None:
-        """Store the input pattern: one boolean per column of the bottom row."""
-        pattern = [bool(b) for b in pattern]
-        if len(pattern) != self.columns:
-            raise ValueError(f"input pattern has {len(pattern)} bits but the mesh has {self.columns} columns")
-        self.input_pattern = pattern
-
-    def set_input_bits(self, bits) -> None:
-        """Set the input from raw bits (half the columns): complement-code them, then permute.
-
-        Bottom-row column i receives coded bit permutation[i]. With the identity
-        permutation (permute=False) the coded bits land in order.
-        """
-        if self.columns % 2:
-            raise ValueError(f"complement coding needs an even number of columns, got {self.columns}")
-        bits = [bool(b) for b in bits]
-        if len(bits) != self.columns // 2:
-            raise ValueError(f"expected {self.columns // 2} input bits for {self.columns} columns, got {len(bits)}")
-        coded = complement_code(bits)
-        self.set_input([coded[i] for i in self.permutation])
-        self.input_bits = bits
-        self.input_coded = coded
-
-    def new_random_input(self) -> list[bool]:
-        """Draw fresh raw bits from the grid's seeded stream and set them as the input.
-
-        Because the stream is the same one used for shortcuts and weights, a
-        seed reproduces the whole sequence of inputs, not just the first.
-        """
-        if self.columns % 2:
-            raise ValueError(f"complement coding needs an even number of columns, got {self.columns}")
-        bits = [self._rng.random() < 0.5 for _ in range(self.columns // 2)]
-        self.set_input_bits(bits)
-        return bits
-
-    def input_neurons(self) -> list[Neuron]:
-        """The bottom-row neurons whose input bit is 1 (empty if no pattern is set)."""
-        if self.input_pattern is None:
-            return []
-        return [neuron for neuron, bit in zip(self.input_row(), self.input_pattern) if bit]
-
-    def fire_input(self) -> list[Wave]:
-        """Force the input neurons to fire and propagate the signal wave by wave."""
-        if self.input_pattern is None:
-            raise ValueError("no input pattern set; call set_input() first")
-        self.epoch += 1
-        return self.propagate(fire=self.input_neurons())
+    def all_neurons(self):
+        return self.neurons.values()
 
     # --- running ----------------------------------------------------------
 
@@ -311,22 +246,3 @@ class GridOfNeurons:
             print(f"\nOrigin neuron {origin.name} has {len(origin.outgoing)} connections")
             return self.propagate(fire=[origin])
         return []
-
-    def propagate(self, fire=(), inputs=None) -> list[Wave]:
-        """Run one epoch from the given stimulus (see propagation.propagate) and keep its waves."""
-        self.waves = propagate(fire=fire, inputs=inputs)
-        return self.waves
-
-    def reset(self, discharge: bool = True):
-        """Clear every neuron's fired state and, by default, its potential.
-
-        With `discharge=False`, neurons that did not fire keep their
-        accumulated potential (see Neuron.reset).
-        """
-        for neuron in self.neurons.values():
-            neuron.reset(discharge)
-        self.waves = []
-
-    def fired_neurons(self) -> list:
-        """Return the neurons that have fired since the last reset."""
-        return [n for n in self.neurons.values() if n.has_fired]
