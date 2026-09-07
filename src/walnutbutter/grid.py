@@ -62,6 +62,7 @@ class GridOfNeurons:
         omega: float = 0.05,
         permute: bool = True,
         weight_range: tuple[float, float] = (-1.0, 1.0),
+        minimum_potential: float = -1.0,
     ):
         """Build the mesh.
 
@@ -89,6 +90,7 @@ class GridOfNeurons:
         self.rows = rows
         self.weight = weight  # fixed weight for every connection, or None for random
         self.threshold = threshold  # firing threshold given to every neuron
+        self.minimum_potential = minimum_potential  # floor on every neuron's potential
         self.omega = omega
         self.seed = seed
         self._rng = random.Random(seed)  # one stream for shortcuts, then weights
@@ -116,7 +118,7 @@ class GridOfNeurons:
         for row in range(self.rows):
             for column in range(self.columns):
                 q, r = offset_to_axial(column - centre_column, row - centre_row)
-                neuron = Neuron(f"Neuron_{q}_{r}", threshold=self.threshold)
+                neuron = Neuron(f"Neuron_{q}_{r}", threshold=self.threshold, minimum_potential=self.minimum_potential)
                 neuron.position = (q, r)
                 self.neurons[(q, r)] = neuron
 
@@ -315,10 +317,14 @@ class GridOfNeurons:
         self.waves = propagate(fire=fire, inputs=inputs)
         return self.waves
 
-    def reset(self):
-        """Clear every neuron's fired state and potential so a signal can be sent again."""
+    def reset(self, discharge: bool = True):
+        """Clear every neuron's fired state and, by default, its potential.
+
+        With `discharge=False`, neurons that did not fire keep their
+        accumulated potential (see Neuron.reset).
+        """
         for neuron in self.neurons.values():
-            neuron.reset()
+            neuron.reset(discharge)
         self.waves = []
 
     def fired_neurons(self) -> list:

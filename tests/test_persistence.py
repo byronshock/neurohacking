@@ -2,11 +2,11 @@ import json
 
 import pytest
 
-from neurohacking.grid import GridOfNeurons
-from neurohacking.learning import Teacher
-from neurohacking.monitor import main, run_epoch
-from neurohacking.neuron import Neuron
-from neurohacking.persistence import checkpoint, load_weights, read_checkpoint, restore, resume_teacher
+from walnutbutter.grid import GridOfNeurons
+from walnutbutter.learning import Teacher
+from walnutbutter.monitor import main, run_epoch
+from walnutbutter.neuron import Neuron
+from walnutbutter.persistence import checkpoint, load_weights, read_checkpoint, restore, resume_teacher
 
 
 @pytest.fixture(autouse=True)
@@ -107,3 +107,37 @@ def test_checkpoint_keeps_the_weight_range(tmp_path):
     assert data["weight_range"] == [0.01, 1.0]
     assert restored.weight_range == (0.01, 1.0)
     assert [c.weight for c in restored.connections.values()] == [c.weight for c in grid.connections.values()]
+
+
+def test_checkpoint_keeps_per_neuron_thresholds_and_rates(tmp_path):
+    grid = main(columns=8, rows=4, seed=1)
+    teacher = Teacher(grid, seed=1, homeostasis=0.05)
+    for _ in range(200):
+        teacher.epoch(verbose=False)
+    thresholds = [n.threshold for n in grid.neurons.values()]
+    assert len(set(thresholds)) > 1  # homeostasis has spread them out
+    path = tmp_path / "w.json"
+    checkpoint(grid, path, teacher)
+    restored, data = restore(path)
+    assert [n.threshold for n in restored.neurons.values()] == thresholds
+    assert [n.rate for n in restored.neurons.values()] == [n.rate for n in grid.neurons.values()]
+    assert data["learning"]["homeostasis"] == 0.05
+
+
+def test_checkpoint_keeps_the_minimum_potential(tmp_path):
+    grid = GridOfNeurons(columns=6, rows=4, seed=1, minimum_potential=-0.4)
+    path = tmp_path / "w.json"
+    checkpoint(grid, path)
+    restored, data = restore(path)
+    assert data["minimum_potential"] == -0.4
+    assert all(n.minimum_potential == -0.4 for n in restored.neurons.values())
+
+
+def test_checkpoint_without_a_floor_restores_without_one(tmp_path):
+    grid = GridOfNeurons(columns=6, rows=4, seed=1)
+    path = tmp_path / "w.json"
+    data = checkpoint(grid, path)
+    del data["minimum_potential"]
+    path.write_text(json.dumps(data))
+    restored, _ = restore(path)
+    assert all(n.minimum_potential == float("-inf") for n in restored.neurons.values())

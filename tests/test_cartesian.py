@@ -2,9 +2,9 @@ import math
 
 import pytest
 
-from neurohacking.cartesian import UNIT_SQUARE, CartesianNodes
-from neurohacking.neuron import Neuron
-from neurohacking.propagation import propagate
+from walnutbutter.cartesian import UNIT_SQUARE, CartesianNodes
+from walnutbutter.neuron import Neuron
+from walnutbutter.propagation import propagate
 
 
 @pytest.fixture(autouse=True)
@@ -110,7 +110,7 @@ def test_repr_and_iteration():
 
 
 def test_cli_nodes_headless_lists_positions(capsys):
-    from neurohacking.cli import cli_main
+    from walnutbutter.cli import cli_main
     assert cli_main(["--headless", "--nodes", "5", "--seed", "1"]) == 0
     captured = capsys.readouterr()
     assert captured.out.count("Node_") == 5
@@ -118,22 +118,22 @@ def test_cli_nodes_headless_lists_positions(capsys):
 
 
 def test_cli_nodes_defaults_to_64(capsys):
-    from neurohacking.cli import cli_main
+    from walnutbutter.cli import cli_main
     assert cli_main(["--headless", "--nodes", "--seed", "1"]) == 0
     captured = capsys.readouterr()
     assert captured.out.count("Node_") == 64 and "64 nodes placed" in captured.err
 
 
 def test_cli_nodes_rejects_zero(capsys):
-    from neurohacking.cli import cli_main
+    from walnutbutter.cli import cli_main
     assert cli_main(["--headless", "--nodes", "0"]) == 2
     assert "at least 1" in capsys.readouterr().err
 
 
 def test_cli_nodes_saves_a_picture_and_opens_the_window(tmp_path, monkeypatch, capsys):
     import pygame
-    from neurohacking import visualizer as viz
-    from neurohacking.cli import cli_main
+    from walnutbutter import visualizer as viz
+    from walnutbutter.cli import cli_main
     out = tmp_path / "nodes.png"
     assert cli_main(["--headless", "--nodes", "20", "--seed", "1", "--save", str(out)]) == 0
     assert pygame.image.load(str(out)).get_size() == (800, 600)
@@ -145,7 +145,7 @@ def test_cli_nodes_saves_a_picture_and_opens_the_window(tmp_path, monkeypatch, c
 
 def test_draw_nodes_places_discs_at_their_positions():
     import pygame
-    from neurohacking import visualizer as viz
+    from walnutbutter import visualizer as viz
     nodes = CartesianNodes()
     corner = nodes.add(-1.0, 1.0)  # top-left of the box
     nodes.add(0.0, 0.0)
@@ -167,7 +167,7 @@ def test_draw_nodes_places_discs_at_their_positions():
 
 def test_show_nodes_returns_on_quit(monkeypatch):
     import pygame
-    from neurohacking import visualizer as viz
+    from walnutbutter import visualizer as viz
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     nodes = CartesianNodes(count=10, seed=1)
     monkeypatch.setattr(pygame.event, "get", lambda: [pygame.event.Event(pygame.QUIT)])

@@ -1,4 +1,4 @@
-# neurohacking
+# walnutbutter
 
 Builds a rectangular mesh of hexagonal neurons, fires the one at the centre,
 and watches the signal spread outward. Each neuron fires at most once per run.
@@ -17,20 +17,20 @@ visualizer needs, use `pip install -e ".[viz]"` instead.
 ## Usage
 
 ```bash
-neurohacking                 # open the window, free-run, learn, report accuracy; close it to stop
-neurohacking --headless --epochs 20000 -q   # the same without a window, for a fixed number of epochs
-neurohacking --step          # window where each Space press runs one epoch
-neurohacking --no-learn      # just watch the untrained network
-neurohacking --columns 24 --rows 20       # a bigger mesh than the default 8 x 10: 12 input bits, coded to 24
-neurohacking --input 1011                 # choose the 4 input bits
-neurohacking --no-permute                 # coded bits in order on the bottom row
-neurohacking --seed 42       # repeat a particular random mesh
-neurohacking --weight 1      # a fixed weight on every connection instead
-neurohacking --omega 0.1     # one connection in ten is a shortcut (default: 0.05)
-neurohacking --positive-weights --threshold 2   # no inhibition: weights kept in [epsilon, 1]
-neurohacking --omega 0       # plain mesh, no shortcuts
-neurohacking --weight 0.2 --show   # signal dies at the origin
-python -m neurohacking       # same thing without the installed command
+walnutbutter                 # open the window, free-run, learn, report accuracy; close it to stop
+walnutbutter --headless --epochs 20000 -q   # the same without a window, for a fixed number of epochs
+walnutbutter --step          # window where each Space press runs one epoch
+walnutbutter --no-learn      # just watch the untrained network
+walnutbutter --columns 24 --rows 20       # a bigger mesh than the default 8 x 10: 12 input bits, coded to 24
+walnutbutter --input 1011                 # choose the 4 input bits
+walnutbutter --no-permute                 # coded bits in order on the bottom row
+walnutbutter --seed 42       # repeat a particular random mesh
+walnutbutter --weight 1      # a fixed weight on every connection instead
+walnutbutter --omega 0.1     # one connection in ten is a shortcut (default: 0.05)
+walnutbutter --positive-weights --threshold 2   # no inhibition: weights kept in [epsilon, 1]
+walnutbutter --omega 0       # plain mesh, no shortcuts
+walnutbutter --weight 0.2 --show   # signal dies at the origin
+python -m walnutbutter       # same thing without the installed command
 ```
 
 **Input.** The network's input is its bottom row. Each epoch draws 4 random
@@ -48,13 +48,13 @@ mesh and presents the next input.
 ## Seeing the grid
 
 ```bash
-neurohacking                              # the default: free-running window with learning
-neurohacking --window 1200 800            # a bigger window
-neurohacking --report 300                 # a progress line every 5 minutes instead of 30 s
-neurohacking --save-weights run1.json     # checkpoint the learned weights at every report and on exit
-neurohacking --load-weights run1.json     # continue from a checkpoint (same mesh, seed and permutation)
-neurohacking --step                       # one epoch per Space press
-neurohacking --columns 24 --rows 20 --headless --save grid.png
+walnutbutter                              # the default: free-running window with learning
+walnutbutter --window 1200 800            # a bigger window
+walnutbutter --report 300                 # a progress line every 5 minutes instead of 30 s
+walnutbutter --save-weights run1.json     # checkpoint the learned weights at every report and on exit
+walnutbutter --load-weights run1.json     # continue from a checkpoint (same mesh, seed and permutation)
+walnutbutter --step                       # one epoch per Space press
+walnutbutter --columns 24 --rows 20 --headless --save grid.png
 ```
 
 By default the window is a monitor on a free-running system. The network
@@ -76,7 +76,7 @@ neurons that were forced in wave 0 carry a white ring. Adding `--save PATH`
 writes whatever state the mesh is in when the window closes.
 
 ```python
-from neurohacking import main, visualizer
+from walnutbutter import main, visualizer
 
 grid = main(columns=8, rows=10)
 visualizer.save(grid, "grid.png")   # write a picture, no window needed
@@ -86,8 +86,8 @@ visualizer.show(grid, 1200, 800)    # or open a window; Space runs a new epoch, 
 ## From Python
 
 ```python
-from neurohacking import main
-from neurohacking.monitor import run_epoch
+from walnutbutter import main
+from walnutbutter.monitor import run_epoch
 
 grid = main(columns=8, rows=10)  # builds the grid and runs the first epoch on its bottom row
 run_epoch(grid)                 # reset every neuron and present a new random input
@@ -145,7 +145,7 @@ on grid size. Each neuron records `fired_in_wave`, the grid keeps the list of
 fired neurons by wave.
 
 ```python
-from neurohacking.propagation import propagate
+from walnutbutter.propagation import propagate
 
 grid = GridOfNeurons(columns=8, rows=10)
 origin, corner = grid.get_origin_neuron(), grid.get_neuron_at(0, 0)
@@ -184,7 +184,7 @@ grid.connection_between(right, origin)   # right -> origin, a different connecti
 
 ## Neurons without a grid
 
-`neurohacking --nodes` builds a population of 64 such neurons from the seed
+`walnutbutter --nodes` builds a population of 64 such neurons from the seed
 (`--nodes N` for another count) and shows it, or lists their positions with
 `--headless`, or writes a picture with `--save`. Nothing is wired or learned
 for nodes yet.
@@ -198,7 +198,7 @@ connections; `nearest` and `within` help decide them. Propagation and the
 neurons themselves work exactly as in the grid.
 
 ```python
-from neurohacking.cartesian import CartesianNodes
+from walnutbutter.cartesian import CartesianNodes
 
 nodes = CartesianNodes(count=50, seed=1)     # 50 neurons scattered in [-1, 1] x [-1, 1]
 centre = nodes.add(0.0, 0.0)                 # one placed by hand
@@ -243,6 +243,16 @@ identical to an uninterrupted one, but the learned weights are the same.
 From Python: `persistence.checkpoint(grid, path, teacher)` and
 `grid, data = persistence.restore(path)`.
 
+**Stuck neurons and homeostasis.** A neuron whose input sits far from its
+threshold is never flipped by the exploration noise, so it gets no learning
+signal and stays "stuck" always on or always off; on a long run most hidden
+neurons end up that way. The status line counts them. To counter it, every
+neuron outside the input row tracks its own firing rate and slowly moves its
+threshold toward a target rate (`--homeostasis`, default 1e-6 per epoch,
+`--target-rate`, default 0.4); firing too often raises the threshold, too
+rarely lowers it. `--homeostasis 0` switches it off. Per-neuron thresholds
+are saved in checkpoints.
+
 Accuracy **to date** is the mean over every epoch since the start; the
 **recent** figure is an exponential average over roughly the last 200.
 
@@ -256,7 +266,7 @@ with variance, and the variance grows with the number of neurons being
 perturbed.
 
 ```python
-from neurohacking.learning import Teacher
+from walnutbutter.learning import Teacher
 grid = main(columns=24, rows=20, seed=1)
 teacher = Teacher(grid, target="reversed", lr=0.03, sigma=0.1, seed=1)
 for _ in range(10000):
@@ -273,7 +283,7 @@ pytest
 ## Layout
 
 ```
-src/neurohacking/
+src/walnutbutter/
   connection.py Connection: ID, source and target neurons, weight, is_active, kind
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
   propagation.py Signal queue and wave-by-wave propagate()
@@ -284,8 +294,8 @@ src/neurohacking/
   learning.py  output targets, reward, the global-reinforcement rule, and Teacher
   persistence.py checkpoint() and restore() for learned weights
   visualizer.py hex geometry and pygame drawing: show() and save()
-  cli.py       argument parsing and the `neurohacking` command
-  __main__.py  lets you run `python -m neurohacking`
+  cli.py       argument parsing and the `walnutbutter` command
+  __main__.py  lets you run `python -m walnutbutter`
 tests/         pytest tests for the neuron, the grid, and the command line
 pyproject.toml project metadata, dependencies, and the command definition
 ```

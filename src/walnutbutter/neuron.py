@@ -6,15 +6,17 @@ from .connection import Connection
 class Neuron:
     verbose = True  # class-wide: print a line each time any neuron fires
 
-    def __init__(self, name: str = "Neuron", threshold: float = 0.25):
+    def __init__(self, name: str = "Neuron", threshold: float = 0.25, minimum_potential: float = -1.0):
         self.name = name
         self.position = None  # (q, r) axial coordinates, set by the grid
         self.outgoing: list[Connection] = []  # connections this neuron sends signals along
         self.incoming: list[Connection] = []  # connections that deliver signals to this neuron
         self.threshold = float(threshold)  # total weighted input needed to fire
+        self.minimum_potential = float(minimum_potential)  # inhibition can push the potential no lower than this
         self.potential = 0.0  # weighted input received since the last reset
         self.noise = 0.0  # exploration noise this epoch started with (see learning.py)
         self.touched_stamp = 0  # last wave (a global stamp) in which a signal reached this neuron
+        self.rate = 0.5  # running estimate of how often this neuron fires per epoch (see learning.py)
         self.has_fired = False
         self.fired_in_wave: int | None = None  # set by fire(); None until it fires
 
@@ -56,6 +58,8 @@ class Neuron:
         if self.has_fired:
             return
         self.potential += amount
+        if self.potential < self.minimum_potential:  # inhibition saturates at the floor
+            self.potential = self.minimum_potential
 
     @property
     def ready(self) -> bool:
@@ -75,11 +79,18 @@ class Neuron:
             print(f"{self.name} fired in wave {wave}.")
         return [connection for connection in self.outgoing if connection.is_active]
 
-    def reset(self) -> None:
-        """Clear accumulated input and allow this neuron to fire again."""
+    def reset(self, discharge: bool = True) -> None:
+        """Allow this neuron to fire again and, by default, clear its potential.
+
+        With `discharge=False` only a neuron that fired is cleared; one that did
+        not fire keeps the sub-threshold input it has accumulated, so charge
+        carries over from epoch to epoch until it eventually fires (an optional
+        mode; see run_epoch's `discharge` and the --carry-over flag).
+        """
+        if self.has_fired or discharge:
+            self.potential = 0.0
         self.has_fired = False
         self.fired_in_wave = None
-        self.potential = 0.0
         self.noise = 0.0
 
     def list_connections(self) -> None:

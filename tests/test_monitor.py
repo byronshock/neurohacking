@@ -1,10 +1,10 @@
 import pytest
 
-from neurohacking import main
-from neurohacking.cli import cli_main
-from neurohacking.grid import GridOfNeurons
-from neurohacking.monitor import run_epoch
-from neurohacking.neuron import Neuron
+from walnutbutter import main
+from walnutbutter.cli import cli_main
+from walnutbutter.grid import GridOfNeurons
+from walnutbutter.monitor import run_epoch
+from walnutbutter.neuron import Neuron
 
 
 def test_main_fires_the_bottom_row_and_returns_the_grid(capsys):
@@ -185,7 +185,7 @@ def test_cli_learn_runs_epochs_and_reports_accuracy(capsys):
             "--lr", "0.1", "--epochs", "2000"]
     assert cli_main(args) == 0
     err = capsys.readouterr().err
-    assert "learning all-off (perturb, lr 0.1): accuracy" in err
+    assert "learning all-off (perturb, lr 0.1, sigma 0.1, homeostasis 1e-06 toward 0.4 in [-5, 5]): accuracy" in err
     assert "after 2000 epochs:" in err and "to date over 2,000 epochs" in err
     final = float(err.rsplit("% recent", 1)[0].rsplit(" ", 1)[1])
     assert final > 85
@@ -213,11 +213,11 @@ def test_cli_eligibility_and_sigma_options(capsys):
     args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--eligibility", "hebb",
             "--sigma", "0.3", "--lr", "0.02", "--epochs", "20"]
     assert cli_main(args) == 0
-    assert "learning reversed (hebb, lr 0.02)" in capsys.readouterr().err
+    assert "learning reversed (hebb, lr 0.02, sigma 0, homeostasis 1e-06 toward 0.4 in [-5, 5])" in capsys.readouterr().err
 
 
 def test_cli_saves_and_loads_weights(tmp_path, capsys):
-    from neurohacking.persistence import read_checkpoint
+    from walnutbutter.persistence import read_checkpoint
     path = tmp_path / "weights.json"
     args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "7", "-q", "--epochs", "200", "--save-weights", str(path)]
     assert cli_main(args) == 0
@@ -262,3 +262,53 @@ def test_cli_load_restores_positive_weights(tmp_path, capsys):
     capsys.readouterr()
     assert cli_main(["--headless", "-q", "--epochs", "5", "--load-weights", str(path)]) == 0
     assert "positive weights: every weight kept between 0.05 and 1" in capsys.readouterr().err
+
+
+def test_cli_homeostasis_options(capsys):
+    args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "20",
+            "--homeostasis", "0.01", "--target-rate", "0.3"]
+    assert cli_main(args) == 0
+    err = capsys.readouterr().err
+    assert "homeostasis 0.01 toward 0.3 in [-5, 5]" in err and "stuck" in err
+
+
+def test_cli_threshold_range_option(capsys):
+    args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5",
+            "--threshold-range", "0", "3"]
+    assert cli_main(args) == 0
+    assert "in [0, 3]" in capsys.readouterr().err
+
+
+def test_run_epoch_discharges_by_default_and_can_carry_over(capsys):
+    import random
+    grid = GridOfNeurons(columns=6, rows=4, weight=None, seed=1, omega=0)
+    run_epoch(grid, verbose=False)
+    before = {n: n.potential for n in grid.neurons.values() if not n.has_fired and n.potential != 0}
+    assert before  # some neurons received input without firing
+    run_epoch(grid, verbose=False, discharge=False, noise=0.1, rng=random.Random(5))
+    assert any(n.fired_in_wave is None and n.potential != n.noise for n in before)  # old charge carried
+    run_epoch(grid, verbose=False)  # the default clears everything before the input arrives
+    grid.reset()
+    assert all(n.potential == 0.0 for n in grid.neurons.values())
+
+
+def test_cli_carry_over_option(capsys):
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5", "--carry-over"]) == 0
+    assert ", carry-over)" in capsys.readouterr().err
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5"]) == 0
+    assert "carry-over" not in capsys.readouterr().err
+
+
+def test_noise_respects_the_minimum_potential(capsys):
+    import random
+    grid = GridOfNeurons(columns=6, rows=4, weight=None, seed=1, minimum_potential=-0.05)
+    for _ in range(20):
+        run_epoch(grid, verbose=False, noise=0.5, rng=random.Random(1))
+    assert all(n.potential >= -0.05 for n in grid.neurons.values())
+
+
+def test_cli_minimum_potential_option(capsys):
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "3",
+                     "--minimum-potential", "-0.5"]) == 0
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--minimum-potential", "0.5"]) == 2
+    assert "must be below the threshold" in capsys.readouterr().err

@@ -1,6 +1,6 @@
 import pytest
 
-from neurohacking.inputs import complement_code, format_bits, parse_bits, random_bits
+from walnutbutter.inputs import complement_code, format_bits, parse_bits, random_bits
 
 
 def test_random_bits_has_the_right_length_and_is_reproducible():

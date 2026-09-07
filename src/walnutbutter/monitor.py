@@ -19,16 +19,19 @@ def run_epoch(
     verbose: bool = True,
     noise: float = 0.0,
     rng: random.Random | None = None,
+    discharge: bool = True,
 ) -> list:
     """Reset every neuron, present an input (random unless `bits` is given), and propagate.
 
-    Weights, shortcuts and thresholds are untouched; only the neurons' fired
-    state and potential are cleared. With `noise` > 0 every neuron starts the
-    epoch with a Gaussian random potential of that standard deviation (the
-    exploration used by learning); each neuron remembers it as `noise`.
-    Prints the input unless `verbose` is False. Returns the waves.
+    Weights, shortcuts and thresholds are untouched. Every neuron's fired
+    state and potential are cleared. With `discharge=False` neurons that did
+    not fire keep the sub-threshold potential they accumulated (carry-over).
+    With `noise` > 0 a Gaussian draw of that standard deviation (the
+    exploration used by learning) is added to every neuron's potential; each
+    neuron remembers it as `noise`. Prints the input unless `verbose` is
+    False. Returns the waves.
     """
-    grid.reset()
+    grid.reset(discharge)
     if bits is None:
         grid.new_random_input()
     else:
@@ -37,7 +40,7 @@ def run_epoch(
         rng = rng or random
         for neuron in grid.neurons.values():
             neuron.noise = rng.gauss(0.0, noise)
-            neuron.potential = neuron.noise
+            neuron.potential = max(neuron.minimum_potential, neuron.potential + neuron.noise)
     if verbose:
         print(
             f"epoch {grid.epoch + 1}: input {format_bits(grid.input_bits)} -> coded "
@@ -56,6 +59,7 @@ def main(
     input_bits: Sequence[bool] | None = None,
     permute: bool = True,
     weight_range: tuple[float, float] = (-1.0, 1.0),
+    minimum_potential: float = -1.0,
 ) -> GridOfNeurons:
     """Build a columns x rows grid, run one epoch on its bottom row, and return it.
 
@@ -77,6 +81,7 @@ def main(
         omega=omega,
         permute=permute,
         weight_range=weight_range,
+        minimum_potential=minimum_potential,
     )
     run_epoch(grid, input_bits)
     return grid

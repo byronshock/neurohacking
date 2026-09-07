@@ -3,9 +3,9 @@ import statistics
 
 import pytest
 
-from neurohacking import learning
-from neurohacking.grid import GridOfNeurons
-from neurohacking.learning import (
+from walnutbutter import learning
+from walnutbutter.grid import GridOfNeurons
+from walnutbutter.learning import (
     Teacher,
     accuracy,
     delivered_connections,
@@ -14,8 +14,8 @@ from neurohacking.learning import (
     output_row,
     reinforce,
 )
-from neurohacking.monitor import main, run_epoch
-from neurohacking.neuron import Neuron
+from walnutbutter.monitor import main, run_epoch
+from walnutbutter.neuron import Neuron
 
 
 @pytest.fixture(autouse=True)
@@ -143,7 +143,7 @@ def test_teacher_validates_tracks_and_reports():
     second = teacher.epoch(verbose=False)
     assert teacher.epochs == 2 and 0 <= teacher.average <= 1 and 0 <= second <= 1
     assert grid.epoch == 2
-    assert "learning reversed (perturb, lr 0.01): accuracy" in teacher.status()
+    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-06 toward 0.4 in [-5, 5]): accuracy" in teacher.status()
     hebb = Teacher(grid, eligibility="hebb")
     assert hebb.sigma == 0.0  # no exploration noise for the Hebbian variant
 
@@ -181,3 +181,97 @@ def test_reinforce_clips_to_the_grid_weight_range():
     assert touched
     assert all(c.weight == 0.001 for c in touched)
     assert all(c.weight >= 0.001 for c in grid.connections.values())
+
+
+def test_rates_track_firing_and_stuck_neurons_are_counted():
+    from walnutbutter.learning import stuck_neurons, update_rates, RATE_MEMORY
+    grid = GridOfNeurons(columns=4, rows=3, omega=0)
+    always, never = grid.get_neuron_at(0, 0), grid.get_neuron_at(1, 0)
+    for _ in range(600):
+        grid.reset()
+        always.fire()
+        update_rates(grid)
+    assert always.rate > 0.99 and never.rate < 0.01
+    on, off = stuck_neurons(grid)
+    assert always in on and never in off
+    assert not any(n in on or n in off for n in grid.input_row())  # the input row is never counted
+    assert abs((0.5 + RATE_MEMORY * 0.5) - 0.505) < 1e-12  # one step from the initial 0.5 toward 1
+
+
+def test_homeostasis_moves_thresholds_toward_the_target_rate_and_stays_in_range():
+    from walnutbutter.learning import THRESHOLD_RANGE, homeostasis
+    grid = GridOfNeurons(columns=4, rows=3, omega=0)
+    hot, cold = grid.get_neuron_at(0, 0), grid.get_neuron_at(1, 0)
+    hot.rate, cold.rate = 1.0, 0.0
+    before = {n: n.threshold for n in grid.neurons.values()}
+    assert homeostasis(grid, rate=0.1, target=0.5) == 8  # 12 neurons minus the 4 in the input row
+    assert hot.threshold == pytest.approx(before[hot] + 0.05)
+    assert cold.threshold == pytest.approx(before[cold] - 0.05)
+    hot.threshold, cold.threshold = before[hot], before[cold]
+    homeostasis(grid, rate=0.1)  # the default target is 0.4
+    assert hot.threshold == pytest.approx(before[hot] + 0.06)
+    assert cold.threshold == pytest.approx(before[cold] - 0.04)
+    hot.threshold, cold.threshold = before[hot], before[cold]
+    homeostasis(grid, rate=0.1, target=0.5)
+    assert hot.threshold == pytest.approx(before[hot] + 0.05)
+    assert cold.threshold == pytest.approx(before[cold] - 0.05)
+    assert all(n.threshold == before[n] for n in grid.input_row())
+    assert homeostasis(grid, rate=0.0) == 0
+    for _ in range(500):
+        homeostasis(grid, rate=1.0)
+    assert hot.threshold == THRESHOLD_RANGE[1] and cold.threshold == THRESHOLD_RANGE[0]
+
+
+def test_teacher_homeostasis_reduces_stuck_neurons():
+    from walnutbutter.learning import stuck_neurons
+    def run(homeostasis):
+        grid = GridOfNeurons(columns=8, rows=6, weight=None, seed=1)
+        teacher = Teacher(grid, seed=1, homeostasis=homeostasis, target_rate=0.5)
+        for _ in range(3000):
+            teacher.epoch(verbose=False)
+        on, off = stuck_neurons(grid)
+        return len(on) + len(off)
+    assert run(0.0) > run(0.01)
+
+
+def test_teacher_validates_homeostasis_and_reports_it():
+    grid = main(columns=8, rows=4, seed=1)
+    with pytest.raises(ValueError):
+        Teacher(grid, homeostasis=-0.1)
+    with pytest.raises(ValueError):
+        Teacher(grid, target_rate=1.5)
+    teacher = Teacher(grid, homeostasis=0.01, target_rate=0.4, seed=1)
+    teacher.step()
+    assert "homeostasis 0.01 toward 0.4 in [-5, 5]" in teacher.status() and "stuck" in teacher.status()
+    default = Teacher(grid, seed=1)
+    default.step()
+    assert "homeostasis 1e-06 toward 0.4" in default.status() and "sigma 0.1" in default.status()
+    assert default.homeostasis == 1e-6 and default.target_rate == 0.4
+    off = Teacher(grid, seed=1, homeostasis=0)
+    off.step()
+    assert "homeostasis" not in off.status()
+
+
+def test_threshold_range_is_configurable_and_validated():
+    from walnutbutter.learning import homeostasis
+    grid = GridOfNeurons(columns=4, rows=3, omega=0)
+    hot = grid.get_neuron_at(0, 0)
+    hot.rate = 1.0
+    for _ in range(200):
+        homeostasis(grid, rate=1.0, threshold_range=(0.0, 1.5))
+    assert hot.threshold == 1.5
+    teacher = Teacher(grid, threshold_range=(0, 2), seed=1)
+    assert teacher.threshold_range == (0.0, 2.0) and "in [0, 2]" in teacher.status() or teacher.average is None
+    with pytest.raises(ValueError):
+        Teacher(grid, threshold_range=(3, 1))
+
+
+def test_discharge_is_the_default_and_carry_over_is_available():
+    grid = main(columns=8, rows=4, seed=1)
+    default = Teacher(grid, seed=1)
+    assert default.carry_over is False
+    default.step()
+    assert "carry-over" not in default.status()
+    carrying = Teacher(grid, seed=1, carry_over=True)
+    carrying.step()
+    assert "carry-over" in carrying.status()

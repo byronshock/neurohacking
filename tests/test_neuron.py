@@ -1,5 +1,6 @@
-from neurohacking.neuron import Neuron
-from neurohacking.propagation import propagate
+import pytest
+from walnutbutter.neuron import Neuron
+from walnutbutter.propagation import propagate
 
 
 def test_connect_is_one_way_and_recorded_on_both_ends():
@@ -83,3 +84,70 @@ def test_verbose_false_silences_firing(capsys, monkeypatch):
     a = Neuron("a")
     a.fire()
     assert a.has_fired and capsys.readouterr().out == ""
+
+
+# --- reset keeps sub-threshold charge -------------------------------------------
+
+
+def test_reset_discharges_only_neurons_that_fired():
+    fired, quiet = Neuron("f"), Neuron("q")
+    fired.receive(0.3)
+    fired.fire()
+    quiet.receive(0.1)
+    fired.reset(discharge=False)
+    quiet.reset(discharge=False)
+    assert fired.potential == 0.0 and not fired.has_fired
+    assert quiet.potential == 0.1 and not quiet.has_fired  # carried over
+
+
+def test_reset_discharges_by_default():
+    quiet = Neuron("q")
+    quiet.receive(0.1)
+    quiet.reset()
+    assert quiet.potential == 0.0
+
+
+def test_charge_accumulates_across_epochs_until_the_neuron_fires(capsys):
+    a, b = Neuron("a"), Neuron("b", threshold=0.25)
+    a.connect(b, weight=0.1)
+    fired_on = None
+    for epoch in range(1, 6):
+        a.reset(discharge=False)
+        b.reset(discharge=False)
+        propagate(fire=[a])
+        if b.has_fired:
+            fired_on = epoch
+            break
+    assert fired_on == 3  # 0.1 + 0.1 + 0.1 reaches 0.25 on the third epoch
+    b.reset(discharge=False)
+    assert b.potential == 0.0  # and it discharged because it fired
+
+
+
+# --- minimum potential -------------------------------------------------------------
+
+
+def test_inhibition_cannot_push_potential_below_the_minimum():
+    a = Neuron("a", minimum_potential=-1.0)
+    a.receive(-0.7)
+    a.receive(-0.7)
+    assert a.potential == -1.0
+    a.receive(0.5)
+    assert a.potential == pytest.approx(-0.5)  # recovery starts from the floor, not from -1.4
+
+
+def test_minimum_potential_defaults_to_minus_one_and_is_configurable():
+    assert Neuron("a").minimum_potential == -1.0
+    b = Neuron("b", minimum_potential=-0.2)
+    b.receive(-5.0)
+    assert b.potential == -0.2
+
+
+def test_carried_charge_respects_the_floor_across_epochs(capsys):
+    a, b = Neuron("a"), Neuron("b", minimum_potential=-0.5)
+    a.connect(b, weight=-0.4)
+    for _ in range(5):
+        a.reset(discharge=False)
+        b.reset(discharge=False)
+        propagate(fire=[a])
+    assert b.potential == -0.5

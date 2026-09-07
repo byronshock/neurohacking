@@ -3,11 +3,11 @@ import math
 import pygame
 import pytest
 
-from neurohacking import main
-from neurohacking.cli import cli_main
-from neurohacking.grid import DIRECTIONS, GridOfNeurons
-from neurohacking.neuron import Neuron
-from neurohacking import visualizer as viz
+from walnutbutter import main
+from walnutbutter.cli import cli_main
+from walnutbutter.grid import DIRECTIONS, GridOfNeurons
+from walnutbutter.neuron import Neuron
+from walnutbutter import visualizer as viz
 
 
 def test_origin_maps_to_zero():
@@ -136,7 +136,7 @@ def test_quit_keys_and_window_close_stop_the_loop():
 
 def test_caption_reports_state(capsys):
     grid = GridOfNeurons(columns=4, rows=3, weight=1.0, omega=0)
-    assert viz.caption(grid).startswith("neurohacking 4x3: unfired")
+    assert viz.caption(grid).startswith("walnutbutter 4x3: unfired")
     grid.set_input_bits([True, False])
     grid.fire_input()
     text = viz.caption(grid)
@@ -238,7 +238,7 @@ def test_cli_defaults_to_a_free_running_learning_window(monkeypatch, capsys):
 
 
 def test_window_teaches_after_each_epoch_and_shows_accuracy(monkeypatch, capsys):
-    from neurohacking.learning import Teacher
+    from walnutbutter.learning import Teacher
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     grid = main(columns=8, rows=4, weight=None, seed=1)
     teacher = Teacher(grid, target="all-off", lr=0.01, seed=1)
@@ -261,7 +261,7 @@ def test_format_elapsed():
 
 
 def test_free_run_logs_progress_with_accuracy_to_date(monkeypatch, capsys):
-    from neurohacking.learning import Teacher
+    from walnutbutter.learning import Teacher
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     grid = main(columns=8, rows=4, weight=None, seed=1)
     teacher = Teacher(grid, target="all-off", seed=1)
@@ -275,7 +275,7 @@ def test_free_run_logs_progress_with_accuracy_to_date(monkeypatch, capsys):
 
 
 def test_free_run_calls_on_report_after_each_report(monkeypatch, capsys):
-    from neurohacking.learning import Teacher
+    from walnutbutter.learning import Teacher
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     grid = main(columns=8, rows=4, weight=None, seed=1)
     teacher = Teacher(grid, seed=1)
