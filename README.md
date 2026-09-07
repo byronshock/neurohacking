@@ -51,7 +51,7 @@ mesh and presents the next input.
 walnutbutter                              # the default: free-running window with learning
 walnutbutter --window 1200 800            # a bigger window
 walnutbutter --report 30                  # a progress line every 30 s instead of every second
-walnutbutter --save-weights run1.json     # checkpoint the learned weights at every report and on exit
+walnutbutter --save-weights run1.json     # choose the checkpoint file (default: runs/<date>-<time>-seed<seed>.json)
 walnutbutter --load-weights run1.json     # continue from a checkpoint (same mesh, seed and permutation)
 walnutbutter --step                       # one epoch per Space press
 walnutbutter --columns 24 --rows 20 --headless --save grid.png
@@ -236,8 +236,10 @@ and weights stay within [-1, 1]. `Teacher` wraps all this; use
 `teacher.epoch()` instead of `run_epoch(grid)` so the exploration noise is
 injected.
 
-**Saving what it learned.** `--save-weights FILE` writes a JSON checkpoint
-at every progress report and on exit: every weight by connection ID, plus
+**Saving what it learned.** Every run writes a JSON checkpoint at every
+progress report and on exit, by default to `runs/<date>-<time>-seed<seed>.json`
+(the path is printed at the start; `runs/` is ignored by git). `--save-weights FILE`
+chooses the file, `--no-save` skips it. A checkpoint holds: every weight by connection ID, plus
 the mesh size, omega, threshold, seed, input permutation, epoch count and
 the learning statistics. `--load-weights FILE` rebuilds that exact mesh from
 the stored seed and settings, restores the weights, and carries on counting

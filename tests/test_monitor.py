@@ -332,3 +332,35 @@ def test_headless_run_records_history_and_default_report_is_one_second(tmp_path,
     assert cli_main(args) == 0
     history = read_checkpoint(path)["learning"]["history"]
     assert len(history) == 10 and history[-1]["epoch"] == 50 and history[0]["epoch"] == 5
+
+
+def test_checkpoints_are_written_by_default_to_a_timestamped_file(tmp_path, capsys):
+    from pathlib import Path
+    from walnutbutter.persistence import read_checkpoint
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "7", "-q", "--epochs", "20"]) == 0
+    err = capsys.readouterr().err
+    files = list(Path("runs").glob("*-seed7.json"))
+    assert len(files) == 1 and f"checkpointing to {files[0]}" in err and f"saved weights to {files[0]}" in err
+    data = read_checkpoint(files[0])
+    assert data["epoch"] == 20 and data["seed"] == 7 and len(data["learning"]["history"]) > 0
+
+
+def test_no_save_writes_nothing_and_explicit_path_wins(tmp_path, capsys):
+    from pathlib import Path
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "7", "-q", "--epochs", "5", "--no-save"]) == 0
+    assert not Path("runs").exists() and "checkpointing" not in capsys.readouterr().err
+    explicit = tmp_path / "mine.json"
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "7", "-q", "--epochs", "5",
+                     "--save-weights", str(explicit)]) == 0
+    assert explicit.exists() and not Path("runs").exists()
+
+
+def test_resumed_run_gets_its_own_file(tmp_path, capsys):
+    from pathlib import Path
+    first = tmp_path / "first.json"
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "7", "-q", "--epochs", "5",
+                     "--save-weights", str(first)]) == 0
+    before = first.read_text()
+    assert cli_main(["--headless", "-q", "--epochs", "5", "--load-weights", str(first)]) == 0
+    assert first.read_text() == before  # the loaded file is untouched
+    assert len(list(Path("runs").glob("*-seed7.json"))) == 1

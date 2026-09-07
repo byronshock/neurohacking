@@ -6,6 +6,8 @@ import argparse
 import random
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
 from .cartesian import CartesianNodes
 from .inputs import parse_bits
@@ -213,7 +215,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--save-weights",
         metavar="FILE",
-        help="write a checkpoint of the learned weights here at every progress report and on exit",
+        help="checkpoint file, written at every progress report and on exit "
+        "(default: runs/<date>-<time>-seed<seed>.json)",
+    )
+    parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help="do not write a checkpoint",
     )
     parser.add_argument(
         "--load-weights",
@@ -277,6 +285,12 @@ def _run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
         seed = args.seed if args.seed is not None else random.randrange(2**31)
+        if args.save_weights is None and not args.no_save:
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            args.save_weights = str(Path("runs") / f"{stamp}-seed{seed}.json")
+        if args.save_weights:
+            Path(args.save_weights).parent.mkdir(parents=True, exist_ok=True)
+            print(f"checkpointing to {args.save_weights}", file=sys.stderr)
         settings = dict(
             columns=args.columns,
             rows=args.rows,
