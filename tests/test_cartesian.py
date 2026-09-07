@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from walnutbutter.cartesian import CartesianNodes
+from walnutbutter.cartesian import CartesianNodes, connection_probability, gaussian_density
 from walnutbutter.neuron import Neuron
 from walnutbutter.propagation import propagate
 
@@ -153,6 +153,7 @@ def test_cli_nodes_headless_lists_positions(capsys):
     captured = capsys.readouterr()
     assert captured.out.count("Node_") == 5
     assert "5 neurons at random in a 8 x 10 unit region" in captured.err and "seed 1" in captured.err
+    assert "wired by distance" in captured.err
 
 
 def test_cli_bare_nodes_is_a_lattice_sized_by_columns_and_rows(capsys):
@@ -216,3 +217,91 @@ def test_show_nodes_returns_on_quit(monkeypatch):
     nodes = CartesianNodes(columns=4, rows=3)
     monkeypatch.setattr(pygame.event, "get", lambda: [pygame.event.Event(pygame.QUIT)])
     viz.show_nodes(nodes, 200, 150)
+
+
+
+# --- wiring by distance -------------------------------------------------------
+
+
+def test_connection_probability_follows_the_standard_gaussian():
+    assert gaussian_density(0.0) == pytest.approx(1 / (2 * math.pi))
+    assert connection_probability(0.0) == 0.0  # the same position: never
+    assert connection_probability(1e-6) == pytest.approx(1.0)  # but arbitrarily close: almost certain
+    assert connection_probability(1.0) == pytest.approx(math.exp(-0.5))  # 0.607
+    assert connection_probability(2.0) == pytest.approx(math.exp(-2.0))  # 0.135
+    assert connection_probability(3.0) == pytest.approx(math.exp(-4.5))  # 0.011
+    assert connection_probability(1.0, scale=0.5) == pytest.approx(0.5 * math.exp(-0.5))
+    assert connection_probability(0.01, scale=3.0) == 1.0  # never above one
+    assert connection_probability(0.0, scale=3.0) == 0.0  # zero distance stays zero whatever the scale
+    assert connection_probability(50.0) == 0.0  # the density has underflowed: exactly zero, never connected
+
+
+def test_neurons_at_the_same_position_never_connect():
+    nodes = CartesianNodes(layout="random", count=0, seed=1)
+    twins = [nodes.add(0.0, 0.0) for _ in range(6)]  # six neurons on one point
+    apart = nodes.add(0.5, 0.0)
+    for _ in range(50):
+        nodes.connect_by_distance()
+    assert all(c.target is apart or c.source is apart for c in nodes.connections.values())
+    assert not any(c.source in twins and c.target in twins for c in nodes.connections.values())
+    assert any(c.source is apart for c in nodes.connections.values())  # the offset neuron connects freely
+
+
+def test_connect_by_distance_makes_independent_one_way_connections():
+    nodes = CartesianNodes(seed=1)
+    made = nodes.connect_by_distance()
+    assert made == len(nodes.connections) > 0
+    assert sorted(nodes.connections) == list(range(1, made + 1))
+    assert all(c.source is not c.target for c in nodes.connections.values())
+    assert all(c.weight == 1.0 for c in nodes.connections.values())
+    forward = {(c.source, c.target) for c in nodes.connections.values()}
+    assert len(forward) == made  # each ordered pair at most once
+    one_way = sum(1 for (a, b) in forward if (b, a) not in forward)
+    assert one_way > 0  # the reverse direction is a separate draw, so some pairs go one way only
+
+
+def test_connect_by_distance_degree_matches_the_gaussian_on_the_lattice():
+    nodes = CartesianNodes(columns=20, rows=20, seed=2)  # a big lattice so the interior dominates
+    nodes.connect_by_distance()
+    interior = [nodes.node_at(c, r) for r in range(5, 15) for c in range(5, 15)]
+    degree = sum(len(n.outgoing) for n in interior) / len(interior)
+    # expected out-degree: sum of exp(-d^2/2) over every other lattice point
+    centre = nodes.node_at(10, 10)
+    expected = sum(connection_probability(CartesianNodes.distance(centre, n)) for n in nodes if n is not centre)
+    assert degree == pytest.approx(expected, rel=0.1)
+    assert 5 < expected < 8  # about the size of a hex neighbourhood, spread over the first rings
+    near = [c for c in nodes.connections.values() if CartesianNodes.distance(c.source, c.target) < 1.01]
+    far = [c for c in nodes.connections.values() if CartesianNodes.distance(c.source, c.target) > 2.9]
+    assert len(near) > 10 * len(far)  # near neighbours dominate, distant ones are rare but present
+
+
+def test_connect_by_distance_is_seeded_and_scalable():
+    a, b = CartesianNodes(seed=5), CartesianNodes(seed=5)
+    a.connect_by_distance(); b.connect_by_distance()
+    assert [(c.source.name, c.target.name) for c in a.connections.values()] == [
+        (c.source.name, c.target.name) for c in b.connections.values()
+    ]
+    sparse = CartesianNodes(seed=5)
+    assert sparse.connect_by_distance(scale=0.25) < len(a.connections) / 2
+    assert CartesianNodes(seed=5).connect_by_distance(scale=0.0) == 0
+    with pytest.raises(ValueError):
+        CartesianNodes(seed=5).connect_by_distance(scale=-1)
+
+
+def test_connect_by_distance_random_weights_and_propagation():
+    nodes = CartesianNodes(seed=3)
+    nodes.connect_by_distance(weight=None)
+    weights = [c.weight for c in nodes.connections.values()]
+    assert min(weights) < 0 < max(weights) and all(-1 <= w <= 1 for w in weights)
+    fixed = CartesianNodes(seed=3)
+    fixed.connect_by_distance(weight=1.0)
+    propagate(fire=[fixed.node_at(4, 5)])
+    assert len(fixed.fired_neurons()) == len(fixed)  # weight 1 everywhere: the whole lattice lights up
+    assert fixed.mean_out_degree() == pytest.approx(len(fixed.connections) / len(fixed))
+
+
+def test_cli_nodes_reports_the_distance_wiring(capsys):
+    from walnutbutter.cli import cli_main
+    assert cli_main(["--headless", "--nodes", "--seed", "1", "--columns", "6", "--rows", "4"]) == 0
+    err = capsys.readouterr().err
+    assert "wired by distance:" in err and "outgoing per neuron" in err

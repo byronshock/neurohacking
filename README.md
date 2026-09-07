@@ -214,21 +214,34 @@ each neuron's six nearest neighbours are exactly one unit away;
 neurons are scattered uniformly over a `width` x `height` unit region
 instead, and `add(x, y)` places a neuron anywhere by hand. The container
 makes no connections; `neighbours(neuron, radius=1.0)`, `within` and
-`nearest` are there to decide them by distance. Propagation and the
-neurons themselves work exactly as in the grid.
+`nearest` are there to inspect distances. Propagation and the neurons
+themselves work exactly as in the grid.
 
-`walnutbutter --nodes` builds the `--columns` x `--rows` lattice and shows
-it; `--nodes N` scatters N neurons at random in a `--columns` x `--rows`
-unit region (`--headless` lists positions, `--save` writes a picture).
-Nothing is wired or learned for nodes yet.
+**Wiring by distance.** `connect_by_distance()` considers every ordered pair
+of distinct neurons once and connects A to B with probability proportional to
+the standard 2D Gaussian density at their separation wherever that separation
+is nonzero, scaled so the probability approaches 1 as the separation
+approaches zero: neighbours one unit apart connect with probability 0.61, two
+units 0.135, three units 0.011. Two neurons at exactly the same position have
+probability zero and never project onto each other. The reverse direction is
+an independent draw, so connections are genuinely one-way. `scale` multiplies the
+probabilities for sparser wiring; `weight` is given to every connection, or
+None draws each from `weight_range`. On the default lattice an interior neuron
+ends up with about six outgoing connections, spread over the first few rings.
+Connections are registered by ID in `nodes.connections`, as in the grid.
+
+`walnutbutter --nodes` builds the `--columns` x `--rows` lattice, wires it by
+distance and shows it; `--nodes N` scatters N neurons at random in a
+`--columns` x `--rows` unit region instead (`--headless` lists positions,
+`--save` writes a picture). Input and learning are not defined for nodes yet.
 
 ```python
 from walnutbutter.cartesian import CartesianNodes
 
-lattice = CartesianNodes()                     # 8 x 10 hexagonal lattice, unit spacing
+lattice = CartesianNodes(seed=1)               # 8 x 10 hexagonal lattice, unit spacing
+lattice.connect_by_distance(weight=None)       # Gaussian-by-distance wiring, random weights
 centre = lattice.node_at(4, 5)
-for other in lattice.neighbours(centre):       # its six neighbours, one unit away
-    centre.connect(other, weight=0.5)
+len(centre.outgoing), len(lattice.neighbours(centre))   # about 6 connections; 6 neighbours within a unit
 
 scatter = CartesianNodes(layout="random", count=64, seed=1)   # random alternative
 ```

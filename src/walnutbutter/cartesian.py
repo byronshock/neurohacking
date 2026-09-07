@@ -21,11 +21,31 @@ import math
 import random
 from typing import Iterator
 
+from .connection import Connection
 from .neuron import Neuron
 
 
 ROW_SPACING = math.sqrt(3) / 2  # distance between rows of a unit-spaced hexagonal lattice
 TOLERANCE = 1e-9  # lattice distances are 1 only up to rounding
+
+
+def gaussian_density(distance: float) -> float:
+    """The standard 2D Gaussian probability density at `distance` from the origin."""
+    return math.exp(-0.5 * distance * distance) / (2.0 * math.pi)
+
+
+def connection_probability(distance: float, scale: float = 1.0) -> float:
+    """Probability of a forward connection between two neurons `distance` units apart.
+
+    Proportional to the standard 2D Gaussian density at that distance wherever
+    the distance is nonzero, scaled so the probability approaches `scale`
+    (default 1) as the distance approaches zero: one unit apart gives 0.61, two
+    units 0.135, three units 0.011. Two neurons at the same position have
+    probability exactly zero: they never project onto each other. Never above 1.
+    """
+    if distance <= TOLERANCE:
+        return 0.0
+    return min(1.0, scale * gaussian_density(distance) / gaussian_density(0.0))
 
 
 class CartesianNodes:
@@ -53,6 +73,7 @@ class CartesianNodes:
         self.minimum_potential = minimum_potential
         self._rng = random.Random(seed)
         self.neurons: list[Neuron] = []
+        self.connections: dict[int, Connection] = {}  # by ID from 1, like the grid
         self._lattice: dict[tuple[int, int], Neuron] = {}
         if layout == "hex":
             if columns < 1 or rows < 1:
@@ -151,6 +172,46 @@ class CartesianNodes:
     def neighbours(self, neuron: Neuron, radius: float = 1.0) -> list[Neuron]:
         """Every other neuron within `radius` unit distances of `neuron`, nearest first."""
         return self.within(*neuron.position, radius=radius, exclude=neuron)
+
+    # --- wiring by distance -------------------------------------------------
+
+    def connect_by_distance(
+        self,
+        scale: float = 1.0,
+        weight: float | None = 1.0,
+        weight_range: tuple[float, float] = (-1.0, 1.0),
+    ) -> int:
+        """Wire the population: A -> B with probability connection_probability(|AB|), each direction drawn independently.
+
+        Every ordered pair of distinct neurons is considered once. A pair whose
+        probability is zero (the same position, or a separation so large the
+        density has underflowed) is never connected.
+        `weight` is given to every new connection; None draws each uniformly
+        from `weight_range`. Draws come from the container's seeded stream.
+        Returns the number of connections made.
+        """
+        if scale < 0:
+            raise ValueError(f"scale must not be negative, got {scale}")
+        low, high = weight_range
+        made = 0
+        for source in self.neurons:
+            for target in self.neurons:
+                if target is source:
+                    continue
+                p = connection_probability(math.dist(source.position, target.position), scale)
+                if p == 0.0 or self._rng.random() >= p:
+                    continue
+                w = self._rng.uniform(low, high) if weight is None else weight
+                connection_id = len(self.connections) + 1
+                self.connections[connection_id] = source.connect(target, connection_id, w)
+                made += 1
+        return made
+
+    def get_connection(self, connection_id: int) -> Connection | None:
+        return self.connections.get(connection_id)
+
+    def mean_out_degree(self) -> float:
+        return sum(len(n.outgoing) for n in self.neurons) / len(self.neurons) if self.neurons else 0.0
 
     # --- state ------------------------------------------------------------
 

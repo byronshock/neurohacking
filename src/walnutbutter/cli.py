@@ -414,17 +414,19 @@ def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
     seed = args.seed if args.seed is not None else random.randrange(2**31)
     common = dict(columns=args.columns, rows=args.rows, seed=seed, threshold=args.threshold,
                   minimum_potential=args.minimum_potential)
+    print(f"seed {seed}", file=sys.stderr)
     if args.nodes == 0:
         nodes = CartesianNodes(layout="hex", **common)
-        print(f"{nodes!r}; connections, input and learning are not defined for nodes yet", file=sys.stderr)
+        print(f"{nodes!r}", file=sys.stderr)
     else:
         nodes = CartesianNodes(layout="random", count=args.nodes, **common)
-        print(f"seed {seed}", file=sys.stderr)
-        print(
-            f"{nodes!r} ({len(nodes) / (nodes.width * nodes.height):.2f} per unit area); "
-            "connections, input and learning are not defined for nodes yet",
-            file=sys.stderr,
-        )
+        print(f"{nodes!r} ({len(nodes) / (nodes.width * nodes.height):.2f} per unit area)", file=sys.stderr)
+    made = nodes.connect_by_distance(weight=args.weight)
+    print(
+        f"wired by distance: {made} one-way connections, {nodes.mean_out_degree():.1f} outgoing per neuron "
+        f"(probability exp(-d^2/2): 0.61 at one unit, 0.14 at two); input and learning are not defined for nodes yet",
+        file=sys.stderr,
+    )
     if args.save or args.show:
         try:
             from . import visualizer
