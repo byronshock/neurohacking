@@ -184,6 +184,7 @@ class Teacher:
         homeostasis: float = 1e-5,
         target_rate: float = 0.4,
         threshold_range: tuple[float, float] = THRESHOLD_RANGE,
+        carry_over: bool = False,
     ):
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")
@@ -199,6 +200,7 @@ class Teacher:
         self.homeostasis = homeostasis
         self.target_rate = target_rate
         self.threshold_range = (float(low), float(high))
+        self.carry_over = carry_over  # unfired neurons keep their potential between epochs
         self.grid = grid
         self.target = target
         self.lr = lr
@@ -215,7 +217,7 @@ class Teacher:
 
     def epoch(self, bits: Sequence[bool] | None = None, verbose: bool = True) -> float:
         """Run one epoch with exploration noise, then learn from it. Returns its reward."""
-        run_epoch(self.grid, bits, verbose=verbose, noise=self.sigma, rng=self.rng)
+        run_epoch(self.grid, bits, verbose=verbose, noise=self.sigma, rng=self.rng, discharge=not self.carry_over)
         return self.step()
 
     def step(self) -> float:
@@ -256,6 +258,8 @@ class Teacher:
         if self.homeostasis:
             low, high = self.threshold_range
             settings += f", homeostasis {self.homeostasis:g} toward {self.target_rate:g} in [{low:g}, {high:g}]"
+        if self.carry_over:
+            settings += ", carry-over"
         return (
             f"learning {self.target} ({settings}): "
             f"accuracy {self.accuracy_to_date:.1%} to date over {self.epochs:,} epochs, "

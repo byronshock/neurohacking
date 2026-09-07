@@ -1,8 +1,8 @@
 import pytest
 
-from neurohacking.grid import GridOfNeurons
-from neurohacking.neuron import Neuron
-from neurohacking.propagation import Signal, Wave, propagate
+from walnutbutter.grid import GridOfNeurons
+from walnutbutter.neuron import Neuron
+from walnutbutter.propagation import Signal, Wave, propagate
 
 
 def chain(n, weight=1.0, threshold=1.0):

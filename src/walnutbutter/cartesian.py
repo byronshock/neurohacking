@@ -29,6 +29,7 @@ class CartesianNodes:
         bounds: Bounds = UNIT_SQUARE,
         seed: int | None = None,
         threshold: float = 0.25,
+        minimum_potential: float = -1.0,
     ):
         (x_min, x_max), (y_min, y_max) = bounds
         if not (x_min < x_max and y_min < y_max):
@@ -38,6 +39,7 @@ class CartesianNodes:
         self.bounds: Bounds = ((float(x_min), float(x_max)), (float(y_min), float(y_max)))
         self.seed = seed
         self.threshold = threshold
+        self.minimum_potential = minimum_potential
         self._rng = random.Random(seed)
         self.neurons: list[Neuron] = []
         for _ in range(count):
@@ -61,6 +63,7 @@ class CartesianNodes:
         neuron = Neuron(
             name if name is not None else f"Node_{len(self.neurons)}",
             threshold=self.threshold if threshold is None else threshold,
+            minimum_potential=self.minimum_potential,
         )
         neuron.position = (x, y)
         self.neurons.append(neuron)
@@ -92,9 +95,9 @@ class CartesianNodes:
 
     # --- state ------------------------------------------------------------
 
-    def reset(self) -> None:
+    def reset(self, discharge: bool = True) -> None:
         for neuron in self.neurons:
-            neuron.reset()
+            neuron.reset(discharge)
 
     def fired_neurons(self) -> list[Neuron]:
         return [n for n in self.neurons if n.has_fired]

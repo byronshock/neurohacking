@@ -1,7 +1,7 @@
 import pytest
 
-from neurohacking.connection import Connection
-from neurohacking.neuron import Neuron
+from walnutbutter.connection import Connection
+from walnutbutter.neuron import Neuron
 
 
 def test_connection_has_direction_weight_and_state():

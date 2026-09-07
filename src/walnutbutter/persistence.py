@@ -25,6 +25,7 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         "rows": grid.rows,
         "omega": grid.omega,
         "threshold": grid.threshold,
+        "minimum_potential": grid.minimum_potential,
         "seed": grid.seed,
         "random_weights": grid.weight is None,
         "weight": grid.weight,
@@ -82,6 +83,7 @@ def restore(path: str | Path) -> tuple[GridOfNeurons, dict]:
         omega=data["omega"],
         permute=False,
         weight_range=tuple(data.get("weight_range", (-1.0, 1.0))),
+        minimum_potential=data.get("minimum_potential", float("-inf")),  # older checkpoints had no floor
     )
     grid.permutation = list(data["permutation"])
     load_weights(grid, data)

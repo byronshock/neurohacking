@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "neurohacking"
+name = "walnutbutter"
 version = "0.1.0"
 description = "Signal propagation through a hexagonal grid of neurons."
 requires-python = ">=3.12"
@@ -13,9 +13,9 @@ dependencies = []
 viz = ["pygame>=2.5"]
 dev = ["pytest>=8", "pygame>=2.5"]
 
-# This makes `neurohacking` a real command after `pip install -e .`
+# This makes `walnutbutter` a real command after `pip install -e .`
 [project.scripts]
-neurohacking = "neurohacking.cli:cli_main"
+walnutbutter = "walnutbutter.cli:cli_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -16,7 +16,7 @@ from .persistence import checkpoint, restore, resume_teacher
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="neurohacking",
+        prog="walnutbutter",
         description=(
             "A hexagonal mesh of neurons that learns to reproduce its input on its output row. "
             "By default it opens a window, free-runs, learns, and reports accuracy until you close it."
@@ -173,6 +173,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="limits homeostasis may move a threshold to (default: -5 5)",
     )
     parser.add_argument(
+        "--minimum-potential",
+        type=float,
+        default=-1.0,
+        help="floor on a neuron's potential: inhibition and carried-over charge can go no lower (default: -1)",
+    )
+    parser.add_argument(
+        "--carry-over",
+        action="store_true",
+        help="unfired neurons keep their potential from one epoch to the next (default: every potential is cleared)",
+    )
+    parser.add_argument(
         "--epochs",
         type=int,
         default=1,
@@ -241,6 +252,7 @@ def _run(args: argparse.Namespace) -> int:
             args.seed = data["seed"]
             args.columns, args.rows, args.omega = data["columns"], data["rows"], data["omega"]
             args.threshold = data["threshold"]
+            args.minimum_potential = data.get("minimum_potential", -1.0)
             args.weight = None if data["random_weights"] else data["weight"]
             low, high = data.get("weight_range", (-1.0, 1.0))
             args.positive_weights, args.epsilon = low > 0, low
@@ -259,7 +271,11 @@ def _run(args: argparse.Namespace) -> int:
             omega=args.omega,
             permute=not args.no_permute,
             weight_range=(args.epsilon, 1.0) if args.positive_weights else (-1.0, 1.0),
+            minimum_potential=args.minimum_potential,
         )
+        if args.minimum_potential >= args.threshold:
+            print(f"error: minimum potential ({args.minimum_potential}) must be below the threshold ({args.threshold})", file=sys.stderr)
+            return 2
         if args.positive_weights and not 0 < args.epsilon < 1:
             print(f"error: epsilon must be between 0 and 1, got {args.epsilon}", file=sys.stderr)
             return 2
@@ -289,6 +305,7 @@ def _run(args: argparse.Namespace) -> int:
                     homeostasis=args.homeostasis,
                     target_rate=args.target_rate,
                     threshold_range=tuple(args.threshold_range),
+                    carry_over=args.carry_over,
                 )
                 if loaded:
                     resume_teacher(teacher, data)
@@ -313,7 +330,7 @@ def _run(args: argparse.Namespace) -> int:
                             print(f"epoch {epoch}: {teacher.status()}", file=sys.stderr)
                             save_checkpoint()
                     else:
-                        run_epoch(grid)
+                        run_epoch(grid, discharge=not args.carry_over)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

@@ -167,7 +167,7 @@ def show_nodes(nodes: CartesianNodes, width: int = 800, height: int = 600, fps: 
         screen = pygame.display.set_mode((width, height))
         (x_min, x_max), (y_min, y_max) = nodes.bounds
         pygame.display.set_caption(
-            f"neurohacking: {len(nodes)} nodes in [{x_min:g}, {x_max:g}] x [{y_min:g}, {y_max:g}]   [Esc] quit"
+            f"walnutbutter: {len(nodes)} nodes in [{x_min:g}, {x_max:g}] x [{y_min:g}, {y_max:g}]   [Esc] quit"
         )
         draw_nodes(screen, nodes)
         pygame.display.flip()
@@ -206,7 +206,7 @@ def caption(grid: GridOfNeurons, teacher: Teacher | None = None) -> str:
     omega = f" omega {grid.omega:g}" if grid.omega else ""
     epoch = f" epoch {grid.epoch}:" if grid.epoch else ":"
     learning = f"   {teacher.status()}" if teacher else ""
-    return f"neurohacking {grid.columns}x{grid.rows}{omega}{epoch} {state}{learning}   [Space] new input  [Esc] quit"
+    return f"walnutbutter {grid.columns}x{grid.rows}{omega}{epoch} {state}{learning}   [Space] new input  [Esc] quit"
 
 
 def caption_fast(grid: GridOfNeurons, epochs_per_second: float, fps: int, teacher: Teacher | None = None) -> str:

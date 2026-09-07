@@ -1,6 +1,6 @@
 import pytest
 
-from neurohacking.grid import DIRECTIONS, DIRECTIONS2, GridOfNeurons, axial_to_offset, hex_distance, offset_to_axial
+from walnutbutter.grid import DIRECTIONS, DIRECTIONS2, GridOfNeurons, axial_to_offset, hex_distance, offset_to_axial
 
 
 @pytest.fixture
@@ -416,3 +416,11 @@ def test_randomize_weights_explicit_bounds_still_win():
 def test_invalid_weight_range_is_rejected():
     with pytest.raises(ValueError):
         GridOfNeurons(columns=4, rows=3, weight_range=(1.0, 0.0))
+
+
+
+def test_grid_gives_every_neuron_its_minimum_potential():
+    grid = GridOfNeurons(columns=4, rows=3, minimum_potential=-0.3)
+    assert grid.minimum_potential == -0.3
+    assert all(n.minimum_potential == -0.3 for n in grid.neurons.values())
+    assert all(n.minimum_potential == -1.0 for n in GridOfNeurons(columns=4, rows=3).neurons.values())

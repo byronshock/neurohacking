@@ -3,9 +3,9 @@ import statistics
 
 import pytest
 
-from neurohacking import learning
-from neurohacking.grid import GridOfNeurons
-from neurohacking.learning import (
+from walnutbutter import learning
+from walnutbutter.grid import GridOfNeurons
+from walnutbutter.learning import (
     Teacher,
     accuracy,
     delivered_connections,
@@ -14,8 +14,8 @@ from neurohacking.learning import (
     output_row,
     reinforce,
 )
-from neurohacking.monitor import main, run_epoch
-from neurohacking.neuron import Neuron
+from walnutbutter.monitor import main, run_epoch
+from walnutbutter.neuron import Neuron
 
 
 @pytest.fixture(autouse=True)
@@ -184,7 +184,7 @@ def test_reinforce_clips_to_the_grid_weight_range():
 
 
 def test_rates_track_firing_and_stuck_neurons_are_counted():
-    from neurohacking.learning import stuck_neurons, update_rates, RATE_MEMORY
+    from walnutbutter.learning import stuck_neurons, update_rates, RATE_MEMORY
     grid = GridOfNeurons(columns=4, rows=3, omega=0)
     always, never = grid.get_neuron_at(0, 0), grid.get_neuron_at(1, 0)
     for _ in range(600):
@@ -199,7 +199,7 @@ def test_rates_track_firing_and_stuck_neurons_are_counted():
 
 
 def test_homeostasis_moves_thresholds_toward_the_target_rate_and_stays_in_range():
-    from neurohacking.learning import THRESHOLD_RANGE, homeostasis
+    from walnutbutter.learning import THRESHOLD_RANGE, homeostasis
     grid = GridOfNeurons(columns=4, rows=3, omega=0)
     hot, cold = grid.get_neuron_at(0, 0), grid.get_neuron_at(1, 0)
     hot.rate, cold.rate = 1.0, 0.0
@@ -223,7 +223,7 @@ def test_homeostasis_moves_thresholds_toward_the_target_rate_and_stays_in_range(
 
 
 def test_teacher_homeostasis_reduces_stuck_neurons():
-    from neurohacking.learning import stuck_neurons
+    from walnutbutter.learning import stuck_neurons
     def run(homeostasis):
         grid = GridOfNeurons(columns=8, rows=6, weight=None, seed=1)
         teacher = Teacher(grid, seed=1, homeostasis=homeostasis, target_rate=0.5)
@@ -253,7 +253,7 @@ def test_teacher_validates_homeostasis_and_reports_it():
 
 
 def test_threshold_range_is_configurable_and_validated():
-    from neurohacking.learning import homeostasis
+    from walnutbutter.learning import homeostasis
     grid = GridOfNeurons(columns=4, rows=3, omega=0)
     hot = grid.get_neuron_at(0, 0)
     hot.rate = 1.0
@@ -264,3 +264,14 @@ def test_threshold_range_is_configurable_and_validated():
     assert teacher.threshold_range == (0.0, 2.0) and "in [0, 2]" in teacher.status() or teacher.average is None
     with pytest.raises(ValueError):
         Teacher(grid, threshold_range=(3, 1))
+
+
+def test_discharge_is_the_default_and_carry_over_is_available():
+    grid = main(columns=8, rows=4, seed=1)
+    default = Teacher(grid, seed=1)
+    assert default.carry_over is False
+    default.step()
+    assert "carry-over" not in default.status()
+    carrying = Teacher(grid, seed=1, carry_over=True)
+    carrying.step()
+    assert "carry-over" in carrying.status()
