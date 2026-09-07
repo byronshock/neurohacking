@@ -88,20 +88,30 @@ def neuron_colour(fired_in_wave: int | None, last_wave: int):
 # --- drawing ------------------------------------------------------------------
 
 
+DISC_FILL = 0.95  # a neuron's disc radius as a fraction of its cell's inscribed radius: a small gap between discs
+
+
 def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) -> None:
-    """Paint the whole grid onto `surface`, scaled to fit."""
+    """Paint the whole grid onto `surface`, scaled to fit.
+
+    Each neuron is a disc centred on its hexagonal cell. The disc radius is just
+    under the cell's inscribed radius (sqrt(3)/2 of the hex radius), so
+    neighbouring discs never touch or overlap.
+    """
     width, height = surface.get_size()
     hex_radius, offset_x, offset_y = layout(grid, width, height, margin)
 
     waves = [n.fired_in_wave for n in grid.neurons.values() if n.fired_in_wave is not None]
     last_wave = max(waves) if waves else 0
 
+    disc = hex_radius * SQRT3 / 2 * DISC_FILL
+    outline = max(1, round(hex_radius / 12))
     surface.fill(BACKGROUND)
     for (q, r), neuron in grid.neurons.items():
         dx, dy = axial_to_pixel(q, r, hex_radius)
-        points = hexagon_points(offset_x + dx, offset_y + dy, hex_radius)
-        pygame.draw.polygon(surface, neuron_colour(neuron.fired_in_wave, last_wave), points)
-        pygame.draw.polygon(surface, OUTLINE, points, width=max(1, round(hex_radius / 12)))
+        centre = (offset_x + dx, offset_y + dy)
+        pygame.draw.circle(surface, neuron_colour(neuron.fired_in_wave, last_wave), centre, disc)
+        pygame.draw.circle(surface, OUTLINE, centre, disc, width=outline)
 
     # Ring the stimulus: the neurons that fired in wave 0, or the input neurons
     # that will be forced when the mesh is fired, or failing both the origin.
@@ -110,8 +120,7 @@ def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) ->
         stimulus = [grid.get_origin_neuron()]
     for neuron in stimulus:
         dx, dy = axial_to_pixel(*neuron.position, hex_radius)
-        points = hexagon_points(offset_x + dx, offset_y + dy, hex_radius * 0.55)
-        pygame.draw.polygon(surface, ORIGIN_RING, points, width=max(1, round(hex_radius / 8)))
+        pygame.draw.circle(surface, ORIGIN_RING, (offset_x + dx, offset_y + dy), hex_radius * 0.55, width=max(1, round(hex_radius / 8)))
 
 
 # --- Cartesian populations ------------------------------------------------------

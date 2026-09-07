@@ -92,7 +92,7 @@ neuron (weights, shortcuts and thresholds are kept), draws a fresh random
 input, fires the bottom row and, unless `--no-learn`, teaches. The input
 neurons are ringed in white. Fired neurons are coloured, shading from
 yellow in wave 0 to orange in the last wave, unfired neurons are grey, and the
-neurons that were forced in wave 0 carry a white ring. Adding `--save PATH`
+neurons that were forced in wave 0 carry a white ring. Each neuron is drawn as a disc on its hexagonal cell, sized so neighbouring discs never touch. Adding `--save PATH`
 writes whatever state the mesh is in when the window closes.
 
 ```python

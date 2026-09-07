@@ -300,3 +300,20 @@ def test_free_run_records_history_before_each_checkpoint(monkeypatch, capsys):
     assert len(teacher.history) >= 2
     assert seen_at_checkpoint == list(range(1, len(teacher.history) + 1))  # each checkpoint saw the entry just added
     assert all(e["elapsed"] is not None and e["epochs_per_second"] is not None for e in teacher.history)
+
+
+def test_discs_do_not_overlap_and_leave_a_gap():
+    grid = GridOfNeurons(columns=6, rows=4, omega=0)
+    surface = pygame.Surface((400, 300))
+    viz.draw_grid(surface, grid)
+    radius, ox, oy = viz.layout(grid, 400, 300)
+    disc = radius * viz.SQRT3 / 2 * viz.DISC_FILL
+    spacing = radius * viz.SQRT3  # centre to centre for neighbours
+    assert 2 * disc < spacing  # two neighbouring discs never overlap
+    a = grid.get_neuron(0, 0)
+    b = grid.get_neuron(1, 0)
+    ax, ay = viz.axial_to_pixel(*a.position, radius)
+    bx, by = viz.axial_to_pixel(*b.position, radius)
+    midpoint = (round(ox + (ax + bx) / 2), round(oy + (ay + by) / 2))
+    assert surface.get_at(midpoint)[:3] == viz.BACKGROUND  # the gap between them shows the background
+    assert surface.get_at((round(ox + ax), round(oy + ay)))[:3] == viz.UNFIRED  # the disc itself is painted
