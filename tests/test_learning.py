@@ -189,13 +189,32 @@ def test_rates_track_firing_and_stuck_neurons_are_counted():
     always, never = grid.get_neuron_at(0, 0), grid.get_neuron_at(1, 0)
     for _ in range(600):
         grid.reset()
-        always.fire()
+        always.fire(wave=1)  # fired by the network, not forced
         update_rates(grid)
     assert always.rate > 0.99 and never.rate < 0.01
     on, off = stuck_neurons(grid)
     assert always in on and never in off
-    assert not any(n in on or n in off for n in grid.input_row())  # the input row is never counted
     assert abs((0.5 + RATE_MEMORY * 0.5) - 0.505) < 1e-12  # one step from the initial 0.5 toward 1
+
+
+def test_forced_neurons_are_left_out_of_rates_and_homeostasis_but_unforced_inputs_are_not():
+    from walnutbutter.learning import forced, homeostasis, update_rates
+    grid = GridOfNeurons(columns=4, rows=3, omega=0)
+    grid.set_input([True, False, True, False])
+    grid.fire_input()
+    row = grid.input_row()
+    forced_input, unforced_input = row[0], row[1]
+    assert forced(forced_input) and not forced(unforced_input)
+    rates_before = {n: n.rate for n in grid.neurons.values()}
+    update_rates(grid)
+    assert forced_input.rate == rates_before[forced_input]  # its firing was not the network's doing
+    assert unforced_input.rate != rates_before[unforced_input]  # an ordinary neuron: its rate moved
+    forced_input.rate, unforced_input.rate = 1.0, 1.0
+    thresholds = {n: n.threshold for n in grid.neurons.values()}
+    moved = homeostasis(grid, rate=0.1, target=0.5)
+    assert moved == len(grid.neurons) - len(grid.input_neurons())  # everyone except the two forced this epoch
+    assert forced_input.threshold == thresholds[forced_input]
+    assert unforced_input.threshold == pytest.approx(thresholds[unforced_input] + 0.05)
 
 
 def test_homeostasis_moves_thresholds_toward_the_target_rate_and_stays_in_range():
@@ -204,7 +223,7 @@ def test_homeostasis_moves_thresholds_toward_the_target_rate_and_stays_in_range(
     hot, cold = grid.get_neuron_at(0, 0), grid.get_neuron_at(1, 0)
     hot.rate, cold.rate = 1.0, 0.0
     before = {n: n.threshold for n in grid.neurons.values()}
-    assert homeostasis(grid, rate=0.1, target=0.5) == 8  # 12 neurons minus the 4 in the input row
+    assert homeostasis(grid, rate=0.1, target=0.5) == 12  # nothing has been forced: every neuron is eligible
     assert hot.threshold == pytest.approx(before[hot] + 0.05)
     assert cold.threshold == pytest.approx(before[cold] - 0.05)
     hot.threshold, cold.threshold = before[hot], before[cold]
@@ -215,7 +234,6 @@ def test_homeostasis_moves_thresholds_toward_the_target_rate_and_stays_in_range(
     homeostasis(grid, rate=0.1, target=0.5)
     assert hot.threshold == pytest.approx(before[hot] + 0.05)
     assert cold.threshold == pytest.approx(before[cold] - 0.05)
-    assert all(n.threshold == before[n] for n in grid.input_row())
     assert homeostasis(grid, rate=0.0) == 0
     for _ in range(500):
         homeostasis(grid, rate=1.0)

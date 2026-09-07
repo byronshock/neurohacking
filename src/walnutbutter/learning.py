@@ -29,9 +29,12 @@ weight_range, [-1, 1] by default.
 
 **Homeostasis.** A neuron whose input sits far from its threshold is never
 flipped by the exploration noise, gets no learning signal, and stays "stuck"
-on or off. Every neuron outside the input row therefore tracks its own
-firing rate and nudges its threshold toward a target rate each epoch:
-firing too often raises the threshold, too rarely lowers it. The default
+on or off. Every neuron therefore tracks its own firing rate and nudges its
+threshold toward a target rate each epoch: firing too often raises the
+threshold, too rarely lowers it. Neurons forced in wave 0 this epoch are
+left out of both, exactly as reinforcement leaves their incoming weights
+alone: their firing was not the network's doing. An unforced input neuron
+is an ordinary neuron and is treated as one. The default
 rate of 1e-6 toward a target of 0.4 is a very slow drift (a fully stuck
 neuron moves its threshold by about 0.0006 per thousand epochs, so the
 effect belongs to runs of millions of epochs); a rate of 0 switches it off. Thresholds may go negative, within `THRESHOLD_RANGE`.
@@ -87,32 +90,41 @@ def accuracy(grid: GridOfNeurons, target: str = "reversed") -> float:
     return sum(1 for e in errors.values() if e == 0) / len(errors)
 
 
+def forced(neuron: Neuron) -> bool:
+    """True if the neuron was forced to fire in wave 0 this epoch (an external stimulus)."""
+    return neuron.fired_in_wave == 0
+
+
 def update_rates(grid: GridOfNeurons) -> None:
-    """Move every neuron's running firing-rate estimate toward what it did this epoch."""
+    """Move every neuron's running firing-rate estimate toward what it did this epoch.
+
+    A neuron forced this epoch is skipped: that firing says nothing about the network.
+    """
     for neuron in grid.neurons.values():
-        neuron.rate += RATE_MEMORY * ((1.0 if neuron.has_fired else 0.0) - neuron.rate)
+        if not forced(neuron):
+            neuron.rate += RATE_MEMORY * ((1.0 if neuron.has_fired else 0.0) - neuron.rate)
 
 
 def stuck_neurons(grid: GridOfNeurons) -> tuple[list[Neuron], list[Neuron]]:
-    """Neurons outside the input row whose running rate is (almost) always on, and always off."""
-    inputs = set(grid.input_row())
-    candidates = [n for n in grid.neurons.values() if n not in inputs]
-    on = [n for n in candidates if n.rate > STUCK_ABOVE]
-    off = [n for n in candidates if n.rate < STUCK_BELOW]
+    """Neurons whose running rate is (almost) always on, and always off."""
+    on = [n for n in grid.neurons.values() if n.rate > STUCK_ABOVE]
+    off = [n for n in grid.neurons.values() if n.rate < STUCK_BELOW]
     return on, off
 
 
 def homeostasis(
     grid: GridOfNeurons, rate: float, target: float = 0.4, threshold_range: tuple[float, float] = THRESHOLD_RANGE
 ) -> int:
-    """Nudge each non-input neuron's threshold toward its target firing rate. Returns neurons moved."""
+    """Nudge each neuron's threshold toward its target firing rate, except those forced this epoch.
+
+    Returns the number of neurons moved.
+    """
     if rate <= 0:
         return 0
     low, high = threshold_range
-    inputs = set(grid.input_row())
     moved = 0
     for neuron in grid.neurons.values():
-        if neuron in inputs:
+        if forced(neuron):
             continue
         threshold = neuron.threshold + rate * (neuron.rate - target)
         neuron.threshold = max(low, min(high, threshold))
