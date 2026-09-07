@@ -198,36 +198,58 @@ class CartesianNodes(Network):
         scale: float = 1.0,
         weight: float | None = 1.0,
         weight_range: tuple[float, float] = (-1.0, 1.0),
+        neighbour_radius: float = 1.0,
+        epsilon: float = 1e-6,
     ) -> int:
-        """Wire the population: A -> B with probability connection_probability(|AB|, sigma), each direction drawn independently.
+        """Wire the population in two tiers. Returns the number of connections made.
 
-        Every ordered pair of distinct neurons is considered once. A pair whose
-        probability is zero (the same position, or a separation so large the
-        density has underflowed) is never connected. `sigma` is the standard
-        deviation of the Gaussian receptive field, in unit distances (default 1).
-        `weight` is given to every new connection; None draws each uniformly
-        from `weight_range`. Draws come from the container's seeded stream.
-        Returns the number of connections made.
+        1. Neighbours: every ordered pair within `neighbour_radius + epsilon`
+           units is connected, both directions, with certainty (kind "local").
+           At unit spacing that is a neuron's six hex neighbours, so "neighbour"
+           keeps meaning literally next to each other.
+        2. Gaussian: every other ordered pair connects with probability
+           connection_probability(distance, sigma, scale), each direction an
+           independent draw (kind "gaussian"). `sigma` is the receptive field's
+           standard deviation in unit distances.
+
+        There are no small-world shortcuts on the lattice: every connection is
+        either a neighbour or a Gaussian draw. A pair at the same position is
+        never connected. `weight` is given to every connection; None draws each
+        uniformly from `weight_range`. All draws come from the container's
+        seeded stream.
         """
         if scale < 0:
             raise ValueError(f"scale must not be negative, got {scale}")
         if sigma <= 0:
             raise ValueError(f"sigma must be positive, got {sigma}")
+        if neighbour_radius < 0 or epsilon < 0:
+            raise ValueError("neighbour radius and epsilon must not be negative")
         self.receptive_field_sigma = sigma
         low, high = weight_range
-        made = 0
+
+        def add(source: Neuron, target: Neuron, kind: str) -> None:
+            w = self._rng.uniform(low, high) if weight is None else weight
+            connection_id = len(self.connections) + 1
+            self.connections[connection_id] = source.connect(target, connection_id, w, kind=kind)
+
+        reach = neighbour_radius + epsilon
         for source in self.neurons:
             for target in self.neurons:
                 if target is source:
                     continue
-                p = connection_probability(math.dist(source.position, target.position), sigma, scale)
-                if p == 0.0 or self._rng.random() >= p:
+                distance = math.dist(source.position, target.position)
+                if distance <= TOLERANCE:
+                    continue  # the same position: never
+                if distance <= reach:
+                    add(source, target, "local")
                     continue
-                w = self._rng.uniform(low, high) if weight is None else weight
-                connection_id = len(self.connections) + 1
-                self.connections[connection_id] = source.connect(target, connection_id, w)
-                made += 1
-        return made
+                p = connection_probability(distance, sigma, scale)
+                if p > 0.0 and self._rng.random() < p:
+                    add(source, target, "gaussian")
+        return len(self.connections)
+
+    def connections_of_kind(self, kind: str) -> list[Connection]:
+        return [c for c in self.connections.values() if c.kind == kind]
 
     def get_connection(self, connection_id: int) -> Connection | None:
         return self.connections.get(connection_id)

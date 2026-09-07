@@ -217,33 +217,41 @@ makes no connections; `neighbours(neuron, radius=1.0)`, `within` and
 `nearest` are there to inspect distances. Propagation and the neurons
 themselves work exactly as in the grid.
 
-**Wiring by distance.** `connect_by_distance()` considers every ordered pair
-of distinct neurons once and connects A to B with probability proportional to
-a 2D Gaussian density at their separation wherever that separation is
-nonzero, scaled so the probability approaches 1 as the separation approaches
-zero: `exp(-d² / 2σ²)`, with `sigma` the standard deviation in unit distances
-(default 1, the standard normal; `--receptive-field-sigma` on the command line). At
-sigma 1, neighbours one unit apart connect with probability 0.61, two units
-0.135, three units 0.011; a larger sigma reaches further. Two neurons at exactly the same position have
-probability zero and never project onto each other. The reverse direction is
-an independent draw, so connections are genuinely one-way. `scale` multiplies the
-probabilities for sparser wiring; `weight` is given to every connection, or
-None draws each from `weight_range`. On the default lattice an interior neuron
-ends up with about six outgoing connections, spread over the first few rings.
+**Wiring.** `connect_by_distance()` wires the population in two tiers.
+Every ordered pair within one unit (plus a small `epsilon`) is connected with
+certainty, both directions, so a neuron's six hex neighbours are always its
+neighbours in the wiring too (`kind == "local"`). Every other pair connects
+with probability proportional to a 2D Gaussian density at its separation,
+`exp(-d² / 2σ²)` with `sigma` the receptive field's standard deviation in unit
+distances (default 1; `--receptive-field-sigma`), each direction an independent
+draw (`kind == "gaussian"`): at sigma 1 two units gives 0.135, three units
+0.011. There are no small-world shortcuts on the lattice. Two neurons at the
+same position are never connected. `weight` is given to every connection, or
+None draws each from `weight_range`.
 Connections are registered by ID in `nodes.connections`, as in the grid.
 
-`walnutbutter --nodes` builds the `--columns` x `--rows` lattice, wires it by
-distance and shows it; `--nodes N` scatters N neurons at random in a
-`--columns` x `--rows` unit region instead (`--headless` lists positions,
-`--save` writes a picture). Input and learning are not defined for nodes yet.
+`walnutbutter --nodes` builds the `--columns` x `--rows` lattice, wires it
+(`--receptive-field-sigma`), and then does everything the grid does: the
+bottom row is the input, the top row the output, it learns, reports,
+checkpoints to `runs/`, and shows in the window or runs headless with
+`--epochs`. Lattice checkpoints record the wiring itself and load back with
+`--load-weights`. `--nodes N` scatters N neurons at random in a `--columns` x
+`--rows` unit region instead; a scatter has no rows, so it is shown, not
+trained. A run is fully determined by its seed, so for example
+
+```bash
+walnutbutter --nodes --seed 3 --receptive-field-sigma 1.5 --headless --epochs 1000000 -q
+```
+
+reproduces a sweep result exactly and leaves its checkpoint in `runs/`.
 
 ```python
 from walnutbutter.cartesian import CartesianNodes
 
 lattice = CartesianNodes(seed=1)               # 8 x 10 hexagonal lattice, unit spacing
-lattice.connect_by_distance(sigma=1.0, weight=None)   # Gaussian-by-distance wiring, random weights
+lattice.connect_by_distance(sigma=1.0, weight=None)   # neighbours for certain, Gaussian beyond; random weights
 centre = lattice.node_at(4, 5)
-len(centre.outgoing), len(lattice.neighbours(centre))   # about 6 connections; 6 neighbours within a unit
+len(centre.outgoing), len(lattice.neighbours(centre))   # the 6 neighbours for certain, plus Gaussian links
 
 scatter = CartesianNodes(layout="random", count=64, seed=1)   # random alternative
 ```

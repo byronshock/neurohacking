@@ -13,6 +13,7 @@ from multiprocessing import Pool
 from pathlib import Path
 
 from .cartesian import CartesianNodes
+from .grid import GridOfNeurons
 from .inputs import parse_bits
 from .learning import ELIGIBILITIES, TARGETS, Teacher
 from .monitor import main, run_epoch
@@ -49,8 +50,9 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const=0,
         default=None,
-        help="Cartesian neurons instead of the hex grid: a --columns x --rows hexagonal lattice at unit "
-        "spacing, or with N, that many neurons at random in a --columns x --rows unit region (shown, not yet wired)",
+        help="Cartesian neurons instead of the hex grid: a --columns x --rows hexagonal lattice at unit spacing, "
+        "wired by distance (--receptive-field-sigma) and learning like the grid; or with N, that many neurons at "
+        "random in a --columns x --rows unit region, just shown",
     )
     parser.add_argument(
         "--receptive-field-sigma",
@@ -283,8 +285,11 @@ def _run(args: argparse.Namespace) -> int:
                 )
                 return 2
         width, height = args.window
-        if args.nodes is not None:
-            return _run_nodes(args, width, height)
+        if args.nodes is not None and args.nodes < 0:
+            print(f"error: --nodes cannot be negative, got {args.nodes}", file=sys.stderr)
+            return 2
+        if args.nodes is not None and args.nodes > 0:
+            return _run_nodes(args, width, height)  # a random scatter: shown, not learnable (no rows)
         if args.seeds is not None:
             return _run_seeds(args)
         loaded = None
@@ -297,6 +302,9 @@ def _run(args: argparse.Namespace) -> int:
             grid_from_file, data = loaded
             args.seed = data["seed"]
             args.columns, args.rows, args.omega = data["columns"], data["rows"], data["omega"]
+            if data.get("container") == "lattice":
+                args.nodes = 0
+                args.receptive_field_sigma = data.get("receptive_field_sigma") or args.receptive_field_sigma
             args.threshold = data["threshold"]
             args.minimum_potential = data.get("minimum_potential", -1.0)
             args.weight = None if data["random_weights"] else data["weight"]
@@ -340,9 +348,25 @@ def _run(args: argparse.Namespace) -> int:
             input_bits = parse_bits(args.input) if args.input is not None else None
             if loaded:
                 grid, data = loaded
-                run_epoch(grid, input_bits)  # first epoch on the restored weights
+            elif args.nodes is not None:
+                if args.receptive_field_sigma <= 0:
+                    print(f"error: --receptive-field-sigma must be positive, got {args.receptive_field_sigma}", file=sys.stderr)
+                    return 2
+                grid = CartesianNodes(
+                    columns=args.columns, rows=args.rows, seed=seed, threshold=args.threshold,
+                    minimum_potential=args.minimum_potential, permute=not args.no_permute,
+                    weight_range=settings["weight_range"],
+                )
+                grid.connect_by_distance(sigma=args.receptive_field_sigma, weight=args.weight)
             else:
-                grid = main(**settings, input_bits=input_bits)
+                grid = GridOfNeurons(**settings)
+            if isinstance(grid, CartesianNodes):
+                kinds = {k: len(grid.connections_of_kind(k)) for k in ("local", "gaussian")}
+                print(
+                    f"{grid!r}, wired: {len(grid.connections)} one-way connections = {kinds['local']} guaranteed neighbours "
+                    f"+ {kinds['gaussian']} Gaussian (receptive field sigma {grid.receptive_field_sigma:g})",
+                    file=sys.stderr,
+                )
             if not args.no_permute or loaded:
                 print(f"input permutation: bottom-row column i shows coded bit {grid.permutation}", file=sys.stderr)
             teacher = None
@@ -363,7 +387,9 @@ def _run(args: argparse.Namespace) -> int:
                 )
                 if loaded:
                     resume_teacher(teacher, data)
-                teacher.step()  # the first epoch ran without exploration; still score and learn from it
+                teacher.epoch(input_bits)  # the first epoch, with exploration, like every other
+            else:
+                run_epoch(grid, input_bits, discharge=not args.carry_over)
 
             def save_checkpoint():
                 if args.save_weights:
@@ -392,7 +418,7 @@ def _run(args: argparse.Namespace) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 2
 
-        if args.omega > 0:
+        if args.omega > 0 and not isinstance(grid, CartesianNodes):
             print(
                 f"omega {args.omega:g}: {len(grid.small_world_connections())} small-world "
                 f"connections among {len(grid.connections)}",
@@ -437,10 +463,12 @@ def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
         return 2
     made = nodes.connect_by_distance(sigma=args.receptive_field_sigma, weight=args.weight)
     s = args.receptive_field_sigma
+    kinds = {k: len(nodes.connections_of_kind(k)) for k in ("local", "gaussian")}
     print(
-        f"wired by distance: {made} one-way connections, {nodes.mean_out_degree():.1f} outgoing per neuron "
-        f"(receptive field sigma {s:g}: probability {math.exp(-0.5 / s**2):.2f} at one unit, {math.exp(-2.0 / s**2):.2f} at two); "
-        "input and learning are not defined for nodes yet",
+        f"wired: {made} one-way connections, {nodes.mean_out_degree():.1f} outgoing per neuron: "
+        f"{kinds['local']} guaranteed neighbours (within one unit), {kinds['gaussian']} Gaussian "
+        f"(receptive field sigma {s:g}: probability {math.exp(-2.0 / s**2):.2f} at two units); "
+        "no small-world shortcuts on the lattice; input and learning are not defined for nodes yet",
         file=sys.stderr,
     )
     if args.save or args.show:
@@ -465,12 +493,11 @@ def _seed_worker(job: dict) -> dict:
     """One seed's headless run, in its own process. Returns a summary row."""
     Neuron.verbose = False
     seed, epochs = job["seed"], job["epochs"]
-    grid = main(**job["settings"], seed=seed, input_bits=None)
+    grid = GridOfNeurons(**job["settings"], seed=seed)
     teacher = Teacher(grid, seed=seed, **job["teacher"])
-    teacher.step()
     report_every = max(1, epochs // 10)
     started = time.perf_counter()
-    rewards = []
+    rewards = [teacher.epoch(verbose=False)]
     for epoch in range(2, epochs + 1):
         rewards.append(teacher.epoch(verbose=False))
         if epoch % report_every == 0 or epoch == epochs:

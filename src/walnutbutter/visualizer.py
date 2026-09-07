@@ -199,10 +199,18 @@ def show_nodes(nodes: CartesianNodes, width: int = 800, height: int = 600, fps: 
 # --- the hex grid -----------------------------------------------------------------
 
 
-def save(grid: GridOfNeurons, path: str, width: int = 800, height: int = 600) -> None:
-    """Render the grid to an image file (PNG by extension). Needs no display."""
+def draw(surface: pygame.Surface, network, margin: int = 24) -> None:
+    """Paint whichever container this is: discs on hex cells for the grid, discs at positions for nodes."""
+    if isinstance(network, CartesianNodes):
+        draw_nodes(surface, network, margin)
+    else:
+        draw_grid(surface, network, margin)
+
+
+def save(grid, path: str, width: int = 800, height: int = 600) -> None:
+    """Render the network to an image file (PNG by extension). Needs no display."""
     surface = pygame.Surface((width, height))
-    draw_grid(surface, grid)
+    draw(surface, grid)
     pygame.image.save(surface, path)
 
 
@@ -215,7 +223,9 @@ def format_elapsed(seconds: float) -> str:
 def caption(grid: GridOfNeurons, teacher: Teacher | None = None) -> str:
     fired = len(grid.fired_neurons())
     state = f"{fired} of {len(grid.neurons)} fired in {len(grid.waves)} waves" if fired else "unfired"
-    omega = f" omega {grid.omega:g}" if grid.omega else ""
+    omega = f" omega {grid.omega:g}" if getattr(grid, "omega", 0) else ""
+    if isinstance(grid, CartesianNodes) and getattr(grid, "receptive_field_sigma", None) is not None:
+        omega = f" lattice, receptive field sigma {grid.receptive_field_sigma:g}"
     epoch = f" epoch {grid.epoch}:" if grid.epoch else ":"
     learning = f"   {teacher.status()}" if teacher else ""
     return f"walnutbutter {grid.columns}x{grid.rows}{omega}{epoch} {state}{learning}   [Space] new input  [Esc] quit"
@@ -290,7 +300,7 @@ def show(
             Neuron.verbose = False
         while running:
             if needs_redraw:
-                draw_grid(screen, grid)
+                draw(screen, grid)
                 pygame.display.set_caption(
                     caption_fast(grid, epochs_per_second, fps, teacher) if fast else caption(grid, teacher)
                 )
