@@ -46,10 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="N",
         nargs="?",
-        const=64,
+        const=0,
         default=None,
-        help="instead of the hex grid: N neurons at random Cartesian positions in [-1, 1] x [-1, 1] "
-        "(N defaults to 64; shown, not yet wired)",
+        help="Cartesian neurons instead of the hex grid: a --columns x --rows hexagonal lattice at unit "
+        "spacing, or with N, that many neurons at random in a --columns x --rows unit region (shown, not yet wired)",
     )
     parser.add_argument(
         "--window",
@@ -408,18 +408,23 @@ def _run(args: argparse.Namespace) -> int:
 
 def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
     """--nodes [N]: place a Cartesian population and show it. No wiring, input or learning yet."""
-    if args.nodes < 1:
-        print(f"error: --nodes needs at least 1 neuron, got {args.nodes}", file=sys.stderr)
+    if args.nodes < 0:
+        print(f"error: --nodes cannot be negative, got {args.nodes}", file=sys.stderr)
         return 2
     seed = args.seed if args.seed is not None else random.randrange(2**31)
-    nodes = CartesianNodes(count=args.nodes, seed=seed, threshold=args.threshold)
-    (x_min, x_max), (y_min, y_max) = nodes.bounds
-    print(f"seed {seed}", file=sys.stderr)
-    print(
-        f"{len(nodes)} nodes placed at random in [{x_min:g}, {x_max:g}] x [{y_min:g}, {y_max:g}]; "
-        "connections, input and learning are not defined for nodes yet",
-        file=sys.stderr,
-    )
+    common = dict(columns=args.columns, rows=args.rows, seed=seed, threshold=args.threshold,
+                  minimum_potential=args.minimum_potential)
+    if args.nodes == 0:
+        nodes = CartesianNodes(layout="hex", **common)
+        print(f"{nodes!r}; connections, input and learning are not defined for nodes yet", file=sys.stderr)
+    else:
+        nodes = CartesianNodes(layout="random", count=args.nodes, **common)
+        print(f"seed {seed}", file=sys.stderr)
+        print(
+            f"{nodes!r} ({len(nodes) / (nodes.width * nodes.height):.2f} per unit area); "
+            "connections, input and learning are not defined for nodes yet",
+            file=sys.stderr,
+        )
     if args.save or args.show:
         try:
             from . import visualizer

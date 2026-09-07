@@ -202,28 +202,35 @@ grid.connection_between(origin, right)   # origin -> right
 grid.connection_between(right, origin)   # right -> origin, a different connection
 ```
 
-## Neurons without a grid
+## Neurons on the Cartesian plane
 
-`walnutbutter --nodes` builds a population of 64 such neurons from the seed
-(`--nodes N` for another count) and shows it, or lists their positions with
-`--headless`, or writes a picture with `--save`. Nothing is wired or learned
-for nodes yet.
-
-`CartesianNodes` is a second container. Each neuron gets an `(x, y)` position
-inside a bounding box, by default the square from -1 to 1 on both axes.
-`add(x, y)` places a neuron exactly; `add()` places it at random, each
-coordinate drawn uniformly from the box using the container's `seed`.
-Coordinates outside the box are rejected. The container makes no
-connections; `nearest` and `within` help decide them. Propagation and the
+`CartesianNodes` is a second container, with positions measured in **unit
+distances**: one unit is the network's natural scale, the step between
+neighbouring cells of the hex mesh, and a population can span many units.
+By default it holds a hexagonal lattice of `columns` x `rows` neurons
+(8 x 10) at unit spacing, pointy-top with odd rows shifted half a unit, so
+each neuron's six nearest neighbours are exactly one unit away;
+`node_at(column, row)` looks one up. With `layout="random"`, `count`
+neurons are scattered uniformly over a `width` x `height` unit region
+instead, and `add(x, y)` places a neuron anywhere by hand. The container
+makes no connections; `neighbours(neuron, radius=1.0)`, `within` and
+`nearest` are there to decide them by distance. Propagation and the
 neurons themselves work exactly as in the grid.
+
+`walnutbutter --nodes` builds the `--columns` x `--rows` lattice and shows
+it; `--nodes N` scatters N neurons at random in a `--columns` x `--rows`
+unit region (`--headless` lists positions, `--save` writes a picture).
+Nothing is wired or learned for nodes yet.
 
 ```python
 from walnutbutter.cartesian import CartesianNodes
 
-nodes = CartesianNodes(count=50, seed=1)     # 50 neurons scattered in [-1, 1] x [-1, 1]
-centre = nodes.add(0.0, 0.0)                 # one placed by hand
-for other in nodes.within(0.0, 0.0, radius=0.3, exclude=centre):
+lattice = CartesianNodes()                     # 8 x 10 hexagonal lattice, unit spacing
+centre = lattice.node_at(4, 5)
+for other in lattice.neighbours(centre):       # its six neighbours, one unit away
     centre.connect(other, weight=0.5)
+
+scatter = CartesianNodes(layout="random", count=64, seed=1)   # random alternative
 ```
 
 ## Teaching the network
@@ -321,7 +328,7 @@ src/walnutbutter/
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
   propagation.py Signal queue and wave-by-wave propagate()
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
-  cartesian.py CartesianNodes: neurons at (x, y) positions in a box, placed or random; no grid
+  cartesian.py CartesianNodes: hexagonal lattice (default) or random neurons at (x, y) in unit distances
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input
   learning.py  output targets, reward, the global-reinforcement rule, and Teacher

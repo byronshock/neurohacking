@@ -118,23 +118,27 @@ def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) ->
 
 
 def node_layout(nodes: CartesianNodes, width: int, height: int, margin: int = 24):
-    """Map the population's bounds onto the surface, preserving aspect ratio.
+    """Map unit distances onto pixels so the region and every neuron fit, preserving aspect ratio.
 
     Returns (to_pixel, node_radius, box) where box is the pygame.Rect the
-    bounds occupy on screen.
+    placement region occupies on screen and node_radius is a quarter of a unit
+    distance in pixels (so neurons within a unit of each other nearly touch).
     """
-    (x_min, x_max), (y_min, y_max) = nodes.bounds
+    (rx0, rx1), (ry0, ry1) = nodes.region
+    (ex0, ex1), (ey0, ey1) = nodes.extent()
+    x_min, x_max = min(rx0, ex0) - 0.5, max(rx1, ex1) + 0.5  # half a unit of breathing room
+    y_min, y_max = min(ry0, ey0) - 0.5, max(ry1, ey1) + 0.5
     scale = min((width - 2 * margin) / (x_max - x_min), (height - 2 * margin) / (y_max - y_min))
     span_w, span_h = scale * (x_max - x_min), scale * (y_max - y_min)
     left, top = (width - span_w) / 2, (height - span_h) / 2
 
     def to_pixel(x: float, y: float) -> tuple[float, float]:
-        # y grows upward in the box but downward on the screen
+        # y grows upward in the plane but downward on the screen
         return left + (x - x_min) * scale, top + (y_max - y) * scale
 
-    area_per_node = span_w * span_h / max(1, len(nodes))
-    radius = max(3.0, min(0.3 * math.sqrt(area_per_node), scale * 0.05))
-    box = pygame.Rect(round(left), round(top), round(span_w), round(span_h))
+    radius = max(2.0, scale * 0.25)
+    bx, by = to_pixel(rx0, ry1)
+    box = pygame.Rect(round(bx), round(by), round((rx1 - rx0) * scale), round((ry1 - ry0) * scale))
     return to_pixel, radius, box
 
 
@@ -145,7 +149,7 @@ def draw_nodes(surface: pygame.Surface, nodes: CartesianNodes, margin: int = 24)
     waves = [n.fired_in_wave for n in nodes if n.fired_in_wave is not None]
     last_wave = max(waves) if waves else 0
     surface.fill(BACKGROUND)
-    pygame.draw.rect(surface, UNFIRED, box, width=1)  # the bounding box the neurons live in
+    pygame.draw.rect(surface, UNFIRED, box, width=1)  # the random placement region, in unit distances
     for neuron in nodes:
         px, py = to_pixel(*neuron.position)
         pygame.draw.circle(surface, neuron_colour(neuron.fired_in_wave, last_wave), (px, py), radius)
@@ -165,9 +169,8 @@ def show_nodes(nodes: CartesianNodes, width: int = 800, height: int = 600, fps: 
     pygame.init()
     try:
         screen = pygame.display.set_mode((width, height))
-        (x_min, x_max), (y_min, y_max) = nodes.bounds
         pygame.display.set_caption(
-            f"walnutbutter: {len(nodes)} nodes in [{x_min:g}, {x_max:g}] x [{y_min:g}, {y_max:g}]   [Esc] quit"
+            f"walnutbutter: {len(nodes)} nodes in a {nodes.width:g} x {nodes.height:g} unit region   [Esc] quit"
         )
         draw_nodes(screen, nodes)
         pygame.display.flip()
