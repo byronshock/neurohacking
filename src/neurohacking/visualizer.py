@@ -15,6 +15,7 @@ import time
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402  (import after the env var so pygame stays quiet)
 
+from .cartesian import CartesianNodes
 from .grid import GridOfNeurons
 from .learning import Teacher
 from .monitor import run_epoch
@@ -111,6 +112,79 @@ def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) ->
         dx, dy = axial_to_pixel(*neuron.position, hex_radius)
         points = hexagon_points(offset_x + dx, offset_y + dy, hex_radius * 0.55)
         pygame.draw.polygon(surface, ORIGIN_RING, points, width=max(1, round(hex_radius / 8)))
+
+
+# --- Cartesian populations ------------------------------------------------------
+
+
+def node_layout(nodes: CartesianNodes, width: int, height: int, margin: int = 24):
+    """Map the population's bounds onto the surface, preserving aspect ratio.
+
+    Returns (to_pixel, node_radius, box) where box is the pygame.Rect the
+    bounds occupy on screen.
+    """
+    (x_min, x_max), (y_min, y_max) = nodes.bounds
+    scale = min((width - 2 * margin) / (x_max - x_min), (height - 2 * margin) / (y_max - y_min))
+    span_w, span_h = scale * (x_max - x_min), scale * (y_max - y_min)
+    left, top = (width - span_w) / 2, (height - span_h) / 2
+
+    def to_pixel(x: float, y: float) -> tuple[float, float]:
+        # y grows upward in the box but downward on the screen
+        return left + (x - x_min) * scale, top + (y_max - y) * scale
+
+    area_per_node = span_w * span_h / max(1, len(nodes))
+    radius = max(3.0, min(0.3 * math.sqrt(area_per_node), scale * 0.05))
+    box = pygame.Rect(round(left), round(top), round(span_w), round(span_h))
+    return to_pixel, radius, box
+
+
+def draw_nodes(surface: pygame.Surface, nodes: CartesianNodes, margin: int = 24) -> None:
+    """Paint every neuron as a disc at its (x, y) position, coloured by wave like the grid."""
+    width, height = surface.get_size()
+    to_pixel, radius, box = node_layout(nodes, width, height, margin)
+    waves = [n.fired_in_wave for n in nodes if n.fired_in_wave is not None]
+    last_wave = max(waves) if waves else 0
+    surface.fill(BACKGROUND)
+    pygame.draw.rect(surface, UNFIRED, box, width=1)  # the bounding box the neurons live in
+    for neuron in nodes:
+        px, py = to_pixel(*neuron.position)
+        pygame.draw.circle(surface, neuron_colour(neuron.fired_in_wave, last_wave), (px, py), radius)
+        pygame.draw.circle(surface, OUTLINE, (px, py), radius, width=1)
+        if neuron.fired_in_wave == 0:
+            pygame.draw.circle(surface, ORIGIN_RING, (px, py), radius * 0.55, width=max(1, round(radius / 6)))
+
+
+def save_nodes(nodes: CartesianNodes, path: str, width: int = 800, height: int = 600) -> None:
+    surface = pygame.Surface((width, height))
+    draw_nodes(surface, nodes)
+    pygame.image.save(surface, path)
+
+
+def show_nodes(nodes: CartesianNodes, width: int = 800, height: int = 600, fps: int = 30) -> None:
+    """Open a window on a Cartesian population until Esc, Q or the window is closed."""
+    pygame.init()
+    try:
+        screen = pygame.display.set_mode((width, height))
+        (x_min, x_max), (y_min, y_max) = nodes.bounds
+        pygame.display.set_caption(
+            f"neurohacking: {len(nodes)} nodes in [{x_min:g}, {x_max:g}] x [{y_min:g}, {y_max:g}]   [Esc] quit"
+        )
+        draw_nodes(screen, nodes)
+        pygame.display.flip()
+        clock = pygame.time.Clock()
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_q):
+                    running = False
+            clock.tick(fps)
+    finally:
+        pygame.quit()
+
+
+# --- the hex grid -----------------------------------------------------------------
 
 
 def save(grid: GridOfNeurons, path: str, width: int = 800, height: int = 600) -> None:

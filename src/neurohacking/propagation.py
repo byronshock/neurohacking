@@ -17,6 +17,7 @@ Wave 0 is the external stimulus that starts the epoch.
 
 from __future__ import annotations
 
+import itertools
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Iterable, Mapping
@@ -24,21 +25,26 @@ from typing import Iterable, Mapping
 from .connection import Connection
 from .neuron import Neuron
 
+_wave_stamps = itertools.count(1)  # a fresh stamp per wave, across all propagations
 
-@dataclass(frozen=True)
+
 class Signal:
-    """One message in the queue: the connection's weight, to be delivered in `wave`."""
+    """One message in the queue: the connection's weight, to be delivered in `wave`.
 
-    connection: Connection
-    wave: int
+    The target and amount are copied from the connection when the signal is
+    created, so delivering it costs plain attribute reads.
+    """
 
-    @property
-    def target(self) -> Neuron:
-        return self.connection.target
+    __slots__ = ("connection", "wave", "target", "amount")
 
-    @property
-    def amount(self) -> float:
-        return self.connection.weight
+    def __init__(self, connection: Connection, wave: int):
+        self.connection = connection
+        self.wave = wave
+        self.target = connection.target
+        self.amount = connection.weight
+
+    def __repr__(self) -> str:
+        return f"Signal({self.connection!r}, wave {self.wave})"
 
 
 @dataclass
@@ -78,12 +84,18 @@ def propagate(
     # Later waves: drain the queue one wave at a time.
     while queue:
         wave = Wave(number=len(waves))
+        stamp = next(_wave_stamps)
         touched = []
+        delivered = wave.delivered
+        popleft = queue.popleft
         while queue and queue[0].wave == wave.number:
-            signal = queue.popleft()
-            signal.target.receive(signal.amount)
-            wave.delivered.append(signal)
-            touched.append(signal.target)
+            signal = popleft()
+            target = signal.target
+            target.receive(signal.amount)
+            delivered.append(signal)
+            if target.touched_stamp != stamp:  # each neuron once per wave, without a set
+                target.touched_stamp = stamp
+                touched.append(target)
         _fire_ready(touched, wave, queue)
         waves.append(wave)
 
@@ -91,12 +103,12 @@ def propagate(
 
 
 def _fire_ready(candidates: Iterable[Neuron], wave: Wave, queue: deque[Signal]) -> None:
-    """Fire each candidate (once) whose potential has reached its threshold."""
-    seen: set[int] = set()
+    """Fire each candidate whose potential has reached its threshold.
+
+    Candidates from a wave are already unique; the stimulus list in wave 0 may
+    repeat a neuron, which is harmless because a fired neuron is never ready.
+    """
     for neuron in candidates:
-        if id(neuron) in seen:
-            continue
-        seen.add(id(neuron))
         if neuron.ready:
             _fire(neuron, wave, queue)
 

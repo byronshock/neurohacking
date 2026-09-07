@@ -91,7 +91,7 @@ def test_cli_runs_and_returns_zero(capsys):
     assert cli_main(["--headless", "--weight", "1"]) == 0
     captured = capsys.readouterr()
     assert captured.out.count("fired in wave 0.") == 4  # half of the 8-column bottom row
-    assert "48 of 48 neurons fired" in captured.err  # default 8 x 6
+    assert "56 of 56 neurons fired" in captured.err  # default 8 x 7
     assert "input permutation:" in captured.err
 
 

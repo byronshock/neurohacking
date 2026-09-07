@@ -75,13 +75,13 @@ def accuracy(grid: GridOfNeurons, target: str = "reversed") -> float:
     return sum(1 for e in errors.values() if e == 0) / len(errors)
 
 
-def delivered_connections(grid: GridOfNeurons):
-    """Every connection that carried a signal in the last epoch (each once)."""
-    seen = set()
-    for wave in grid.waves:
-        for signal in wave.delivered:
-            seen.add(signal.connection)
-    return seen
+def delivered_connections(grid: GridOfNeurons) -> list:
+    """Every connection that carried a signal in the last epoch, each exactly once.
+
+    No deduplication is needed: a neuron fires at most once per epoch, so each
+    of its active outgoing connections carries at most one signal.
+    """
+    return [signal.connection for wave in grid.waves for signal in wave.delivered]
 
 
 def reinforce(
@@ -96,17 +96,25 @@ def reinforce(
         raise ValueError(f"unknown eligibility {eligibility!r}; choose from {', '.join(ELIGIBILITIES)}")
     if not advantage:
         return 0
+    low, high = grid.weight_range
+    step = lr * advantage
+    perturb = eligibility == "perturb"
     changed = 0
     for connection in delivered_connections(grid):
         target = connection.target
         if target.fired_in_wave == 0:
             continue  # a forced input: its firing was not the network's doing
-        if eligibility == "perturb":
+        if perturb:
             e = target.noise / sigma if sigma else 0.0
         else:
             e = 1.0 if target.has_fired else -1.0
         if e:
-            connection.weight = grid.clip_weight(connection.weight + lr * advantage * e)
+            weight = connection.weight + step * e
+            if weight < low:
+                weight = low
+            elif weight > high:
+                weight = high
+            connection.weight = weight
             changed += 1
     return changed
 
