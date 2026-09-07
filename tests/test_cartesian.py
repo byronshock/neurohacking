@@ -236,6 +236,31 @@ def test_connection_probability_follows_the_standard_gaussian():
     assert connection_probability(50.0) == 0.0  # the density has underflowed: exactly zero, never connected
 
 
+def test_connection_probability_sigma_sets_the_reach():
+    assert connection_probability(2.0, sigma=2.0) == pytest.approx(math.exp(-0.5))  # two units at sigma 2 = one unit at sigma 1
+    assert connection_probability(1.0, sigma=0.5) == pytest.approx(math.exp(-2.0))  # a tight Gaussian barely reaches a neighbour
+    assert connection_probability(3.0, sigma=3.0) == pytest.approx(math.exp(-0.5))
+    assert gaussian_density(0.0, sigma=2.0) == pytest.approx(1 / (8 * math.pi))
+    assert connection_probability(0.0, sigma=2.0) == 0.0  # zero distance is still zero
+    with pytest.raises(ValueError):
+        connection_probability(1.0, sigma=0.0)
+
+
+def test_connect_by_distance_sigma_changes_the_degree():
+    tight = CartesianNodes(seed=4)
+    wide = CartesianNodes(seed=4)
+    default = CartesianNodes(seed=4)
+    n_tight = tight.connect_by_distance(sigma=0.5)
+    n_default = default.connect_by_distance()
+    n_wide = wide.connect_by_distance(sigma=2.0)
+    assert n_tight < n_default < n_wide
+    assert wide.receptive_field_sigma == 2.0 and default.receptive_field_sigma == 1.0
+    far = [c for c in wide.connections.values() if CartesianNodes.distance(c.source, c.target) > 3.5]
+    assert far  # at sigma 2 connections reach several units
+    with pytest.raises(ValueError):
+        CartesianNodes(seed=4).connect_by_distance(sigma=-1)
+
+
 def test_neurons_at_the_same_position_never_connect():
     nodes = CartesianNodes(layout="random", count=0, seed=1)
     twins = [nodes.add(0.0, 0.0) for _ in range(6)]  # six neurons on one point
@@ -304,4 +329,8 @@ def test_cli_nodes_reports_the_distance_wiring(capsys):
     from walnutbutter.cli import cli_main
     assert cli_main(["--headless", "--nodes", "--seed", "1", "--columns", "6", "--rows", "4"]) == 0
     err = capsys.readouterr().err
-    assert "wired by distance:" in err and "outgoing per neuron" in err
+    assert "wired by distance:" in err and "outgoing per neuron" in err and "receptive field sigma 1" in err
+    assert cli_main(["--headless", "--nodes", "--seed", "1", "--columns", "6", "--rows", "4", "--receptive-field-sigma", "2"]) == 0
+    assert "receptive field sigma 2: probability 0.88 at one unit" in capsys.readouterr().err
+    assert cli_main(["--headless", "--nodes", "--receptive_field_sigma", "0.5", "--seed", "1"]) == 0  # underscore spelling works too
+    assert cli_main(["--headless", "--nodes", "--receptive-field-sigma", "0"]) == 2

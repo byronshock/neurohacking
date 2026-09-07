@@ -29,23 +29,27 @@ ROW_SPACING = math.sqrt(3) / 2  # distance between rows of a unit-spaced hexagon
 TOLERANCE = 1e-9  # lattice distances are 1 only up to rounding
 
 
-def gaussian_density(distance: float) -> float:
-    """The standard 2D Gaussian probability density at `distance` from the origin."""
-    return math.exp(-0.5 * distance * distance) / (2.0 * math.pi)
+def gaussian_density(distance: float, sigma: float = 1.0) -> float:
+    """The isotropic 2D Gaussian probability density with standard deviation `sigma`, at `distance` from the origin."""
+    return math.exp(-0.5 * (distance / sigma) ** 2) / (2.0 * math.pi * sigma * sigma)
 
 
-def connection_probability(distance: float, scale: float = 1.0) -> float:
+def connection_probability(distance: float, sigma: float = 1.0, scale: float = 1.0) -> float:
     """Probability of a forward connection between two neurons `distance` units apart.
 
-    Proportional to the standard 2D Gaussian density at that distance wherever
-    the distance is nonzero, scaled so the probability approaches `scale`
-    (default 1) as the distance approaches zero: one unit apart gives 0.61, two
-    units 0.135, three units 0.011. Two neurons at the same position have
-    probability exactly zero: they never project onto each other. Never above 1.
+    Proportional to the 2D Gaussian density with standard deviation `sigma`
+    (default 1, the standard normal) at that distance wherever the distance is
+    nonzero, scaled so the probability approaches `scale` (default 1) as the
+    distance approaches zero: exp(-d^2 / 2 sigma^2). With sigma 1, one unit
+    apart gives 0.61, two units 0.135, three units 0.011; a larger sigma
+    reaches further. Two neurons at the same position have probability exactly
+    zero: they never project onto each other. Never above 1.
     """
+    if sigma <= 0:
+        raise ValueError(f"sigma must be positive, got {sigma}")
     if distance <= TOLERANCE:
         return 0.0
-    return min(1.0, scale * gaussian_density(distance) / gaussian_density(0.0))
+    return min(1.0, scale * gaussian_density(distance, sigma) / gaussian_density(0.0, sigma))
 
 
 class CartesianNodes:
@@ -177,28 +181,33 @@ class CartesianNodes:
 
     def connect_by_distance(
         self,
+        sigma: float = 1.0,
         scale: float = 1.0,
         weight: float | None = 1.0,
         weight_range: tuple[float, float] = (-1.0, 1.0),
     ) -> int:
-        """Wire the population: A -> B with probability connection_probability(|AB|), each direction drawn independently.
+        """Wire the population: A -> B with probability connection_probability(|AB|, sigma), each direction drawn independently.
 
         Every ordered pair of distinct neurons is considered once. A pair whose
         probability is zero (the same position, or a separation so large the
-        density has underflowed) is never connected.
+        density has underflowed) is never connected. `sigma` is the standard
+        deviation of the Gaussian receptive field, in unit distances (default 1).
         `weight` is given to every new connection; None draws each uniformly
         from `weight_range`. Draws come from the container's seeded stream.
         Returns the number of connections made.
         """
         if scale < 0:
             raise ValueError(f"scale must not be negative, got {scale}")
+        if sigma <= 0:
+            raise ValueError(f"sigma must be positive, got {sigma}")
+        self.receptive_field_sigma = sigma
         low, high = weight_range
         made = 0
         for source in self.neurons:
             for target in self.neurons:
                 if target is source:
                     continue
-                p = connection_probability(math.dist(source.position, target.position), scale)
+                p = connection_probability(math.dist(source.position, target.position), sigma, scale)
                 if p == 0.0 or self._rng.random() >= p:
                     continue
                 w = self._rng.uniform(low, high) if weight is None else weight

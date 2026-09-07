@@ -219,10 +219,12 @@ themselves work exactly as in the grid.
 
 **Wiring by distance.** `connect_by_distance()` considers every ordered pair
 of distinct neurons once and connects A to B with probability proportional to
-the standard 2D Gaussian density at their separation wherever that separation
-is nonzero, scaled so the probability approaches 1 as the separation
-approaches zero: neighbours one unit apart connect with probability 0.61, two
-units 0.135, three units 0.011. Two neurons at exactly the same position have
+a 2D Gaussian density at their separation wherever that separation is
+nonzero, scaled so the probability approaches 1 as the separation approaches
+zero: `exp(-d² / 2σ²)`, with `sigma` the standard deviation in unit distances
+(default 1, the standard normal; `--receptive-field-sigma` on the command line). At
+sigma 1, neighbours one unit apart connect with probability 0.61, two units
+0.135, three units 0.011; a larger sigma reaches further. Two neurons at exactly the same position have
 probability zero and never project onto each other. The reverse direction is
 an independent draw, so connections are genuinely one-way. `scale` multiplies the
 probabilities for sparser wiring; `weight` is given to every connection, or
@@ -239,7 +241,7 @@ distance and shows it; `--nodes N` scatters N neurons at random in a
 from walnutbutter.cartesian import CartesianNodes
 
 lattice = CartesianNodes(seed=1)               # 8 x 10 hexagonal lattice, unit spacing
-lattice.connect_by_distance(weight=None)       # Gaussian-by-distance wiring, random weights
+lattice.connect_by_distance(sigma=1.0, weight=None)   # Gaussian-by-distance wiring, random weights
 centre = lattice.node_at(4, 5)
 len(centre.outgoing), len(lattice.neighbours(centre))   # about 6 connections; 6 neighbours within a unit
 

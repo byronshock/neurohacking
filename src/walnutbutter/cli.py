@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import random
 import sys
 import time
@@ -50,6 +51,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Cartesian neurons instead of the hex grid: a --columns x --rows hexagonal lattice at unit "
         "spacing, or with N, that many neurons at random in a --columns x --rows unit region (shown, not yet wired)",
+    )
+    parser.add_argument(
+        "--receptive-field-sigma",
+        "--receptive_field_sigma",
+        dest="receptive_field_sigma",
+        type=float,
+        default=1.0,
+        metavar="UNITS",
+        help="with --nodes: standard deviation, in unit distances, of the Gaussian receptive field that sets "
+        "connection probability by distance (default: 1)",
     )
     parser.add_argument(
         "--window",
@@ -421,10 +432,15 @@ def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
     else:
         nodes = CartesianNodes(layout="random", count=args.nodes, **common)
         print(f"{nodes!r} ({len(nodes) / (nodes.width * nodes.height):.2f} per unit area)", file=sys.stderr)
-    made = nodes.connect_by_distance(weight=args.weight)
+    if args.receptive_field_sigma <= 0:
+        print(f"error: --receptive-field-sigma must be positive, got {args.receptive_field_sigma}", file=sys.stderr)
+        return 2
+    made = nodes.connect_by_distance(sigma=args.receptive_field_sigma, weight=args.weight)
+    s = args.receptive_field_sigma
     print(
         f"wired by distance: {made} one-way connections, {nodes.mean_out_degree():.1f} outgoing per neuron "
-        f"(probability exp(-d^2/2): 0.61 at one unit, 0.14 at two); input and learning are not defined for nodes yet",
+        f"(receptive field sigma {s:g}: probability {math.exp(-0.5 / s**2):.2f} at one unit, {math.exp(-2.0 / s**2):.2f} at two); "
+        "input and learning are not defined for nodes yet",
         file=sys.stderr,
     )
     if args.save or args.show:
