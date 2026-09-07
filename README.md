@@ -301,7 +301,7 @@ signal and stays "stuck" always on or always off; on a long run most hidden
 neurons end up that way. To counter it, every
 neuron tracks its own firing rate and slowly moves its threshold toward a
 target rate (`--homeostasis`, default 1e-6 per epoch,
-`--target-rate`, default 0.4); firing too often raises the threshold, too
+`--target-rate`, default 0.5); firing too often raises the threshold, too
 rarely lowers it. Neurons forced in wave 0 are left out for that epoch, as
 reinforcement leaves them out; an unforced input neuron is treated like any
 other. `--homeostasis 0` switches it off. Per-neuron thresholds are saved in

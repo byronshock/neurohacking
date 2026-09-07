@@ -143,7 +143,7 @@ def test_teacher_validates_tracks_and_reports():
     second = teacher.epoch(verbose=False)
     assert teacher.epochs == 2 and 0 <= teacher.average <= 1 and 0 <= second <= 1
     assert grid.epoch == 2
-    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-06 toward 0.4 in [-5, 5], unstick 0.001): accuracy" in teacher.status()
+    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-06 toward 0.5 in [-5, 5], unstick 0.001): accuracy" in teacher.status()
     hebb = Teacher(grid, eligibility="hebb")
     assert hebb.sigma == 0.0  # no exploration noise for the Hebbian variant
 
@@ -227,9 +227,9 @@ def test_homeostasis_moves_thresholds_toward_the_target_rate_and_stays_in_range(
     assert hot.threshold == pytest.approx(before[hot] + 0.05)
     assert cold.threshold == pytest.approx(before[cold] - 0.05)
     hot.threshold, cold.threshold = before[hot], before[cold]
-    homeostasis(grid, rate=0.1)  # the default target is 0.4
-    assert hot.threshold == pytest.approx(before[hot] + 0.06)
-    assert cold.threshold == pytest.approx(before[cold] - 0.04)
+    homeostasis(grid, rate=0.1)  # the default target is 0.5
+    assert hot.threshold == pytest.approx(before[hot] + 0.05)
+    assert cold.threshold == pytest.approx(before[cold] - 0.05)
     hot.threshold, cold.threshold = before[hot], before[cold]
     homeostasis(grid, rate=0.1, target=0.5)
     assert hot.threshold == pytest.approx(before[hot] + 0.05)
@@ -263,8 +263,8 @@ def test_teacher_validates_homeostasis_and_reports_it():
     assert "homeostasis 0.01 toward 0.4 in [-5, 5]" in teacher.status() and "stuck" not in teacher.status()
     default = Teacher(grid, seed=1)
     default.step()
-    assert "homeostasis 1e-06 toward 0.4" in default.status() and "sigma 0.1" in default.status()
-    assert default.homeostasis == 1e-6 and default.target_rate == 0.4
+    assert "homeostasis 1e-06 toward 0.5" in default.status() and "sigma 0.1" in default.status()
+    assert default.homeostasis == 1e-6 and default.target_rate == 0.5
     off = Teacher(grid, seed=1, homeostasis=0)
     off.step()
     assert "homeostasis" not in off.status()

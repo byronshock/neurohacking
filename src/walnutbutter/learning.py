@@ -35,7 +35,7 @@ threshold, too rarely lowers it. Neurons forced in wave 0 this epoch are
 left out of both, exactly as reinforcement leaves their incoming weights
 alone: their firing was not the network's doing. An unforced input neuron
 is an ordinary neuron and is treated as one. The default
-rate of 1e-6 toward a target of 0.4 is a very slow drift (a fully stuck
+rate of 1e-6 toward a target of 0.5 is a very slow drift (a fully stuck
 neuron moves its threshold by about 0.0006 per thousand epochs, so the
 effect belongs to runs of millions of epochs); a rate of 0 switches it off. Thresholds may go negative, within `THRESHOLD_RANGE`.
 """
@@ -113,7 +113,7 @@ def stuck_neurons(grid: GridOfNeurons) -> tuple[list[Neuron], list[Neuron]]:
 
 
 def homeostasis(
-    grid: GridOfNeurons, rate: float, target: float = 0.4, threshold_range: tuple[float, float] = THRESHOLD_RANGE
+    grid: GridOfNeurons, rate: float, target: float = 0.5, threshold_range: tuple[float, float] = THRESHOLD_RANGE
 ) -> int:
     """Nudge each neuron's threshold toward its target firing rate, except those forced this epoch.
 
@@ -220,7 +220,7 @@ class Teacher:
         window: int = 200,
         seed: int | None = None,
         homeostasis: float = 1e-6,
-        target_rate: float = 0.4,
+        target_rate: float = 0.5,
         threshold_range: tuple[float, float] = THRESHOLD_RANGE,
         carry_over: bool = False,
         unstick: float = 1e-3,

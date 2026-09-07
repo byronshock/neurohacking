@@ -187,8 +187,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target-rate",
         type=float,
-        default=0.4,
-        help="firing rate homeostasis aims for, 0 to 1 (default: 0.4)",
+        default=0.5,
+        help="firing rate homeostasis aims for, 0 to 1 (default: 0.5)",
     )
     parser.add_argument(
         "--unstick",
