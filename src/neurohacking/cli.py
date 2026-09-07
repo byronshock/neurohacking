@@ -152,6 +152,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="what the global reward acts on: the neuron's exploration noise (perturb) or plain Hebbian (default: perturb)",
     )
     parser.add_argument(
+        "--homeostasis",
+        type=float,
+        default=0.0,
+        metavar="RATE",
+        help="per-epoch rate at which each neuron's threshold moves toward its target firing rate (default: 0, off)",
+    )
+    parser.add_argument(
+        "--target-rate",
+        type=float,
+        default=0.5,
+        help="firing rate homeostasis aims for, 0 to 1 (default: 0.5)",
+    )
+    parser.add_argument(
         "--epochs",
         type=int,
         default=1,
@@ -259,7 +272,14 @@ def _run(args: argparse.Namespace) -> int:
             teacher = None
             if args.learn:
                 teacher = Teacher(
-                    grid, target=args.target, lr=args.lr, sigma=args.sigma, eligibility=args.eligibility, seed=seed
+                    grid,
+                    target=args.target,
+                    lr=args.lr,
+                    sigma=args.sigma,
+                    eligibility=args.eligibility,
+                    seed=seed,
+                    homeostasis=args.homeostasis,
+                    target_rate=args.target_rate,
                 )
                 if loaded:
                     resume_teacher(teacher, data)

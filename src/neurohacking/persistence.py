@@ -35,6 +35,8 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         # the shortcuts are the only random part of the topology: record them so a load can verify the mesh
         "shortcuts": [[c.source.name, c.target.name] for c in grid.small_world_connections()],
         "weights": [grid.connections[i].weight for i in range(1, len(grid.connections) + 1)],
+        "thresholds": [n.threshold for n in grid.neurons.values()],
+        "rates": [n.rate for n in grid.neurons.values()],
     }
     if teacher is not None:
         data["learning"] = {
@@ -43,6 +45,8 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
             "sigma": teacher.sigma,
             "eligibility": teacher.eligibility,
             "epochs": teacher.epochs,
+            "homeostasis": teacher.homeostasis,
+            "target_rate": teacher.target_rate,
             "total_reward": teacher.total_reward,
             "baseline": teacher.baseline,
             "average": teacher.average,
@@ -98,6 +102,11 @@ def load_weights(grid: GridOfNeurons, data: dict) -> None:
         raise ValueError("checkpoint shortcuts differ from the mesh's: it was built from a different seed")
     for connection_id, weight in enumerate(data["weights"], start=1):
         grid.connections[connection_id].weight = weight
+    neurons = list(grid.neurons.values())
+    for neuron, threshold in zip(neurons, data.get("thresholds", [])):
+        neuron.threshold = threshold
+    for neuron, rate in zip(neurons, data.get("rates", [])):
+        neuron.rate = rate
 
 
 def resume_teacher(teacher, data: dict) -> None:

@@ -26,6 +26,13 @@ injected, which is the classic reward-modulated Hebbian rule.
 
 Forced inputs are never adjusted and weights are kept within the grid's
 weight_range, [-1, 1] by default.
+
+**Homeostasis** (optional). A neuron whose input sits far from its threshold
+is never flipped by the exploration noise, gets no learning signal, and stays
+"stuck" on or off. With a homeostasis rate above zero, every neuron outside
+the input row tracks its own firing rate and nudges its threshold toward a
+target rate each epoch: firing too often raises the threshold, too rarely
+lowers it. Thresholds may go negative, within `THRESHOLD_RANGE`.
 """
 
 from __future__ import annotations
@@ -47,6 +54,9 @@ TARGETS: dict[str, Target] = {
 }
 
 ELIGIBILITIES = ("perturb", "hebb")
+RATE_MEMORY = 0.01  # per-epoch update of a neuron's running firing rate (about the last 100 epochs)
+STUCK_BELOW, STUCK_ABOVE = 0.01, 0.99  # a neuron firing less or more often than this is "stuck"
+THRESHOLD_RANGE = (-5.0, 5.0)  # what homeostasis may move a threshold to
 
 
 def output_row(grid: GridOfNeurons) -> list[Neuron]:
@@ -73,6 +83,37 @@ def accuracy(grid: GridOfNeurons, target: str = "reversed") -> float:
     """Fraction of the output row that matches the target, 0 to 1. This is the reward."""
     errors = output_errors(grid, target)
     return sum(1 for e in errors.values() if e == 0) / len(errors)
+
+
+def update_rates(grid: GridOfNeurons) -> None:
+    """Move every neuron's running firing-rate estimate toward what it did this epoch."""
+    for neuron in grid.neurons.values():
+        neuron.rate += RATE_MEMORY * ((1.0 if neuron.has_fired else 0.0) - neuron.rate)
+
+
+def stuck_neurons(grid: GridOfNeurons) -> tuple[list[Neuron], list[Neuron]]:
+    """Neurons outside the input row whose running rate is (almost) always on, and always off."""
+    inputs = set(grid.input_row())
+    candidates = [n for n in grid.neurons.values() if n not in inputs]
+    on = [n for n in candidates if n.rate > STUCK_ABOVE]
+    off = [n for n in candidates if n.rate < STUCK_BELOW]
+    return on, off
+
+
+def homeostasis(grid: GridOfNeurons, rate: float, target: float = 0.5) -> int:
+    """Nudge each non-input neuron's threshold toward its target firing rate. Returns neurons moved."""
+    if rate <= 0:
+        return 0
+    low, high = THRESHOLD_RANGE
+    inputs = set(grid.input_row())
+    moved = 0
+    for neuron in grid.neurons.values():
+        if neuron in inputs:
+            continue
+        threshold = neuron.threshold + rate * (neuron.rate - target)
+        neuron.threshold = max(low, min(high, threshold))
+        moved += 1
+    return moved
 
 
 def delivered_connections(grid: GridOfNeurons) -> list:
@@ -136,13 +177,19 @@ class Teacher:
         baseline_rate: float = 0.05,
         window: int = 200,
         seed: int | None = None,
+        homeostasis: float = 0.0,
+        target_rate: float = 0.5,
     ):
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")
         if eligibility not in ELIGIBILITIES:
             raise ValueError(f"unknown eligibility {eligibility!r}; choose from {', '.join(ELIGIBILITIES)}")
-        if lr < 0 or sigma < 0:
-            raise ValueError("learning rate and sigma must not be negative")
+        if lr < 0 or sigma < 0 or homeostasis < 0:
+            raise ValueError("learning rate, sigma and homeostasis rate must not be negative")
+        if not 0.0 < target_rate < 1.0:
+            raise ValueError(f"target firing rate must be between 0 and 1, got {target_rate}")
+        self.homeostasis = homeostasis
+        self.target_rate = target_rate
         self.grid = grid
         self.target = target
         self.lr = lr
@@ -169,6 +216,8 @@ class Teacher:
             self.baseline = reward
         advantage = reward - self.baseline
         reinforce(self.grid, advantage, self.lr, self.sigma, self.eligibility)
+        update_rates(self.grid)
+        homeostasis(self.grid, self.homeostasis, self.target_rate)
         self.baseline += self.baseline_rate * (reward - self.baseline)
         self.epochs += 1
         self.total_reward += reward
@@ -185,11 +234,20 @@ class Teacher:
         """Mean reward over every epoch taught so far."""
         return self.total_reward / self.epochs if self.epochs else None
 
+    def stuck(self) -> str:
+        """Short summary of stuck neurons, e.g. '26 on + 17 off of 56 stuck'."""
+        on, off = stuck_neurons(self.grid)
+        total = len(self.grid.neurons) - self.grid.columns
+        return f"{len(on)} on + {len(off)} off of {total} stuck"
+
     def status(self) -> str:
         if self.average is None:
             return f"learning {self.target}: no epochs yet"
+        settings = f"{self.eligibility}, lr {self.lr:g}, sigma {self.sigma:g}"
+        if self.homeostasis:
+            settings += f", homeostasis {self.homeostasis:g} toward {self.target_rate:g}"
         return (
-            f"learning {self.target} ({self.eligibility}, lr {self.lr:g}): "
+            f"learning {self.target} ({settings}): "
             f"accuracy {self.accuracy_to_date:.1%} to date over {self.epochs:,} epochs, "
-            f"{self.average:.0%} recent"
+            f"{self.average:.0%} recent, {self.stuck()}"
         )

@@ -15,6 +15,7 @@ class Neuron:
         self.potential = 0.0  # weighted input received since the last reset
         self.noise = 0.0  # exploration noise this epoch started with (see learning.py)
         self.touched_stamp = 0  # last wave (a global stamp) in which a signal reached this neuron
+        self.rate = 0.5  # running estimate of how often this neuron fires per epoch (see learning.py)
         self.has_fired = False
         self.fired_in_wave: int | None = None  # set by fire(); None until it fires
 
