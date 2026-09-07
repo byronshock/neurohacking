@@ -225,6 +225,7 @@ class Teacher:
         self.unstick = unstick
         self.unstick_target = unstick_target
         self.unstuck_count = 0  # how many epoch-nudges the output un-sticking has applied
+        self.history: list[dict] = []  # one entry per progress report; saved in checkpoints
         if not 0.0 < target_rate < 1.0:
             raise ValueError(f"target firing rate must be between 0 and 1, got {target_rate}")
         low, high = threshold_range
@@ -278,6 +279,21 @@ class Teacher:
     def accuracy_to_date(self) -> float | None:
         """Mean reward over every epoch taught so far."""
         return self.total_reward / self.epochs if self.epochs else None
+
+    def record(self, elapsed: float | None = None, epochs_per_second: float | None = None) -> dict:
+        """Append the current figures to the history (called at each progress report). Returns the entry."""
+        on, off = stuck_neurons(self.grid)
+        entry = {
+            "epoch": self.grid.epoch,
+            "elapsed": None if elapsed is None else round(elapsed, 1),
+            "accuracy_to_date": None if self.accuracy_to_date is None else round(self.accuracy_to_date, 4),
+            "recent": None if self.average is None else round(self.average, 4),
+            "stuck_on": len(on),
+            "stuck_off": len(off),
+            "epochs_per_second": None if epochs_per_second is None else round(epochs_per_second),
+        }
+        self.history.append(entry)
+        return entry
 
     def stuck(self) -> str:
         """Short summary of stuck neurons, e.g. '26 on + 17 off of 56 stuck'."""

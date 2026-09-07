@@ -51,6 +51,7 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
             "threshold_range": list(teacher.threshold_range),
             "unstick": teacher.unstick,
             "unstick_target": teacher.unstick_target,
+            "history": teacher.history,
             "total_reward": teacher.total_reward,
             "baseline": teacher.baseline,
             "average": teacher.average,
@@ -123,3 +124,4 @@ def resume_teacher(teacher, data: dict) -> None:
     teacher.total_reward = record["total_reward"]
     teacher.baseline = record["baseline"]
     teacher.average = record["average"]
+    teacher.history = list(record.get("history", []))

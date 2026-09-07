@@ -50,7 +50,7 @@ mesh and presents the next input.
 ```bash
 walnutbutter                              # the default: free-running window with learning
 walnutbutter --window 1200 800            # a bigger window
-walnutbutter --report 300                 # a progress line every 5 minutes instead of 30 s
+walnutbutter --report 30                  # a progress line every 30 s instead of every second
 walnutbutter --save-weights run1.json     # checkpoint the learned weights at every report and on exit
 walnutbutter --load-weights run1.json     # continue from a checkpoint (same mesh, seed and permutation)
 walnutbutter --step                       # one epoch per Space press
@@ -63,8 +63,12 @@ after every one, with no coupling to the display; the window samples its
 state 30 times a second, always showing a completed epoch. The title bar
 shows the epoch count, the epoch rate, the accuracy to date (the mean over
 every epoch since the start) and the recent accuracy, and the same figures
-go to the terminal every `--report` seconds with an elapsed-time stamp, so a
-run can be left for hours and read back later. **Esc** or **Q** closes the
+go to the terminal every `--report` seconds (default 1) with an elapsed-time
+stamp, so a run can be left for hours and read back later. Each report is
+also appended to an accuracy history (epoch, elapsed seconds, accuracy to
+date, recent accuracy, stuck counts, epoch rate) that `--save-weights`
+stores in the checkpoint and `--load-weights` carries forward, so the
+learning curve survives the window closing. **Esc** or **Q** closes the
 window; the final figures are printed on exit.
 
 With `--step` nothing happens until you press **Space**, which resets every

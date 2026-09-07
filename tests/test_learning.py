@@ -331,3 +331,19 @@ def test_teacher_applies_unsticking_and_reports_it():
 def test_unstick_defaults_on_at_one_thousandth():
     teacher = Teacher(main(columns=8, rows=4, seed=1))
     assert teacher.unstick == 1e-3 and teacher.unstick_target == 0.5
+
+
+
+def test_record_appends_the_current_figures_to_the_history():
+    grid = main(columns=8, rows=4, seed=1)
+    teacher = Teacher(grid, seed=1)
+    assert teacher.history == []
+    teacher.step()
+    entry = teacher.record(elapsed=12.34, epochs_per_second=2500.6)
+    assert teacher.history == [entry]
+    assert entry["epoch"] == 1 and entry["elapsed"] == 12.3 and entry["epochs_per_second"] == 2501
+    assert entry["accuracy_to_date"] == round(teacher.accuracy_to_date, 4) and entry["recent"] == round(teacher.average, 4)
+    assert entry["stuck_on"] + entry["stuck_off"] <= len(grid.neurons) - grid.columns
+    teacher.epoch(verbose=False)
+    teacher.record()
+    assert len(teacher.history) == 2 and teacher.history[1]["epoch"] == 2 and teacher.history[1]["elapsed"] is None

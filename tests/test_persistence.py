@@ -150,3 +150,22 @@ def test_checkpoint_records_the_unstick_settings(tmp_path):
     path = tmp_path / "w.json"
     data = checkpoint(grid, path, teacher)
     assert data["learning"]["unstick"] == 0.005 and data["learning"]["unstick_target"] == 0.45
+
+
+def test_checkpoint_carries_the_accuracy_history_and_resume_continues_it(tmp_path):
+    grid = main(columns=8, rows=4, seed=1)
+    teacher = Teacher(grid, seed=1)
+    teacher.step()
+    for i in range(3):
+        teacher.epoch(verbose=False)
+        teacher.record(elapsed=float(i), epochs_per_second=100.0)
+    path = tmp_path / "w.json"
+    data = checkpoint(grid, path, teacher)
+    assert len(data["learning"]["history"]) == 3
+    restored, data = restore(path)
+    resumed = Teacher(restored, seed=2)
+    resume_teacher(resumed, data)
+    assert resumed.history == teacher.history
+    resumed.epoch(verbose=False)
+    resumed.record(elapsed=0.5)
+    assert len(resumed.history) == 4 and resumed.history[-1]["epoch"] == 5

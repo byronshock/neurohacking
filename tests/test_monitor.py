@@ -321,3 +321,14 @@ def test_cli_unstick_options(capsys):
     assert "unstick 0.02" in capsys.readouterr().err
     assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5", "--unstick", "0"]) == 0
     assert "unstick" not in capsys.readouterr().err
+
+
+def test_headless_run_records_history_and_default_report_is_one_second(tmp_path, capsys):
+    from walnutbutter.cli import build_parser
+    from walnutbutter.persistence import read_checkpoint
+    assert build_parser().parse_args([]).report == 1.0
+    path = tmp_path / "w.json"
+    args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "50", "--save-weights", str(path)]
+    assert cli_main(args) == 0
+    history = read_checkpoint(path)["learning"]["history"]
+    assert len(history) == 10 and history[-1]["epoch"] == 50 and history[0]["epoch"] == 5

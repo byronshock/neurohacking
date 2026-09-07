@@ -304,6 +304,7 @@ def show(
                 now = time.perf_counter()
                 if teacher and report_seconds is not None and now - last_report >= report_seconds:
                     last_report = now
+                    teacher.record(now - started, epochs_per_second)
                     log(f"[{format_elapsed(now - started)}] epoch {grid.epoch:,}: {teacher.status()}, {epochs_per_second:,.0f} epochs/s")
                     if on_report:
                         on_report()

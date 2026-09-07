@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import random
 import sys
+import time
 
 from .cartesian import CartesianNodes
 from .inputs import parse_bits
@@ -118,9 +119,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--report",
         type=float,
-        default=30.0,
+        default=1.0,
         metavar="SECONDS",
-        help="while free-running, print a progress line this often (default: 30)",
+        help="while free-running, print a progress line (and record it in the checkpoint history) this often (default: 1)",
     )
     parser.add_argument(
         "--no-learn",
@@ -339,10 +340,13 @@ def _run(args: argparse.Namespace) -> int:
                 )
             else:
                 report_every = max(1, args.epochs // 10)
+                started = time.perf_counter()
                 for epoch in range(2, args.epochs + 1):
                     if teacher:
                         teacher.epoch()  # --quiet drops the per-neuron lines, not the per-epoch line
                         if epoch % report_every == 0 or epoch == args.epochs:
+                            elapsed = time.perf_counter() - started
+                            teacher.record(elapsed, (epoch - 1) / elapsed if elapsed else None)
                             print(f"epoch {epoch}: {teacher.status()}", file=sys.stderr)
                             save_checkpoint()
                     else:
