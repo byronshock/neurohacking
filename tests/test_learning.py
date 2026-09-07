@@ -242,7 +242,7 @@ def test_teacher_validates_homeostasis_and_reports_it():
         Teacher(grid, target_rate=1.5)
     teacher = Teacher(grid, homeostasis=0.01, target_rate=0.4, seed=1)
     teacher.step()
-    assert "homeostasis 0.01 toward 0.4 in [-5, 5]" in teacher.status() and "stuck" in teacher.status()
+    assert "homeostasis 0.01 toward 0.4 in [-5, 5]" in teacher.status() and "stuck" not in teacher.status()
     default = Teacher(grid, seed=1)
     default.step()
     assert "homeostasis 1e-06 toward 0.4" in default.status() and "sigma 0.1" in default.status()

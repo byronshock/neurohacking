@@ -269,7 +269,7 @@ def test_cli_homeostasis_options(capsys):
             "--homeostasis", "0.01", "--target-rate", "0.3"]
     assert cli_main(args) == 0
     err = capsys.readouterr().err
-    assert "homeostasis 0.01 toward 0.3 in [-5, 5]" in err and "stuck" in err
+    assert "homeostasis 0.01 toward 0.3 in [-5, 5]" in err and "stuck" not in err
 
 
 def test_cli_threshold_range_option(capsys):
@@ -364,3 +364,32 @@ def test_resumed_run_gets_its_own_file(tmp_path, capsys):
     assert cli_main(["--headless", "-q", "--epochs", "5", "--load-weights", str(first)]) == 0
     assert first.read_text() == before  # the loaded file is untouched
     assert len(list(Path("runs").glob("*-seed7.json"))) == 1
+
+
+def test_seeds_runs_in_parallel_and_reports_a_sorted_table(tmp_path, capsys):
+    from pathlib import Path
+    from walnutbutter.persistence import read_checkpoint
+    args = ["--seeds", "3", "--seed", "10", "--columns", "8", "--rows", "4", "--epochs", "40"]
+    assert cli_main(args) == 0
+    captured = capsys.readouterr()
+    lines = [l for l in captured.out.splitlines() if l.strip() and not l.startswith(" " * 6 + "seed")]
+    rows = [l.split() for l in lines[1:]]
+    assert [int(r[0]) for r in rows] and sorted(int(r[0]) for r in rows) == [10, 11, 12]
+    recents = [float(r[1].rstrip("%")) for r in rows]
+    assert recents == sorted(recents, reverse=True)
+    assert "3 seeds from 10 on" in captured.err and "best seed" in captured.err
+    files = sorted(Path("runs").glob("*-seed1?.json"))
+    assert len(files) == 3 and all(read_checkpoint(f)["epoch"] == 40 for f in files)
+
+
+def test_seeds_rejects_bad_arguments(capsys):
+    assert cli_main(["--seeds", "0", "--epochs", "10"]) == 2
+    assert cli_main(["--seeds", "2", "--epochs", "1"]) == 2
+    assert cli_main(["--seeds", "2", "--epochs", "10", "--no-learn"]) == 2
+
+
+def test_seeds_with_no_save_writes_nothing(capsys):
+    from pathlib import Path
+    assert cli_main(["--seeds", "2", "--seed", "1", "--columns", "8", "--rows", "4", "--epochs", "10", "--no-save"]) == 0
+    assert not Path("runs").exists()
+    assert "  -" in capsys.readouterr().out

@@ -59,7 +59,7 @@ class GridOfNeurons:
         weight: float | None = 1.0,
         threshold: float = 0.25,
         seed: int | None = None,
-        omega: float = 0.05,
+        omega: float = 0.2,
         permute: bool = True,
         weight_range: tuple[float, float] = (-1.0, 1.0),
         minimum_potential: float = -1.0,

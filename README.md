@@ -26,7 +26,7 @@ walnutbutter --input 1011                 # choose the 4 input bits
 walnutbutter --no-permute                 # coded bits in order on the bottom row
 walnutbutter --seed 42       # repeat a particular random mesh
 walnutbutter --weight 1      # a fixed weight on every connection instead
-walnutbutter --omega 0.1     # one connection in ten is a shortcut (default: 0.05)
+walnutbutter --omega 0.1     # one connection in ten is a shortcut (default: 0.2)
 walnutbutter --positive-weights --threshold 2   # no inhibition: weights kept in [epsilon, 1]
 walnutbutter --omega 0       # plain mesh, no shortcuts
 walnutbutter --weight 0.2 --show   # signal dies at the origin
@@ -44,6 +44,22 @@ bits for the first epoch, `--no-permute` lays the coded bits down in order,
 and `--seed` reproduces the permutation and the whole sequence of random
 inputs. Columns must be even. From Python, `run_epoch(grid)` resets the
 mesh and presents the next input.
+
+## Comparing seeds
+
+Outcomes vary a lot between seeds: with identical settings, some seeds reach
+the high 80s within a million epochs while others sit in the low 60s. So
+the best use of a many-core machine is to run several seeds at once and
+keep the best:
+
+```bash
+walnutbutter --seeds 15 --epochs 1000000 --seed 1
+```
+
+runs seeds 1 to 15 in parallel, headless, one process per core, prints a
+table sorted best first (accuracy over each run's last tenth, and to date),
+and checkpoints every run to `runs/` so the winner can be loaded with
+`--load-weights`. Without `--seed` the base seed is random and printed.
 
 ## Seeing the grid
 
@@ -120,7 +136,7 @@ flag. The grid keeps every connection in `grid.connections`, a dictionary
 keyed by ID starting from 1. A neuron lists the connections it sends along in
 `outgoing` and the ones it receives from in `incoming`.
 
-**Small-world shortcuts.** `omega` (0 up to but not including 1, default 0.05)
+**Small-world shortcuts.** `omega` (0 up to but not including 1, default 0.2)
 is the proportion of all connections that are long-range shortcuts. After the local
 mesh is built with L connections, `omega * L / (1 - omega)` extra connections
 are added, each running one way from a random neuron to a random neuron that
@@ -252,7 +268,7 @@ From Python: `persistence.checkpoint(grid, path, teacher)` and
 **Stuck neurons and homeostasis.** A neuron whose input sits far from its
 threshold is never flipped by the exploration noise, so it gets no learning
 signal and stays "stuck" always on or always off; on a long run most hidden
-neurons end up that way. The status line counts them. To counter it, every
+neurons end up that way. To counter it, every
 neuron outside the input row tracks its own firing rate and slowly moves its
 threshold toward a target rate (`--homeostasis`, default 1e-6 per epoch,
 `--target-rate`, default 0.4); firing too often raises the threshold, too

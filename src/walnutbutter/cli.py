@@ -6,7 +6,9 @@ import argparse
 import random
 import sys
 import time
+import os
 from datetime import datetime
+from multiprocessing import Pool
 from pathlib import Path
 
 from .cartesian import CartesianNodes
@@ -68,8 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         "--omega",
         type=float,
-        default=0.05,
-        help="proportion of connections that are small-world shortcuts, 0 to <1 (default: 0.05)",
+        default=0.2,
+        help="proportion of connections that are small-world shortcuts, 0 to <1 (default: 0.2)",
     )
     parser.add_argument(
         "-i",
@@ -94,6 +96,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.001,
         help="the smallest weight allowed under --positive-weights (default: 0.001)",
+    )
+    parser.add_argument(
+        "--seeds",
+        type=int,
+        metavar="N",
+        default=None,
+        help="run N seeds in parallel (consecutive from --seed, or from a random base), headless, for --epochs "
+        "each; print a table sorted best first and checkpoint every run",
     )
     parser.add_argument(
         "--seed",
@@ -264,6 +274,8 @@ def _run(args: argparse.Namespace) -> int:
         width, height = args.window
         if args.nodes is not None:
             return _run_nodes(args, width, height)
+        if args.seeds is not None:
+            return _run_seeds(args)
         loaded = None
         if args.load_weights:
             try:
@@ -423,4 +435,98 @@ def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
         for neuron in nodes:
             x, y = neuron.position
             print(f"{neuron.name}: ({x:+.3f}, {y:+.3f})")
+    return 0
+
+
+def _seed_worker(job: dict) -> dict:
+    """One seed's headless run, in its own process. Returns a summary row."""
+    Neuron.verbose = False
+    seed, epochs = job["seed"], job["epochs"]
+    grid = main(**job["settings"], seed=seed, input_bits=None)
+    teacher = Teacher(grid, seed=seed, **job["teacher"])
+    teacher.step()
+    report_every = max(1, epochs // 10)
+    started = time.perf_counter()
+    rewards = []
+    for epoch in range(2, epochs + 1):
+        rewards.append(teacher.epoch(verbose=False))
+        if epoch % report_every == 0 or epoch == epochs:
+            elapsed = time.perf_counter() - started
+            teacher.record(elapsed, (epoch - 1) / elapsed if elapsed else None)
+    if job["save"]:
+        checkpoint(grid, job["save"], teacher)
+    tail = rewards[-max(1, len(rewards) // 10):]  # the last tenth of the run
+    return {
+        "seed": seed,
+        "to_date": teacher.accuracy_to_date,
+        "recent": sum(tail) / len(tail),
+        "epochs": teacher.epochs,
+        "save": job["save"],
+    }
+
+
+def _run_seeds(args: argparse.Namespace) -> int:
+    """--seeds N: N headless runs in parallel, one table at the end, a checkpoint per run."""
+    if args.seeds < 1:
+        print(f"error: --seeds needs at least 1, got {args.seeds}", file=sys.stderr)
+        return 2
+    if args.epochs < 2:
+        print("error: --seeds needs --epochs of at least 2", file=sys.stderr)
+        return 2
+    base = args.seed if args.seed is not None else random.randrange(2**31 - args.seeds)
+    seeds = list(range(base, base + args.seeds))
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    settings = dict(
+        columns=args.columns,
+        rows=args.rows,
+        weight=args.weight,
+        threshold=args.threshold,
+        omega=args.omega,
+        permute=not args.no_permute,
+        weight_range=(args.epsilon, 1.0) if args.positive_weights else (-1.0, 1.0),
+        minimum_potential=args.minimum_potential,
+    )
+    teacher_kwargs = dict(
+        target=args.target,
+        lr=args.lr,
+        sigma=args.sigma,
+        eligibility=args.eligibility,
+        homeostasis=args.homeostasis,
+        target_rate=args.target_rate,
+        threshold_range=tuple(args.threshold_range),
+        carry_over=args.carry_over,
+        unstick=args.unstick,
+        unstick_target=args.unstick_target,
+    )
+    if args.no_learn:
+        print("error: --seeds is for comparing learning runs; drop --no-learn", file=sys.stderr)
+        return 2
+    jobs = []
+    for seed in seeds:
+        save = None
+        if not args.no_save:
+            save = args.save_weights or str(Path("runs") / f"{stamp}-seed{seed}.json")
+            if args.save_weights and args.seeds > 1:
+                save = str(Path(args.save_weights).with_suffix("")) + f"-seed{seed}.json"
+            Path(save).parent.mkdir(parents=True, exist_ok=True)
+        jobs.append({"seed": seed, "epochs": args.epochs, "settings": settings, "teacher": teacher_kwargs, "save": save})
+    workers = max(1, min(args.seeds, (os.cpu_count() or 2) - 1))
+    print(
+        f"{args.seeds} seeds from {base} on {workers} cores, {args.epochs:,} epochs each, "
+        f"{args.columns}x{args.rows}, omega {args.omega:g}",
+        file=sys.stderr,
+    )
+    started = time.perf_counter()
+    with Pool(workers) as pool:
+        rows = pool.map(_seed_worker, jobs)
+    rows.sort(key=lambda r: (r["recent"], r["to_date"]), reverse=True)
+    print(f"{'seed':>11}  {'last tenth':>10}  {'to date':>8}  checkpoint")
+    for r in rows:
+        print(f"{r['seed']:>11}  {r['recent']:>10.1%}  {r['to_date']:>8.1%}  {r['save'] or '-'}")
+    best = rows[0]
+    print(
+        f"best seed {best['seed']}: {best['recent']:.1%} over its last tenth "
+        f"({time.perf_counter() - started:.0f}s wall)",
+        file=sys.stderr,
+    )
     return 0

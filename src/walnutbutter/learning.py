@@ -295,12 +295,6 @@ class Teacher:
         self.history.append(entry)
         return entry
 
-    def stuck(self) -> str:
-        """Short summary of stuck neurons, e.g. '26 on + 17 off of 56 stuck'."""
-        on, off = stuck_neurons(self.grid)
-        total = len(self.grid.neurons) - self.grid.columns
-        return f"{len(on)} on + {len(off)} off of {total} stuck"
-
     def status(self) -> str:
         if self.average is None:
             return f"learning {self.target}: no epochs yet"
@@ -315,5 +309,5 @@ class Teacher:
         return (
             f"learning {self.target} ({settings}): "
             f"accuracy {self.accuracy_to_date:.1%} to date over {self.epochs:,} epochs, "
-            f"{self.average:.0%} recent, {self.stuck()}"
+            f"{self.average:.0%} recent"
         )
