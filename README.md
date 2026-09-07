@@ -27,6 +27,7 @@ neurohacking --no-permute                 # coded bits in order on the bottom ro
 neurohacking --seed 42       # repeat a particular random mesh
 neurohacking --weight 1      # a fixed weight on every connection instead
 neurohacking --omega 0.1     # one connection in ten is a shortcut (default: 0.05)
+neurohacking --positive-weights --threshold 2   # no inhibition: weights kept in [epsilon, 1]
 neurohacking --omega 0       # plain mesh, no shortcuts
 neurohacking --weight 0.2 --show   # signal dies at the origin
 python -m neurohacking       # same thing without the installed command
@@ -155,7 +156,13 @@ waves = grid.propagate(inputs={origin: 0.6, corner: 0.6})  # external input amou
 
 **Weights.** By default the command line gives every connection its own
 random weight, drawn uniformly between -1 and 1, so each direction between a
-pair of neurons gets an independent value. The seed is printed so a run can be
+pair of neurons gets an independent value. `--positive-weights` restricts
+the range to `[epsilon, 1]` (`--epsilon`, default 0.001) for both the
+initial draw and the clipping applied during learning, which removes all
+inhibition. With nothing to hold activity down, a positive-weight mesh at
+threshold 0.25 fires every neuron every epoch; a threshold of about 2 gives
+activity comparable to the signed default. The range is stored in
+checkpoints and restored with them. The seed is printed so a run can be
 repeated with `--seed`. With the default threshold of 0.25, a typical random
 mesh lets the signal reach somewhere between a tenth and a third of the
 neurons before it dies out; raise `--threshold` to make it die sooner, lower

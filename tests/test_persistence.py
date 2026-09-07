@@ -97,3 +97,13 @@ def test_checkpoint_without_teacher_has_no_learning_record(tmp_path):
     teacher = Teacher(restore(path)[0])
     resume_teacher(teacher, data)  # a no-op
     assert teacher.epochs == 0
+
+
+def test_checkpoint_keeps_the_weight_range(tmp_path):
+    grid = GridOfNeurons(columns=6, rows=4, weight=None, seed=1, weight_range=(0.01, 1.0))
+    path = tmp_path / "w.json"
+    checkpoint(grid, path)
+    restored, data = restore(path)
+    assert data["weight_range"] == [0.01, 1.0]
+    assert restored.weight_range == (0.01, 1.0)
+    assert [c.weight for c in restored.connections.values()] == [c.weight for c in grid.connections.values()]

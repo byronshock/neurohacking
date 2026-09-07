@@ -28,6 +28,7 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         "seed": grid.seed,
         "random_weights": grid.weight is None,
         "weight": grid.weight,
+        "weight_range": list(grid.weight_range),
         "permutation": grid.permutation,
         "epoch": grid.epoch,
         "connections": len(grid.connections),
@@ -75,6 +76,7 @@ def restore(path: str | Path) -> tuple[GridOfNeurons, dict]:
         seed=data["seed"],
         omega=data["omega"],
         permute=False,
+        weight_range=tuple(data.get("weight_range", (-1.0, 1.0))),
     )
     grid.permutation = list(data["permutation"])
     load_weights(grid, data)

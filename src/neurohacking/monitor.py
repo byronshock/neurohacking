@@ -55,6 +55,7 @@ def main(
     omega: float = 0.05,
     input_bits: Sequence[bool] | None = None,
     permute: bool = True,
+    weight_range: tuple[float, float] = (-1.0, 1.0),
 ) -> GridOfNeurons:
     """Build a columns x rows grid, run one epoch on its bottom row, and return it.
 
@@ -68,7 +69,14 @@ def main(
     tests) inspect which neurons fired.
     """
     grid = GridOfNeurons(
-        columns=columns, rows=rows, weight=weight, threshold=threshold, seed=seed, omega=omega, permute=permute
+        columns=columns,
+        rows=rows,
+        weight=weight,
+        threshold=threshold,
+        seed=seed,
+        omega=omega,
+        permute=permute,
+        weight_range=weight_range,
     )
     run_epoch(grid, input_bits)
     return grid

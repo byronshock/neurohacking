@@ -386,3 +386,33 @@ def test_set_input_bits_applies_the_permutation():
     assert grid.input_coded == coded
     assert grid.input_pattern == [coded[i] for i in grid.permutation]
     assert sorted(grid.input_pattern) == sorted(coded)  # a scramble, not a change of content
+
+
+
+# --- weight range ------------------------------------------------------------
+
+
+def test_default_weight_range_is_signed():
+    grid = GridOfNeurons(columns=6, rows=4, weight=None, seed=1)
+    assert grid.weight_range == (-1.0, 1.0)
+    assert min(c.weight for c in grid.connections.values()) < 0
+
+
+def test_positive_weight_range_draws_and_clips_within_it():
+    grid = GridOfNeurons(columns=6, rows=4, weight=None, seed=1, weight_range=(0.001, 1.0))
+    weights = [c.weight for c in grid.connections.values()]
+    assert all(0.001 <= w <= 1.0 for w in weights) and min(weights) < 0.1 and max(weights) > 0.9
+    assert grid.clip_weight(-0.5) == 0.001
+    assert grid.clip_weight(7.0) == 1.0
+    assert grid.clip_weight(0.4) == 0.4
+
+
+def test_randomize_weights_explicit_bounds_still_win():
+    grid = GridOfNeurons(columns=6, rows=4, seed=1, weight_range=(0.001, 1.0))
+    grid.randomize_weights(low=-0.5, high=-0.4)
+    assert all(-0.5 <= c.weight <= -0.4 for c in grid.connections.values())
+
+
+def test_invalid_weight_range_is_rejected():
+    with pytest.raises(ValueError):
+        GridOfNeurons(columns=4, rows=3, weight_range=(1.0, 0.0))

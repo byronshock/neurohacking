@@ -241,3 +241,24 @@ def test_cli_reports_a_bad_checkpoint(tmp_path, capsys):
     path = tmp_path / "nope.json"
     assert cli_main(["--headless", "--load-weights", str(path)]) == 2
     assert "cannot load" in capsys.readouterr().err
+
+
+def test_cli_positive_weights_option(capsys):
+    args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5",
+            "--positive_weights", "--epsilon", "0.01", "--threshold", "2"]
+    assert cli_main(args) == 0
+    assert "positive weights: every weight kept between 0.01 and 1" in capsys.readouterr().err
+
+
+def test_cli_positive_weights_rejects_bad_epsilon(capsys):
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--positive-weights", "--epsilon", "0"]) == 2
+    assert "epsilon" in capsys.readouterr().err
+
+
+def test_cli_load_restores_positive_weights(tmp_path, capsys):
+    path = tmp_path / "pos.json"
+    base = ["--headless", "--columns", "8", "--rows", "4", "--seed", "3", "-q", "--epochs", "5"]
+    assert cli_main(base + ["--positive-weights", "--epsilon", "0.05", "--save-weights", str(path)]) == 0
+    capsys.readouterr()
+    assert cli_main(["--headless", "-q", "--epochs", "5", "--load-weights", str(path)]) == 0
+    assert "positive weights: every weight kept between 0.05 and 1" in capsys.readouterr().err

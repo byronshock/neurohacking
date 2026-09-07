@@ -70,6 +70,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="lay the complement-coded bits on the bottom row in order instead of scrambling them",
     )
     parser.add_argument(
+        "--positive-weights",
+        "--positive_weights",
+        action="store_true",
+        help="keep every weight between epsilon and 1: no inhibitory connections, before or after learning",
+    )
+    parser.add_argument(
+        "--epsilon",
+        type=float,
+        default=0.001,
+        help="the smallest weight allowed under --positive-weights (default: 0.001)",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -196,6 +208,8 @@ def _run(args: argparse.Namespace) -> int:
             args.columns, args.rows, args.omega = data["columns"], data["rows"], data["omega"]
             args.threshold = data["threshold"]
             args.weight = None if data["random_weights"] else data["weight"]
+            low, high = data.get("weight_range", (-1.0, 1.0))
+            args.positive_weights, args.epsilon = low > 0, low
             print(
                 f"loaded {args.load_weights}: {args.columns}x{args.rows}, seed {args.seed}, "
                 f"{data['epoch']:,} epochs so far",
@@ -210,7 +224,13 @@ def _run(args: argparse.Namespace) -> int:
             seed=seed,
             omega=args.omega,
             permute=not args.no_permute,
+            weight_range=(args.epsilon, 1.0) if args.positive_weights else (-1.0, 1.0),
         )
+        if args.positive_weights and not 0 < args.epsilon < 1:
+            print(f"error: epsilon must be between 0 and 1, got {args.epsilon}", file=sys.stderr)
+            return 2
+        if args.positive_weights:
+            print(f"positive weights: every weight kept between {args.epsilon:g} and 1", file=sys.stderr)
         if args.weight is None or args.omega > 0 or args.input is None:
             print(f"seed {seed}", file=sys.stderr)
 

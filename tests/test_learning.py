@@ -171,3 +171,13 @@ def test_accuracy_to_date_is_the_mean_over_all_epochs():
     rewards = [teacher.step()] + [teacher.epoch(verbose=False) for _ in range(9)]
     assert teacher.accuracy_to_date == pytest.approx(sum(rewards) / 10)
     assert "to date over 10 epochs" in teacher.status()
+
+
+def test_reinforce_clips_to_the_grid_weight_range():
+    grid = GridOfNeurons(columns=8, rows=4, weight=None, seed=2, omega=0, weight_range=(0.001, 1.0), threshold=2.0)
+    run_epoch(grid, verbose=False, noise=0.1, rng=random.Random(2))
+    reinforce(grid, advantage=-1.0, lr=50.0)  # a huge negative push: everything touched should hit the floor, not go negative
+    touched = [c for c in delivered_connections(grid) if c.target.fired_in_wave != 0 and c.target.noise > 0]
+    assert touched
+    assert all(c.weight == 0.001 for c in touched)
+    assert all(c.weight >= 0.001 for c in grid.connections.values())

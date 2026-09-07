@@ -61,11 +61,13 @@ class GridOfNeurons:
         seed: int | None = None,
         omega: float = 0.05,
         permute: bool = True,
+        weight_range: tuple[float, float] = (-1.0, 1.0),
     ):
         """Build the mesh.
 
         `weight` is given to every connection; pass None to draw each weight
-        independently from a uniform distribution between -1 and 1 instead.
+        independently and uniformly from `weight_range` instead. The range is
+        also what learning clips weights to; (epsilon, 1) keeps them positive.
         `threshold` is given to every neuron. `omega` is the proportion of all
         connections that are small-world shortcuts (0 <= omega < 1): after the
         local mesh is built, shortcuts from random neurons to random
@@ -79,6 +81,10 @@ class GridOfNeurons:
             raise ValueError(f"grid needs at least one column and one row, got {columns}x{rows}")
         if not 0.0 <= omega < 1.0:
             raise ValueError(f"omega must be at least 0 and less than 1, got {omega}")
+        low, high = weight_range
+        if not low < high:
+            raise ValueError(f"weight range must run from low to high, got {weight_range}")
+        self.weight_range = (float(low), float(high))
         self.columns = columns
         self.rows = rows
         self.weight = weight  # fixed weight for every connection, or None for random
@@ -181,16 +187,26 @@ class GridOfNeurons:
         """Connections to neighbours of neighbours, in ID order."""
         return [c for c in self.connections.values() if c.kind == "local2"]
 
-    def randomize_weights(self, low: float = -1.0, high: float = 1.0, seed: int | None = None) -> None:
+    def randomize_weights(
+        self, low: float | None = None, high: float | None = None, seed: int | None = None
+    ) -> None:
         """Give every connection its own weight, drawn uniformly between low and high.
 
-        Each direction between two neurons gets an independent draw. Weights are
-        assigned in connection-ID order, so the same seed always gives the same mesh.
-        With no seed here, the grid's own seeded stream is used.
+        The bounds default to the grid's weight_range. Each direction between two
+        neurons gets an independent draw. Weights are assigned in connection-ID
+        order, so the same seed always gives the same mesh. With no seed here,
+        the grid's own seeded stream is used.
         """
+        low = self.weight_range[0] if low is None else low
+        high = self.weight_range[1] if high is None else high
         rng = self._rng if seed is None else random.Random(seed)
         for connection in self.connections.values():
             connection.weight = rng.uniform(low, high)
+
+    def clip_weight(self, weight: float) -> float:
+        """Keep a weight inside the grid's weight_range."""
+        low, high = self.weight_range
+        return max(low, min(high, weight))
 
     # --- lookup -----------------------------------------------------------
 

@@ -24,7 +24,8 @@ global reward. With `eligibility="hebb"` the perturbation is replaced by a
 plain Hebbian term (+1 if the target fired, -1 if not) and no noise is
 injected, which is the classic reward-modulated Hebbian rule.
 
-Forced inputs are never adjusted and weights are kept within [-1, 1].
+Forced inputs are never adjusted and weights are kept within the grid's
+weight_range, [-1, 1] by default.
 """
 
 from __future__ import annotations
@@ -105,7 +106,7 @@ def reinforce(
         else:
             e = 1.0 if target.has_fired else -1.0
         if e:
-            connection.weight = max(-1.0, min(1.0, connection.weight + lr * advantage * e))
+            connection.weight = grid.clip_weight(connection.weight + lr * advantage * e)
             changed += 1
     return changed
 
