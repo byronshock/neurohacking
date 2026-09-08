@@ -247,10 +247,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --headless: how many epochs to run, printing accuracy along the way (default: 1)",
     )
     parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="print a line for every epoch's input and for every neuron that fires (slow; off by default)",
+    )
+    parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
-        help="do not print a line for every neuron that fires (free-running is always quiet)",
+        help="accepted for compatibility: runs are quiet unless --verbose",
     )
     parser.add_argument(
         "--save-weights",
@@ -285,7 +291,7 @@ def cli_main(argv: list[str] | None = None) -> int:
     args.fast = args.show and not args.step
     args.learn = not args.no_learn
     was_verbose = Neuron.verbose
-    Neuron.verbose = not (args.quiet or args.fast)
+    Neuron.verbose = bool(args.verbose) and not args.fast and not args.quiet
     try:
         return _run(args)
     finally:
@@ -419,9 +425,9 @@ def _run(args: argparse.Namespace) -> int:
                 )
                 if loaded:
                     resume_teacher(teacher, data)
-                teacher.epoch(input_bits)  # the first epoch, with exploration, like every other
+                teacher.epoch(input_bits, verbose=Neuron.verbose)  # the first epoch, with exploration, like every other
             else:
-                run_epoch(grid, input_bits, discharge=not args.carry_over)
+                run_epoch(grid, input_bits, verbose=Neuron.verbose, discharge=not args.carry_over)
 
             def save_checkpoint():
                 if args.save_weights:
@@ -438,14 +444,14 @@ def _run(args: argparse.Namespace) -> int:
                 started = time.perf_counter()
                 for epoch in range(2, args.epochs + 1):
                     if teacher:
-                        teacher.epoch()  # --quiet drops the per-neuron lines, not the per-epoch line
+                        teacher.epoch(verbose=Neuron.verbose)  # silent unless --verbose: printing is slower than learning
                         if epoch % report_every == 0 or epoch == args.epochs:
                             elapsed = time.perf_counter() - started
                             teacher.record(elapsed, (epoch - 1) / elapsed if elapsed else None)
                             print(f"epoch {epoch}: {teacher.status()}", file=sys.stderr)
                             save_checkpoint()
                     else:
-                        run_epoch(grid, discharge=not args.carry_over)
+                        run_epoch(grid, verbose=Neuron.verbose, discharge=not args.carry_over)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

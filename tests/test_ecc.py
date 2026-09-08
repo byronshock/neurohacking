@@ -111,21 +111,21 @@ def test_cli_ecc_defaults_to_hamming_on_fourteen_columns_and_checkpoints_the_cod
     from pathlib import Path
     from walnutbutter.cli import cli_main
     from walnutbutter.persistence import restore
-    assert cli_main(["--headless", "--ecc", "--seed", "1", "-q", "--epochs", "3"]) == 0
+    assert cli_main(["--headless", "-v", "--ecc", "--seed", "1", "--epochs", "3"]) == 0
     err = capsys.readouterr().err
     assert "hamming74 (7, 4) code, corrects single errors -> complement code -> 14 columns" in err
     f = next(Path("runs").glob("*-seed1.json"))
     restored, data = restore(f)
     assert data["ecc"] == "hamming74" and restored.ecc == "hamming74" and restored.columns == 14 and restored.rows == 10
-    assert cli_main(["--headless", "-q", "--epochs", "2", "--load-weights", str(f), "--no-save"]) == 0
+    assert cli_main(["--headless", "-v", "--epochs", "2", "--load-weights", str(f), "--no-save"]) == 0
     assert "hamming74" in capsys.readouterr().err
-    assert cli_main(["--headless", "--ecc", "parity64", "--seed", "1", "-q", "--epochs", "2", "--no-save"]) == 0
+    assert cli_main(["--headless", "-v", "--ecc", "parity64", "--seed", "1", "--epochs", "2", "--no-save"]) == 0
     assert "parity64 (6, 4) code, detects single errors -> complement code -> 12 columns" in capsys.readouterr().err
-    assert cli_main(["--headless", "--ecc", "--columns", "8", "--rows", "4", "--no-save"]) == 2
-    assert cli_main(["--headless", "--ecc", "--input", "1011", "--seed", "1", "-q", "--no-save"]) == 0
+    assert cli_main(["--headless", "-v", "--ecc", "--columns", "8", "--rows", "4", "--no-save"]) == 2
+    assert cli_main(["--headless", "-v", "--ecc", "--input", "1011", "--seed", "1", "--no-save"]) == 0
     assert "data 1011 -> hamming74 1011010" in capsys.readouterr().out
     with pytest.raises(SystemExit):
-        cli_main(["--headless", "--ecc", "golay", "--no-save"])
+        cli_main(["--headless", "-v", "--ecc", "golay", "--no-save"])
 
 
 def test_old_checkpoints_with_ecc_true_mean_the_parity_code(tmp_path):

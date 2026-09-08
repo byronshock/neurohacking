@@ -88,7 +88,7 @@ def test_main_random_input_is_reproducible_by_seed(capsys):
 
 
 def test_cli_runs_and_returns_zero(capsys):
-    assert cli_main(["--headless", "--weight", "1"]) == 0
+    assert cli_main(["--headless", "-v", "--weight", "1"]) == 0
     captured = capsys.readouterr()
     assert captured.out.count("fired in wave 0.") == 4  # half of the 8-column bottom row
     assert "80 of 80 neurons fired" in captured.err  # default 8 x 10
@@ -96,7 +96,7 @@ def test_cli_runs_and_returns_zero(capsys):
 
 
 def test_cli_input_option_sets_the_pattern(capsys):
-    assert cli_main(["--headless", "--columns", "6", "--rows", "3", "--weight", "1", "--input", "110", "--no-permute"]) == 0
+    assert cli_main(["--headless", "-v", "--columns", "6", "--rows", "3", "--weight", "1", "--input", "110", "--no-permute"]) == 0
     captured = capsys.readouterr()
     assert "epoch 1: input 110 -> coded 110001 -> bottom row 110001" in captured.out
     assert captured.out.count("fired in wave 0.") == 3
@@ -126,7 +126,7 @@ def test_cli_seed_makes_runs_repeatable(capsys):
 
 
 def test_cli_columns_and_rows_options(capsys):
-    assert cli_main(["--headless", "--columns", "4", "--rows", "3", "--weight", "1"]) == 0
+    assert cli_main(["--headless", "-v", "--columns", "4", "--rows", "3", "--weight", "1"]) == 0
     assert capsys.readouterr().out.count("fired") == 12
 
 
@@ -137,7 +137,7 @@ def test_cli_rejects_unknown_arguments():
 
 
 def test_cli_weight_and_threshold_options(capsys):
-    args = ["--headless", "--columns", "6", "--rows", "5", "--weight", "0.2", "--threshold", "1", "--input", "101"]
+    args = ["--headless", "-v", "--columns", "6", "--rows", "5", "--weight", "0.2", "--threshold", "1", "--input", "101"]
     assert cli_main(args) == 0
     assert capsys.readouterr().out.count("fired") == 3  # only the input neurons: 0.4 max input < 1
 
@@ -171,13 +171,16 @@ def test_run_epoch_verbose_false_prints_nothing_about_the_input(capsys, monkeypa
     assert capsys.readouterr().out == ""
 
 
-def test_cli_quiet_suppresses_neuron_lines_but_keeps_the_epoch_line(capsys):
-    assert cli_main(["--headless", "--columns", "6", "--rows", "3", "--weight", "1", "--quiet"]) == 0
+def test_cli_is_silent_by_default_and_verbose_on_request(capsys):
+    assert cli_main(["--headless", "--columns", "6", "--rows", "3", "--weight", "1", "--no-save"]) == 0
     out = capsys.readouterr().out
-    assert "fired in wave" not in out and "epoch 1: input" in out
-    assert Neuron.verbose is True  # restored once the command finishes
-    cli_main(["--headless", "--columns", "6", "--rows", "3", "--weight", "1"])
-    assert "fired in wave" in capsys.readouterr().out
+    assert out == ""  # nothing per epoch and nothing per neuron: printing is slower than learning
+    assert Neuron.verbose is True  # the process-wide flag is restored once the command finishes
+    assert cli_main(["--headless", "-v", "--columns", "6", "--rows", "3", "--weight", "1", "--no-save"]) == 0
+    out = capsys.readouterr().out
+    assert "fired in wave" in out and "epoch 1: input" in out
+    assert cli_main(["--headless", "-v", "-q", "--columns", "6", "--rows", "3", "--weight", "1", "--no-save"]) == 0
+    assert capsys.readouterr().out == ""  # --quiet still wins if both are given
 
 
 def test_cli_learn_runs_epochs_and_reports_accuracy(capsys):
@@ -192,7 +195,7 @@ def test_cli_learn_runs_epochs_and_reports_accuracy(capsys):
 
 
 def test_cli_epochs_without_learn_just_runs_them(capsys):
-    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "--quiet", "--epochs", "5", "--no-learn"]) == 0
+    assert cli_main(["--headless", "-v", "--columns", "8", "--rows", "4", "--seed", "1", "--epochs", "5", "--no-learn"]) == 0
     out = capsys.readouterr().out
     assert out.count("epoch ") == 5 and "epoch 5:" in out
 

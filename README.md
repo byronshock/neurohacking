@@ -314,6 +314,12 @@ and weights stay within [-1, 1]. `Teacher` wraps all this; use
 `teacher.epoch()` instead of `run_epoch(grid)` so the exploration noise is
 injected.
 
+**Output.** Runs are silent apart from the progress reports and the final
+summary: printing is far slower than learning, and a headless run of millions
+of epochs would otherwise spend its time writing to the terminal. `-v` /
+`--verbose` prints a line for every epoch's input and every neuron that
+fires, for short inspections.
+
 **Saving what it learned.** Every run writes a JSON checkpoint at every
 progress report and on exit, by default to `runs/<date>-<time>-seed<seed>.json`
 (the path is printed at the start; `runs/` is ignored by git). `--save-weights FILE`
