@@ -33,6 +33,7 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         "weight": getattr(grid, "weight", None),
         "weight_range": list(grid.weight_range),
         "permutation": grid.permutation,
+        "ecc": grid.ecc,
         "random_weights": grid.weight is None if not lattice else True,
         "epoch": grid.epoch,
         "connections": len(grid.connections),
@@ -64,6 +65,7 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
             "threshold_range": list(teacher.threshold_range),
             "unstick": teacher.unstick,
             "unstick_target": teacher.unstick_target,
+            "critic": teacher.critic,
             "history": teacher.history,
             "total_reward": teacher.total_reward,
             "baseline": teacher.baseline,
@@ -104,6 +106,7 @@ def restore(path: str | Path) -> tuple[GridOfNeurons, dict]:
         minimum_potential=data.get("minimum_potential", float("-inf")),  # older checkpoints had no floor
     )
     grid.permutation = list(data["permutation"])
+    grid.ecc = _ecc_name(data)
     load_weights(grid, data)
     grid.epoch = data["epoch"]
     return grid, data
@@ -159,6 +162,7 @@ def _restore_lattice(data: dict) -> CartesianNodes:
         for x, y in data["positions"]:
             nodes.add(x, y)
     nodes.permutation = list(data["permutation"])
+    nodes.ecc = _ecc_name(data)
     nodes.receptive_field_sigma = data.get("receptive_field_sigma")
     nodes.reach = data.get("reach")
     neurons = nodes.neurons
@@ -170,3 +174,10 @@ def _restore_lattice(data: dict) -> CartesianNodes:
         neuron.rate = rate
     nodes.epoch = data["epoch"]
     return nodes
+
+
+def _ecc_name(data: dict) -> str | None:
+    value = data.get("ecc")
+    if value is True:
+        return "parity64"  # written when ecc was a flag and meant the (6, 4) code
+    return value or None

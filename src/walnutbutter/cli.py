@@ -14,8 +14,8 @@ from pathlib import Path
 
 from .cartesian import CartesianNodes
 from .grid import GridOfNeurons
-from .inputs import parse_bits
-from .learning import ELIGIBILITIES, TARGETS, Teacher
+from .inputs import CODES, DEFAULT_CODE, parse_bits
+from .learning import CRITICS, ELIGIBILITIES, TARGETS, Teacher
 from .monitor import main, run_epoch
 from .neuron import Neuron
 from .persistence import checkpoint, restore, resume_teacher
@@ -33,8 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-c",
         "--columns",
         type=int,
-        default=8,
-        help="number of hexagons across (default: 8)",
+        default=None,
+        help="number of hexagons across (default: 8, or twice the code length with --ecc)",
     )
     parser.add_argument(
         "-r",
@@ -90,6 +90,17 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="BITS",
         default=None,
         help="raw input bits, one per half column, e.g. 1011 for 8 columns (default: random)",
+    )
+    parser.add_argument(
+        "--ecc",
+        nargs="?",
+        const=DEFAULT_CODE,
+        default=None,
+        choices=sorted(CODES),
+        metavar="CODE",
+        help="encode the 4 data bits with an error-correcting code before complement coding: hamming74 "
+        "(the default with bare --ecc; corrects single errors; 14 columns) or parity64 (detects only; "
+        "12 columns). Sets --columns to fit unless given.",
     )
     parser.add_argument(
         "--no-permute",
@@ -156,6 +167,14 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(TARGETS),
         default="reversed",
         help="what the top row should show, derived from the input row (default: reversed)",
+    )
+    parser.add_argument(
+        "--critic",
+        choices=sorted(CRITICS),
+        default="row",
+        help="how the reward is judged: row (fraction of output neurons matching the target), decoded "
+        "(read the row as a word, error-correct it, fraction of data bits right), or decoded-exact "
+        "(all data bits right or nothing). Default: row",
     )
     parser.add_argument(
         "--lr",
@@ -260,6 +279,8 @@ def build_parser() -> argparse.ArgumentParser:
 def cli_main(argv: list[str] | None = None) -> int:
     """Run the CLI. Returns a process exit code (0 = success)."""
     args = build_parser().parse_args(argv)
+    if args.columns is None:
+        args.columns = 2 * CODES[args.ecc].code_bits if args.ecc else 8
     args.show = not args.headless
     args.fast = args.show and not args.step
     args.learn = not args.no_learn
@@ -302,6 +323,7 @@ def _run(args: argparse.Namespace) -> int:
             args.columns, args.rows, args.omega = data["columns"], data["rows"], data["omega"]
             if data.get("container") == "lattice":
                 args.nodes = 0
+            args.ecc = _ecc_from_checkpoint(data)
             args.threshold = data["threshold"]
             args.minimum_potential = data.get("minimum_potential", -1.0)
             args.weight = None if data["random_weights"] else data["weight"]
@@ -357,6 +379,19 @@ def _run(args: argparse.Namespace) -> int:
                 grid.connect_within(reach=args.reach, weight=args.weight)
             else:
                 grid = GridOfNeurons(**settings)
+            if args.ecc:
+                try:
+                    grid.use_ecc(args.ecc)
+                except ValueError as exc:
+                    print(f"error: {exc}", file=sys.stderr)
+                    return 2
+                code = CODES[args.ecc]
+                print(
+                    f"input: {code.data_bits} data bits -> {code.name} ({code.code_bits}, {code.data_bits}) code, "
+                    f"{'corrects' if code.corrects_single_errors else 'detects'} single errors -> complement code "
+                    f"-> {2 * code.code_bits} columns",
+                    file=sys.stderr,
+                )
             if isinstance(grid, CartesianNodes):
                 print(
                     f"{grid!r}, wired: {len(grid.connections)} one-way connections, every pair within "
@@ -380,6 +415,7 @@ def _run(args: argparse.Namespace) -> int:
                     carry_over=args.carry_over,
                     unstick=args.unstick,
                     unstick_target=args.unstick_target,
+                    critic=args.critic,
                 )
                 if loaded:
                     resume_teacher(teacher, data)
@@ -495,6 +531,8 @@ def _seed_worker(job: dict) -> dict:
         grid.connect_within(reach=job["lattice"]["reach"], weight=settings["weight"])
     else:
         grid = GridOfNeurons(**job["settings"], seed=seed)
+    if job.get("ecc"):
+        grid.use_ecc(job["ecc"])
     teacher = Teacher(grid, seed=seed, **job["teacher"])
     report_every = max(1, epochs // 10)
     started = time.perf_counter()
@@ -548,6 +586,7 @@ def _run_seeds(args: argparse.Namespace) -> int:
         carry_over=args.carry_over,
         unstick=args.unstick,
         unstick_target=args.unstick_target,
+        critic=args.critic,
     )
     if args.no_learn:
         print("error: --seeds is for comparing learning runs; drop --no-learn", file=sys.stderr)
@@ -562,7 +601,7 @@ def _run_seeds(args: argparse.Namespace) -> int:
             Path(save).parent.mkdir(parents=True, exist_ok=True)
         lattice = {"reach": args.reach} if args.nodes is not None else None
         jobs.append({"seed": seed, "epochs": args.epochs, "settings": settings, "teacher": teacher_kwargs,
-                     "save": save, "lattice": lattice})
+                     "save": save, "lattice": lattice, "ecc": args.ecc})
     workers = max(1, min(args.seeds, (os.cpu_count() or 2) - 1))
     wiring = (f"lattice, reach {args.reach:g}" if args.nodes is not None else f"hex grid, omega {args.omega:g}")
     print(
@@ -584,3 +623,11 @@ def _run_seeds(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return 0
+
+
+def _ecc_from_checkpoint(data: dict) -> str | None:
+    """The code a checkpoint used: a name, or the (6, 4) code for files written when ecc was a flag."""
+    value = data.get("ecc")
+    if value is True:
+        return "parity64"
+    return value or None

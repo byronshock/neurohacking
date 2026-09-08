@@ -90,6 +90,80 @@ def accuracy(grid: GridOfNeurons, target: str = "reversed") -> float:
     return sum(1 for e in errors.values() if e == 0) / len(errors)
 
 
+# --- reading the output row as a receiver would ------------------------------------
+
+
+def read_output_word(grid: GridOfNeurons, target: str = "reversed") -> list[bool | None]:
+    """Undo the target's arrangement and the permutation, then resolve each complement pair.
+
+    The output row is what the network produced; the target says where each
+    coded bit was meant to land (reversed: column j shows coded bit
+    permutation[columns-1-j]). Coded bit k and its complement k + half form a
+    pair: if exactly one of them fired, the bit is read; if both or neither
+    did, the bit is unreadable (None) and counts as an error for the code.
+    """
+    fired = [n.has_fired for n in output_row(grid)]
+    columns = grid.columns
+    if target == "reversed":
+        placed = fired[::-1]  # placed[i] is what column i of the input arrangement would show
+    elif target == "copy":
+        placed = fired
+    else:
+        raise ValueError(f"the output word can only be read for the reversed or copy target, not {target!r}")
+    coded = [False] * columns
+    for i, k in enumerate(grid.permutation):
+        coded[k] = placed[i]
+    half = columns // 2
+    word: list[bool | None] = []
+    for k in range(half):
+        bit, complement = coded[k], coded[k + half]
+        word.append(bit if bit != complement else None)
+    return word
+
+
+def decoded_output(grid: GridOfNeurons, target: str = "reversed") -> list[bool]:
+    """The data bits a receiver would decode from the output row, after error correction if a code is on.
+
+    Unreadable bits are taken as 0 before correction, so a single unreadable
+    or wrong bit is repaired by a correcting code.
+    """
+    word = [False if b is None else b for b in read_output_word(grid, target)]
+    if grid.code:
+        return grid.code.decode(word)
+    return word
+
+
+def expected_data(grid: GridOfNeurons) -> list[bool]:
+    """What the receiver should decode: the data bits when a code is on, else the raw input bits."""
+    if grid.input_bits is None:
+        raise ValueError("no input pattern set")
+    return list(grid.input_data if grid.code else grid.input_bits)
+
+
+def decoded_accuracy(grid: GridOfNeurons, target: str = "reversed") -> float:
+    """Fraction of the corrected, decoded data bits that are right, 0 to 1."""
+    want = expected_data(grid)
+    got = decoded_output(grid, target)
+    return sum(a == b for a, b in zip(got, want)) / len(want)
+
+
+def decoded_exact(grid: GridOfNeurons, target: str = "reversed") -> float:
+    """1 if the corrected, decoded data bits are all right, else 0."""
+    return 1.0 if decoded_output(grid, target) == expected_data(grid) else 0.0
+
+
+CRITICS = {
+    "row": accuracy,  # fraction of the output row matching the target, neuron by neuron
+    "decoded": decoded_accuracy,  # fraction of data bits right after reading and error-correcting the row
+    "decoded-exact": decoded_exact,  # all data bits right after correction, or nothing
+}
+
+
+def reward(grid: GridOfNeurons, target: str = "reversed", critic: str = "row") -> float:
+    """The scalar the network is judged by, according to the chosen critic."""
+    return CRITICS[critic](grid, target)
+
+
 def forced(neuron: Neuron) -> bool:
     """True if the neuron was forced to fire in wave 0 this epoch (an external stimulus)."""
     return neuron.fired_in_wave == 0
@@ -225,9 +299,15 @@ class Teacher:
         carry_over: bool = False,
         unstick: float = 1e-3,
         unstick_target: float = 0.5,
+        critic: str = "row",
     ):
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")
+        if critic not in CRITICS:
+            raise ValueError(f"unknown critic {critic!r}; choose from {', '.join(CRITICS)}")
+        if critic != "row" and target not in ("reversed", "copy"):
+            raise ValueError(f"the {critic} critic reads the output as a word, which needs the reversed or copy target")
+        self.critic = critic
         if eligibility not in ELIGIBILITIES:
             raise ValueError(f"unknown eligibility {eligibility!r}; choose from {', '.join(ELIGIBILITIES)}")
         if lr < 0 or sigma < 0 or homeostasis < 0 or unstick < 0:
@@ -268,7 +348,7 @@ class Teacher:
 
     def step(self) -> float:
         """Score the epoch that has just run and reinforce. Returns its reward (accuracy)."""
-        reward = accuracy(self.grid, self.target)
+        reward = CRITICS[self.critic](self.grid, self.target)
         if self.baseline is None:
             self.baseline = reward
         advantage = reward - self.baseline
@@ -311,6 +391,8 @@ class Teacher:
         if self.average is None:
             return f"learning {self.target}: no epochs yet"
         settings = f"{self.eligibility}, lr {self.lr:g}, sigma {self.sigma:g}"
+        if self.critic != "row":
+            settings += f", critic {self.critic}"
         if self.homeostasis:
             low, high = self.threshold_range
             settings += f", homeostasis {self.homeostasis:g} toward {self.target_rate:g} in [{low:g}, {high:g}]"

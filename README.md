@@ -42,6 +42,8 @@ walnutbutter --headless --epochs 20000 -q   # the same without a window, for a f
 walnutbutter --step          # window where each Space press runs one epoch
 walnutbutter --no-learn      # just watch the untrained network
 walnutbutter --columns 24 --rows 20       # a bigger mesh than the default 8 x 10: 12 input bits, coded to 24
+walnutbutter --ecc                        # 4 data bits -> Hamming (7, 4) -> 14 columns, on a 14 x 10 field
+walnutbutter --ecc parity64               # the (6, 4) detect-only code on 12 columns instead
 walnutbutter --input 1011                 # choose the 4 input bits
 walnutbutter --no-permute                 # coded bits in order on the bottom row
 walnutbutter --seed 42       # repeat a particular random mesh
@@ -165,6 +167,30 @@ marked `kind == "small_world"` (first-ring connections are `"local"`,
 second-ring ones `"local2"`), listed by
 `grid.small_world_connections()`, and get weights like any other connection.
 The same `seed` reproduces both the shortcuts and the weights.
+
+**Error-correcting code.** With `--ecc` (or `network.use_ecc()`), the raw
+input is 4 data bits, encoded before complement coding. The default code is
+Hamming's (7, 4): three parity bits, each covering three of the four data
+bits, giving every bit position a distinct syndrome, so any single flipped
+bit is located and corrected (`Code.correct`, `Code.decode`); complement
+coding then fills a 14-column bottom row, so the usual field is 14 columns
+by 10 rows. `--ecc parity64` is the (6, 4) code instead: two parity bits,
+minimum distance 2, single errors detected but not corrected, 12 columns.
+`--ecc` sets the columns to fit unless told otherwise. The epoch line reads
+`data 1011 -> hamming74 1011010 -> coded ... -> bottom row ...`, and
+checkpoints remember which code is on.
+
+**Critics.** The reward is a single number per epoch, and `--critic` chooses
+how it is judged. `row` (the default) is the fraction of output neurons that
+match the target, neuron by neuron. `decoded` reads the output row the way a
+receiver would: it undoes the target's arrangement and the permutation,
+resolves each complement pair to a bit (a pair whose neurons contradict each
+other is unreadable), runs the word through the code's error correction, and
+rewards the fraction of data bits that come out right; `decoded-exact` gives
+1 only if all of them do. Under Hamming a single wrong output neuron costs
+nothing with the decoding critics, because the code absorbs it: the network
+is judged on the message, not the pixels, and the code's redundancy stands in
+for a population of outputs.
 
 **Firing rule.** Every neuron has a `threshold` (default 0.25) and a running
 `potential`. When a neuron fires, each of its active outgoing connections adds

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from .inputs import complement_code
+from .inputs import CODES, DEFAULT_CODE, Code, complement_code
 from .neuron import Neuron
 from .propagation import Wave, propagate
 
@@ -34,6 +34,8 @@ class Network:
         self.input_coded: list[bool] | None = None  # the complement-coded bits before permutation
         self.permutation: list[int] = list(range(columns))  # bottom-row column i shows coded bit permutation[i]
         self.epoch = 0  # how many inputs have been presented
+        self.ecc: str | None = None  # name of the error-correcting code applied before complement coding, if any
+        self.input_data: list[bool] | None = None  # the raw data bits when ecc is on
 
     def all_neurons(self) -> Iterable[Neuron]:
         """Every neuron, in a stable order. Subclasses override if `neurons` is not a list."""
@@ -60,20 +62,47 @@ class Network:
             raise ValueError(f"input pattern has {len(pattern)} bits but the network has {self.columns} columns")
         self.input_pattern = pattern
 
-    def set_input_bits(self, bits) -> None:
-        """Set the input from raw bits (half the columns): complement-code them, then permute.
+    @property
+    def code(self) -> Code | None:
+        return CODES[self.ecc] if self.ecc else None
 
-        Bottom-row column i receives coded bit permutation[i]. With the identity
-        permutation the coded bits land in order.
-        """
+    def raw_bit_count(self) -> int:
+        """How many raw bits an input takes: half the columns, or the code's data bits when a code is on."""
         if self.columns % 2:
             raise ValueError(f"complement coding needs an even number of columns, got {self.columns}")
+        if self.code:
+            if self.columns // 2 != self.code.code_bits:
+                raise ValueError(f"{self.code.name} needs {2 * self.code.code_bits} columns, got {self.columns}")
+            return self.code.data_bits
+        return self.columns // 2
+
+    def use_ecc(self, code: str | bool | None = DEFAULT_CODE) -> None:
+        """Encode raw data bits with a named code before complement coding (True means the default, Hamming (7, 4))."""
+        if code is True:
+            code = DEFAULT_CODE
+        if code is False:
+            code = None
+        if code is not None and code not in CODES:
+            raise ValueError(f"unknown code {code!r}; choose from {', '.join(CODES)}")
+        self.ecc = code
+        self.raw_bit_count()  # validates the column count
+
+    def set_input_bits(self, bits) -> None:
+        """Set the input from raw bits: (ecc-encode them,) complement-code them, then permute.
+
+        Without ecc the raw bits number half the columns. With ecc they are the 4
+        data bits, encoded to 6 before complement coding fills 12 columns.
+        Bottom-row column i receives coded bit permutation[i].
+        """
         bits = [bool(b) for b in bits]
-        if len(bits) != self.columns // 2:
-            raise ValueError(f"expected {self.columns // 2} input bits for {self.columns} columns, got {len(bits)}")
-        coded = complement_code(bits)
+        wanted = self.raw_bit_count()
+        if len(bits) != wanted:
+            raise ValueError(f"expected {wanted} input bits for {self.columns} columns, got {len(bits)}")
+        word = self.code.encode(bits) if self.code else bits
+        coded = complement_code(word)
         self.set_input([coded[i] for i in self.permutation])
-        self.input_bits = bits
+        self.input_data = bits if self.code else None
+        self.input_bits = word  # the bits that were complement-coded: the codeword with ecc, the raw bits without
         self.input_coded = coded
 
     def new_random_input(self) -> list[bool]:
@@ -82,9 +111,7 @@ class Network:
         Because the stream is the same one used to build the network, a seed
         reproduces the whole sequence of inputs, not just the first.
         """
-        if self.columns % 2:
-            raise ValueError(f"complement coding needs an even number of columns, got {self.columns}")
-        bits = [self._rng.random() < 0.5 for _ in range(self.columns // 2)]
+        bits = [self._rng.random() < 0.5 for _ in range(self.raw_bit_count())]
         self.set_input_bits(bits)
         return bits
 

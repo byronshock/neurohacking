@@ -42,10 +42,10 @@ def run_epoch(
             neuron.noise = rng.gauss(0.0, noise)
             neuron.potential = max(neuron.minimum_potential, neuron.potential + neuron.noise)
     if verbose:
-        print(
-            f"epoch {grid.epoch + 1}: input {format_bits(grid.input_bits)} -> coded "
-            f"{format_bits(grid.input_coded)} -> bottom row {format_bits(grid.input_pattern)}"
-        )
+        stages = f"input {format_bits(grid.input_bits)}"
+        if grid.code:
+            stages = f"data {format_bits(grid.input_data)} -> {grid.code.name} {format_bits(grid.input_bits)}"
+        print(f"epoch {grid.epoch + 1}: {stages} -> coded {format_bits(grid.input_coded)} -> bottom row {format_bits(grid.input_pattern)}")
     return grid.fire_input()
 
 
