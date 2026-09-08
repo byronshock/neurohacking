@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "walnutbutter"
 version = "0.1.0"
-description = "Signal propagation through a hexagonal grid of neurons."
+description = "Fire-once threshold neurons spread on the plane as walnut butter, wired by reach, taught by global reinforcement while they run."
 requires-python = ">=3.12"
 dependencies = []
 

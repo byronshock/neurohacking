@@ -1,7 +1,27 @@
 # walnutbutter
 
-Builds a rectangular mesh of hexagonal neurons, fires the one at the centre,
-and watches the signal spread outward. Each neuron fires at most once per run.
+A living network of simple neurons on a plane, and the substance you build
+it from.
+
+Each neuron is a fire-once threshold unit: weighted input accumulates until
+it crosses a threshold, the neuron fires exactly once per epoch, and its
+signal travels one-way, wave by wave, along weighted connections. The
+network's input is a complement-coded, permuted bit pattern forced onto its
+bottom row; its output is the top row, which is taught to show that pattern
+reversed. Learning is global reinforcement: every epoch a single scalar
+reward, the output's accuracy, is broadcast to every connection and combined
+with each neuron's exploration noise (node-perturbation REINFORCE), with a
+slow homeostatic drift of thresholds and an un-sticking rule for saturated
+outputs. There is no training run and no evaluation run, only one run that
+keeps going: the window is a 30 Hz monitor on a free-running system that
+learns, checkpoints itself, and reports as it goes.
+
+Two containers build networks. The **hex grid** wires every cell to its two
+rings of neighbours plus a few random small-world shortcuts. **Walnut butter**
+is the substance the neurons are made of: spread it on the plane in smears of
+a given density and neurons appear at that density, and butter spread near
+other butter connects, so where you put it and how thick decides the whole
+architecture. The default of each is an 8 x 10 field of 80 neurons.
 
 ## Setup (once)
 
