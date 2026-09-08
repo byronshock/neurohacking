@@ -224,8 +224,8 @@ def caption(grid: GridOfNeurons, teacher: Teacher | None = None) -> str:
     fired = len(grid.fired_neurons())
     state = f"{fired} of {len(grid.neurons)} fired in {len(grid.waves)} waves" if fired else "unfired"
     omega = f" omega {grid.omega:g}" if getattr(grid, "omega", 0) else ""
-    if isinstance(grid, CartesianNodes) and getattr(grid, "receptive_field_sigma", None) is not None:
-        omega = f" lattice, receptive field sigma {grid.receptive_field_sigma:g}"
+    if isinstance(grid, CartesianNodes) and getattr(grid, "reach", None) is not None:
+        omega = f" lattice, reach {grid.reach:g}"
     epoch = f" epoch {grid.epoch}:" if grid.epoch else ":"
     learning = f"   {teacher.status()}" if teacher else ""
     return f"walnutbutter {grid.columns}x{grid.rows}{omega}{epoch} {state}{learning}   [Space] new input  [Esc] quit"

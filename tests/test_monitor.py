@@ -393,3 +393,17 @@ def test_seeds_with_no_save_writes_nothing(capsys):
     assert cli_main(["--seeds", "2", "--seed", "1", "--columns", "8", "--rows", "4", "--epochs", "10", "--no-save"]) == 0
     assert not Path("runs").exists()
     assert "  -" in capsys.readouterr().out
+
+
+def test_seeds_runs_the_lattice_when_nodes_is_given(tmp_path, capsys):
+    from pathlib import Path
+    from walnutbutter.cartesian import CartesianNodes
+    from walnutbutter.persistence import restore
+    assert cli_main(["--nodes", "--seeds", "2", "--seed", "20", "--columns", "8", "--rows", "4", "--epochs", "30"]) == 0
+    captured = capsys.readouterr()
+    assert "lattice, reach 2" in captured.err
+    files = sorted(Path("runs").glob("*-seed2?.json"))
+    assert len(files) == 2
+    for f in files:
+        restored, data = restore(f)
+        assert isinstance(restored, CartesianNodes) and data["epoch"] == 30 and data["reach"] == 2.0

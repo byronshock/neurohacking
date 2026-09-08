@@ -198,15 +198,17 @@ class CartesianNodes(Network):
         scale: float = 1.0,
         weight: float | None = 1.0,
         weight_range: tuple[float, float] = (-1.0, 1.0),
-        neighbour_radius: float = 1.0,
+        neighbour_radius: float = 2.0,
         epsilon: float = 1e-6,
     ) -> int:
         """Wire the population in two tiers. Returns the number of connections made.
 
         1. Neighbours: every ordered pair within `neighbour_radius + epsilon`
            units is connected, both directions, with certainty (kind "local").
-           At unit spacing that is a neuron's six hex neighbours, so "neighbour"
-           keeps meaning literally next to each other.
+           The default radius of 2 takes in a neuron's six hex neighbours (at
+           distance 1) and their twelve neighbours (six at sqrt(3), six at 2):
+           the same eighteen cells as the hex grid's two rings. A radius of 1
+           keeps only the six.
         2. Gaussian: every other ordered pair connects with probability
            connection_probability(distance, sigma, scale), each direction an
            independent draw (kind "gaussian"). `sigma` is the receptive field's
@@ -250,6 +252,47 @@ class CartesianNodes(Network):
 
     def connections_of_kind(self, kind: str) -> list[Connection]:
         return [c for c in self.connections.values() if c.kind == kind]
+
+    def connect_within(
+        self,
+        reach: float = 2.0,
+        epsilon: float = 1e-6,
+        weight: float | None = 1.0,
+        weight_range: tuple[float, float] = (-1.0, 1.0),
+    ) -> int:
+        """Butter that is spread near other butter connects: every ordered pair within `reach` units.
+
+        Deterministic: no draws decide the topology, only the positions do (the
+        weights are still drawn when `weight` is None). At unit spacing a reach
+        of 2 gives each interior neuron its eighteen neighbours, the hex grid's
+        two rings; denser butter packs more neurons inside the same reach.
+        Returns the number of connections made.
+        """
+        if reach < 0 or epsilon < 0:
+            raise ValueError("reach and epsilon must not be negative")
+        self.reach = reach
+        low, high = weight_range
+        for source in self.neurons:
+            for target in self.neurons:
+                if target is source:
+                    continue
+                distance = math.dist(source.position, target.position)
+                if distance <= TOLERANCE or distance > reach + epsilon:
+                    continue
+                w = self._rng.uniform(low, high) if weight is None else weight
+                connection_id = len(self.connections) + 1
+                self.connections[connection_id] = source.connect(target, connection_id, w, kind="local")
+        return len(self.connections)
+
+    @classmethod
+    def from_butter(cls, butter, seed: int | None = None, **kwargs) -> "CartesianNodes":
+        """Place the neurons a WalnutButter recipe describes. Rows are not defined for a free spread."""
+        nodes = cls(layout="random", count=0, seed=seed, **kwargs)
+        nodes.layout = "butter"
+        nodes.butter = butter
+        for x, y in butter.positions():
+            nodes.add(x, y)
+        return nodes
 
     def get_connection(self, connection_id: int) -> Connection | None:
         return self.connections.get(connection_id)

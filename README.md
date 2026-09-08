@@ -56,8 +56,8 @@ keep the best:
 walnutbutter --seeds 15 --epochs 1000000 --seed 1
 ```
 
-runs seeds 1 to 15 in parallel, headless, one process per core, prints a
-table sorted best first (accuracy over each run's last tenth, and to date),
+runs seeds 1 to 15 in parallel, headless, one process per core (add `--nodes`
+for the lattice instead of the grid), prints a table sorted best first (accuracy over each run's last tenth, and to date),
 and checkpoints every run to `runs/` so the winner can be loaded with
 `--load-weights`. Without `--seed` the base seed is random and printed.
 
@@ -202,59 +202,45 @@ grid.connection_between(origin, right)   # origin -> right
 grid.connection_between(right, origin)   # right -> origin, a different connection
 ```
 
-## Neurons on the Cartesian plane
+## Walnut butter
 
-`CartesianNodes` is a second container, with positions measured in **unit
-distances**: one unit is the network's natural scale, the step between
-neighbouring cells of the hex mesh, and a population can span many units.
-By default it holds a hexagonal lattice of `columns` x `rows` neurons
-(8 x 10) at unit spacing, pointy-top with odd rows shifted half a unit, so
-each neuron's six nearest neighbours are exactly one unit away;
-`node_at(column, row)` looks one up. With `layout="random"`, `count`
-neurons are scattered uniformly over a `width` x `height` unit region
-instead, and `add(x, y)` places a neuron anywhere by hand. The container
-makes no connections; `neighbours(neuron, radius=1.0)`, `within` and
-`nearest` are there to inspect distances. Propagation and the neurons
-themselves work exactly as in the grid.
+Walnut butter is the substance the neurons are made of. It is spread over
+the plane in **smears**: each is a shape (`Rect` or `Disc`, in unit
+distances) with a **density** in neurons per unit area, and placing the
+butter packs neurons on a hexagonal lattice inside each shape at the spacing
+that density implies. Thick butter means many neurons close together, thin
+butter a few far apart, bare plane none. **Butter that is spread near other
+butter connects:** a neuron projects to every neuron within its `reach`
+(default 2 units), so density alone decides how richly a region is wired,
+and a gap in the spread is a gap in the network. Nothing about the topology
+is random; only the weights are drawn from the seed.
 
-**Wiring.** `connect_by_distance()` wires the population in two tiers.
-Every ordered pair within one unit (plus a small `epsilon`) is connected with
-certainty, both directions, so a neuron's six hex neighbours are always its
-neighbours in the wiring too (`kind == "local"`). Every other pair connects
-with probability proportional to a 2D Gaussian density at its separation,
-`exp(-d² / 2σ²)` with `sigma` the receptive field's standard deviation in unit
-distances (default 1.5, the plateau found by sweeping; `--receptive-field-sigma`),
-each direction an independent draw (`kind == "gaussian"`): at sigma 1.5 two
-units gives 0.41, three units 0.14. There are no small-world shortcuts on the lattice. Two neurons at the
-same position are never connected. `weight` is given to every connection, or
-None draws each from `weight_range`.
-Connections are registered by ID in `nodes.connections`, as in the grid.
-
-`walnutbutter --nodes` builds the `--columns` x `--rows` lattice, wires it
-(`--receptive-field-sigma`), and then does everything the grid does: the
-bottom row is the input, the top row the output, it learns, reports,
-checkpoints to `runs/`, and shows in the window or runs headless with
-`--epochs`. Lattice checkpoints record the wiring itself and load back with
-`--load-weights`. `--nodes N` scatters N neurons at random in a `--columns` x
-`--rows` unit region instead; a scatter has no rows, so it is shown, not
-trained. A run is fully determined by its seed, so for example
-
-```bash
-walnutbutter --nodes --seed 3 --receptive-field-sigma 1.5 --headless --epochs 1000000 -q
-```
-
-reproduces a sweep result exactly and leaves its checkpoint in `runs/`.
+The default network is one rectangular smear at unit density, which is the
+8 x 10 hexagonal lattice at unit spacing: `CartesianNodes()` builds it
+directly, and with a reach of 2 each interior neuron has eighteen neighbours,
+six at distance 1, six at √3 and six at 2, the same as the hex grid's two
+rings. Its bottom row is the input and its top row the output, addressed
+like the grid with `get_neuron_at(column, row)`. A free spread has no rows,
+so input and output zones for it are still to be defined.
 
 ```python
+from walnutbutter.butter import Disc, Rect, WalnutButter, UNIT_DENSITY
 from walnutbutter.cartesian import CartesianNodes
 
-lattice = CartesianNodes(seed=1)               # 8 x 10 hexagonal lattice, unit spacing
-lattice.connect_by_distance(sigma=1.0, weight=None)   # neighbours for certain, Gaussian beyond; random weights
-centre = lattice.node_at(4, 5)
-len(centre.outgoing), len(lattice.neighbours(centre))   # the 6 neighbours for certain, plus Gaussian links
-
-scatter = CartesianNodes(layout="random", count=64, seed=1)   # random alternative
+recipe = (WalnutButter()
+          .spread(Rect(-4, -4, 4, 4), UNIT_DENSITY)        # a lattice-density slab
+          .spread(Disc(0, 0, 1.5), 3 * UNIT_DENSITY))      # a dense knot in the middle
+nodes = CartesianNodes.from_butter(recipe, seed=1)
+nodes.connect_within(reach=2.0, weight=None)               # near butter connects
 ```
+
+`walnutbutter --nodes` builds the default lattice, wires it with `--reach`
+(default 2), and then does everything the grid does: learns, reports,
+checkpoints to `runs/` (lattice checkpoints record the wiring and load back
+with `--load-weights`), and shows in the window or runs headless with
+`--epochs`. `--nodes N` scatters N neurons at random instead; a scatter has
+no rows, so it is shown, not trained. The earlier Gaussian receptive-field
+wiring (`connect_by_distance`) remains in the library for reference.
 
 ## Teaching the network
 
@@ -353,7 +339,8 @@ src/walnutbutter/
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
   propagation.py Signal queue and wave-by-wave propagate()
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
-  cartesian.py CartesianNodes: hexagonal lattice (default) or random neurons at (x, y) in unit distances
+  butter.py    WalnutButter: smears of neuron density on the plane; shapes Rect and Disc
+  cartesian.py CartesianNodes: the lattice, a scatter, or a placed recipe; reach wiring
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input
   learning.py  output targets, reward, the global-reinforcement rule, and Teacher

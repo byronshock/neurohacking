@@ -45,7 +45,8 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
     if lattice:
         index = {n: i for i, n in enumerate(grid.neurons)}
         data["layout"] = grid.layout
-        data["receptive_field_sigma"] = getattr(grid, "receptive_field_sigma", None)
+        data["reach"] = getattr(grid, "reach", None)
+        data["receptive_field_sigma"] = getattr(grid, "receptive_field_sigma", None)  # the earlier Gaussian rule, if used
         data["positions"] = grid.positions()
         # the whole wiring, so a restore rebuilds it exactly without redrawing anything
         data["connection_list"] = [
@@ -159,6 +160,7 @@ def _restore_lattice(data: dict) -> CartesianNodes:
             nodes.add(x, y)
     nodes.permutation = list(data["permutation"])
     nodes.receptive_field_sigma = data.get("receptive_field_sigma")
+    nodes.reach = data.get("reach")
     neurons = nodes.neurons
     for connection_id, ((s_idx, t_idx, kind), weight) in enumerate(zip(data["connection_list"], data["weights"]), start=1):
         nodes.connections[connection_id] = neurons[s_idx].connect(neurons[t_idx], connection_id, weight, kind=kind)

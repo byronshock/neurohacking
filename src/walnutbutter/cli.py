@@ -55,14 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
         "random in a --columns x --rows unit region, just shown",
     )
     parser.add_argument(
-        "--receptive-field-sigma",
-        "--receptive_field_sigma",
-        dest="receptive_field_sigma",
+        "--reach",
         type=float,
-        default=1.5,
+        default=2.0,
         metavar="UNITS",
-        help="with --nodes: standard deviation, in unit distances, of the Gaussian receptive field that sets "
-        "connection probability by distance (default: 1.5, from the sweeps)",
+        help="with --nodes: a neuron connects to every neuron within this many unit distances "
+        "(default: 2, the two hex rings at unit density)",
     )
     parser.add_argument(
         "--window",
@@ -291,7 +289,7 @@ def _run(args: argparse.Namespace) -> int:
         if args.nodes is not None and args.nodes > 0:
             return _run_nodes(args, width, height)  # a random scatter: shown, not learnable (no rows)
         if args.seeds is not None:
-            return _run_seeds(args)
+            return _run_seeds(args)  # grid, or the lattice with bare --nodes
         loaded = None
         if args.load_weights:
             try:
@@ -304,7 +302,6 @@ def _run(args: argparse.Namespace) -> int:
             args.columns, args.rows, args.omega = data["columns"], data["rows"], data["omega"]
             if data.get("container") == "lattice":
                 args.nodes = 0
-                args.receptive_field_sigma = data.get("receptive_field_sigma") or args.receptive_field_sigma
             args.threshold = data["threshold"]
             args.minimum_potential = data.get("minimum_potential", -1.0)
             args.weight = None if data["random_weights"] else data["weight"]
@@ -349,22 +346,21 @@ def _run(args: argparse.Namespace) -> int:
             if loaded:
                 grid, data = loaded
             elif args.nodes is not None:
-                if args.receptive_field_sigma <= 0:
-                    print(f"error: --receptive-field-sigma must be positive, got {args.receptive_field_sigma}", file=sys.stderr)
+                if args.reach < 0:
+                    print(f"error: --reach must not be negative, got {args.reach}", file=sys.stderr)
                     return 2
                 grid = CartesianNodes(
                     columns=args.columns, rows=args.rows, seed=seed, threshold=args.threshold,
                     minimum_potential=args.minimum_potential, permute=not args.no_permute,
                     weight_range=settings["weight_range"],
                 )
-                grid.connect_by_distance(sigma=args.receptive_field_sigma, weight=args.weight)
+                grid.connect_within(reach=args.reach, weight=args.weight)
             else:
                 grid = GridOfNeurons(**settings)
             if isinstance(grid, CartesianNodes):
-                kinds = {k: len(grid.connections_of_kind(k)) for k in ("local", "gaussian")}
                 print(
-                    f"{grid!r}, wired: {len(grid.connections)} one-way connections = {kinds['local']} guaranteed neighbours "
-                    f"+ {kinds['gaussian']} Gaussian (receptive field sigma {grid.receptive_field_sigma:g})",
+                    f"{grid!r}, wired: {len(grid.connections)} one-way connections, every pair within "
+                    f"{grid.reach:g} units ({grid.mean_out_degree():.1f} per neuron)",
                     file=sys.stderr,
                 )
             if not args.no_permute or loaded:
@@ -458,17 +454,13 @@ def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
     else:
         nodes = CartesianNodes(layout="random", count=args.nodes, **common)
         print(f"{nodes!r} ({len(nodes) / (nodes.width * nodes.height):.2f} per unit area)", file=sys.stderr)
-    if args.receptive_field_sigma <= 0:
-        print(f"error: --receptive-field-sigma must be positive, got {args.receptive_field_sigma}", file=sys.stderr)
+    if args.reach < 0:
+        print(f"error: --reach must not be negative, got {args.reach}", file=sys.stderr)
         return 2
-    made = nodes.connect_by_distance(sigma=args.receptive_field_sigma, weight=args.weight)
-    s = args.receptive_field_sigma
-    kinds = {k: len(nodes.connections_of_kind(k)) for k in ("local", "gaussian")}
+    made = nodes.connect_within(reach=args.reach, weight=args.weight)
     print(
-        f"wired: {made} one-way connections, {nodes.mean_out_degree():.1f} outgoing per neuron: "
-        f"{kinds['local']} guaranteed neighbours (within one unit), {kinds['gaussian']} Gaussian "
-        f"(receptive field sigma {s:g}: probability {math.exp(-2.0 / s**2):.2f} at two units); "
-        "no small-world shortcuts on the lattice; input and learning are not defined for nodes yet",
+        f"wired: {made} one-way connections, {nodes.mean_out_degree():.1f} outgoing per neuron, every pair within "
+        f"{args.reach:g} units; input and learning are not defined for a scatter (it has no rows)",
         file=sys.stderr,
     )
     if args.save or args.show:
@@ -493,7 +485,16 @@ def _seed_worker(job: dict) -> dict:
     """One seed's headless run, in its own process. Returns a summary row."""
     Neuron.verbose = False
     seed, epochs = job["seed"], job["epochs"]
-    grid = GridOfNeurons(**job["settings"], seed=seed)
+    if job.get("lattice"):
+        settings = job["settings"]
+        grid = CartesianNodes(
+            columns=settings["columns"], rows=settings["rows"], seed=seed, threshold=settings["threshold"],
+            minimum_potential=settings["minimum_potential"], permute=settings["permute"],
+            weight_range=settings["weight_range"],
+        )
+        grid.connect_within(reach=job["lattice"]["reach"], weight=settings["weight"])
+    else:
+        grid = GridOfNeurons(**job["settings"], seed=seed)
     teacher = Teacher(grid, seed=seed, **job["teacher"])
     report_every = max(1, epochs // 10)
     started = time.perf_counter()
@@ -559,11 +560,14 @@ def _run_seeds(args: argparse.Namespace) -> int:
             if args.save_weights and args.seeds > 1:
                 save = str(Path(args.save_weights).with_suffix("")) + f"-seed{seed}.json"
             Path(save).parent.mkdir(parents=True, exist_ok=True)
-        jobs.append({"seed": seed, "epochs": args.epochs, "settings": settings, "teacher": teacher_kwargs, "save": save})
+        lattice = {"reach": args.reach} if args.nodes is not None else None
+        jobs.append({"seed": seed, "epochs": args.epochs, "settings": settings, "teacher": teacher_kwargs,
+                     "save": save, "lattice": lattice})
     workers = max(1, min(args.seeds, (os.cpu_count() or 2) - 1))
+    wiring = (f"lattice, reach {args.reach:g}" if args.nodes is not None else f"hex grid, omega {args.omega:g}")
     print(
         f"{args.seeds} seeds from {base} on {workers} cores, {args.epochs:,} epochs each, "
-        f"{args.columns}x{args.rows}, omega {args.omega:g}",
+        f"{args.columns}x{args.rows} {wiring}",
         file=sys.stderr,
     )
     started = time.perf_counter()

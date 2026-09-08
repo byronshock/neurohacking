@@ -160,7 +160,7 @@ def test_cli_bare_nodes_builds_a_learning_lattice(capsys):
     from walnutbutter.cli import cli_main
     assert cli_main(["--headless", "--nodes", "--columns", "6", "--rows", "4", "--seed", "1", "-q", "--epochs", "5", "--no-save"]) == 0
     err = capsys.readouterr().err
-    assert "6x4 hexagonal lattice, 24 neurons at unit spacing" in err and "guaranteed neighbours" in err
+    assert "6x4 hexagonal lattice, 24 neurons at unit spacing" in err and "every pair within 2 units" in err
     assert "learning reversed" in err and "after 5 epochs" in err
 
 
@@ -283,12 +283,12 @@ def test_connect_by_distance_makes_independent_one_way_connections():
     assert len(forward) == made  # each ordered pair at most once
     one_way = sum(1 for (a, b) in forward if (b, a) not in forward)
     assert one_way > 0  # beyond the neighbours the reverse direction is a separate draw, so some pairs go one way only
-    assert all(CartesianNodes.distance(c.source, c.target) > 1 + 1e-6 for c in nodes.connections.values() if c.kind != "local")
+    assert all(CartesianNodes.distance(c.source, c.target) > 2 + 1e-6 for c in nodes.connections.values() if c.kind != "local")
 
 
 def test_connect_by_distance_degree_matches_the_gaussian_on_the_lattice():
     nodes = CartesianNodes(columns=20, rows=20, seed=2)  # a big lattice so the interior dominates
-    nodes.connect_by_distance(sigma=1.0)
+    nodes.connect_by_distance(sigma=1.0, neighbour_radius=1.0)
     interior = [nodes.node_at(c, r) for r in range(5, 15) for c in range(5, 15)]
     degree = sum(len(n.outgoing) for n in interior) / len(interior)
     # expected out-degree: the six guaranteed neighbours plus exp(-d^2/2) over every farther lattice point
@@ -334,15 +334,14 @@ def test_connect_by_distance_random_weights_and_propagation():
 
 
 
-def test_cli_nodes_reports_the_distance_wiring(capsys):
+def test_cli_nodes_reports_the_reach_wiring(capsys):
     from walnutbutter.cli import cli_main
     base = ["--headless", "--nodes", "--seed", "1", "--columns", "6", "--rows", "4", "-q", "--epochs", "2", "--no-save"]
     assert cli_main(base) == 0
-    assert "receptive field sigma 1.5)" in capsys.readouterr().err  # the default
-    assert cli_main(base + ["--receptive-field-sigma", "2"]) == 0
-    assert "receptive field sigma 2)" in capsys.readouterr().err
-    assert cli_main(base + ["--receptive_field_sigma", "0.5"]) == 0  # underscore spelling works too
-    assert cli_main(base + ["--receptive-field-sigma", "0"]) == 2
+    assert "every pair within 2 units" in capsys.readouterr().err  # the default reach
+    assert cli_main(base + ["--reach", "1"]) == 0
+    assert "every pair within 1 units" in capsys.readouterr().err
+    assert cli_main(base + ["--reach", "-1"]) == 2
 
 
 
@@ -395,23 +394,31 @@ def test_teacher_learns_on_the_lattice():
 # --- three tiers of wiring ---------------------------------------------------------
 
 
-def test_neighbours_within_one_unit_are_always_connected_both_ways():
+def test_neighbours_and_their_neighbours_are_always_connected_both_ways():
     nodes = CartesianNodes(seed=9)
-    nodes.connect_by_distance(sigma=0.5)  # a tight Gaussian adds almost nothing beyond the neighbours
+    nodes.connect_by_distance(sigma=0.5)  # a tight Gaussian adds almost nothing beyond the guaranteed cells
     for neuron in nodes:
-        for other in nodes.neighbours(neuron):  # everything within one unit
+        for other in nodes.neighbours(neuron, radius=2.0):  # everything within two units: both rings
             assert neuron.connection_to(other) is not None and neuron.connection_to(other).kind == "local"
             assert other.connection_to(neuron) is not None
     local = nodes.connections_of_kind("local")
-    assert len(local) == sum(len(nodes.neighbours(n)) for n in nodes)
-    assert all(CartesianNodes.distance(c.source, c.target) <= 1 + 1e-6 for c in local)
+    assert len(local) == sum(len(nodes.neighbours(n, radius=2.0)) for n in nodes)
+    assert all(CartesianNodes.distance(c.source, c.target) <= 2 + 1e-6 for c in local)
+    centre = nodes.node_at(4, 5)
+    mine = [c for c in centre.outgoing if c.kind == "local"]
+    assert len(mine) == 18
+    distances = sorted(round(CartesianNodes.distance(centre, c.target), 3) for c in mine)
+    assert distances == [1.0] * 6 + [round(math.sqrt(3), 3)] * 6 + [2.0] * 6  # the hex grid's two rings exactly
 
 
 def test_epsilon_and_neighbour_radius_are_tunable():
     nodes = CartesianNodes(seed=9)
-    nodes.connect_by_distance(sigma=0.5, neighbour_radius=math.sqrt(3), epsilon=0.01)  # take in the second ring too
+    nodes.connect_by_distance(sigma=0.5, neighbour_radius=1.0)  # only the six immediate neighbours
     centre = nodes.node_at(4, 5)
-    assert len([c for c in centre.outgoing if c.kind == "local"]) == 12
+    assert len([c for c in centre.outgoing if c.kind == "local"]) == 6
+    ring = CartesianNodes(seed=9)
+    ring.connect_by_distance(sigma=0.5, neighbour_radius=math.sqrt(3), epsilon=0.01)  # the six corners of the second ring too
+    assert len([c for c in ring.node_at(4, 5).outgoing if c.kind == "local"]) == 12
     tight = CartesianNodes(seed=9)
     tight.connect_by_distance(sigma=0.5, neighbour_radius=0.0, epsilon=0.0)  # no guaranteed neighbours at all
     assert tight.connections_of_kind("local") == []
@@ -434,7 +441,7 @@ def test_cli_random_scatter_is_shown_not_learned(capsys):
     from walnutbutter.cli import cli_main
     assert cli_main(["--headless", "--nodes", "12", "--seed", "1"]) == 0
     err = capsys.readouterr().err
-    assert "12 neurons at random" in err and "guaranteed neighbours" in err and "no small-world shortcuts" in err
+    assert "12 neurons at random" in err and "every pair within 2 units" in err and "no rows" in err
 
 
 # --- lattice checkpoints and the reproducible command line ---------------------
@@ -468,11 +475,11 @@ def test_cli_lattice_run_saves_a_loadable_checkpoint(tmp_path, capsys):
     from pathlib import Path
     from walnutbutter.cli import cli_main
     from walnutbutter.persistence import restore
-    assert cli_main(["--headless", "--nodes", "--seed", "3", "--receptive-field-sigma", "1.5", "-q", "--epochs", "20"]) == 0
+    assert cli_main(["--headless", "--nodes", "--seed", "3", "--reach", "2", "-q", "--epochs", "20"]) == 0
     files = list(Path("runs").glob("*-seed3.json"))
     assert len(files) == 1
     restored, data = restore(files[0])
-    assert isinstance(restored, CartesianNodes) and data["epoch"] == 20 and data["receptive_field_sigma"] == 1.5
+    assert isinstance(restored, CartesianNodes) and data["epoch"] == 20 and data["reach"] == 2.0 and restored.reach == 2.0
     assert cli_main(["--headless", "-q", "--epochs", "5", "--load-weights", str(files[0]), "--no-save"]) == 0
     assert "to date over 25 epochs" in capsys.readouterr().err
 
@@ -485,11 +492,11 @@ def test_command_line_reproduces_the_sweep_sequence_exactly(tmp_path, capsys):
     from walnutbutter.persistence import read_checkpoint
     epochs = 300
     nodes = CartesianNodes(columns=8, rows=10, seed=3)
-    nodes.connect_by_distance(sigma=1.5, weight=None)
+    nodes.connect_within(reach=2.0, weight=None)
     teacher = Teacher(nodes, seed=3)
     for _ in range(epochs):
         teacher.epoch(verbose=False)
-    assert cli_main(["--headless", "--nodes", "--seed", "3", "--receptive-field-sigma", "1.5", "-q", "--epochs", str(epochs)]) == 0
+    assert cli_main(["--headless", "--nodes", "--seed", "3", "--reach", "2", "-q", "--epochs", str(epochs)]) == 0
     saved = read_checkpoint(next(Path("runs").glob("*-seed3.json")))
     assert saved["weights"] == [c.weight for c in nodes.connections.values()]
     assert saved["thresholds"] == [n.threshold for n in nodes]
