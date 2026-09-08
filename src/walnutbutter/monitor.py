@@ -38,7 +38,7 @@ def run_epoch(
         grid.set_input_bits(bits)
     if noise > 0:
         rng = rng or random
-        for neuron in grid.neurons.values():
+        for neuron in grid.all_neurons():
             neuron.noise = rng.gauss(0.0, noise)
             neuron.potential = max(neuron.minimum_potential, neuron.potential + neuron.noise)
     if verbose:
@@ -55,7 +55,7 @@ def main(
     weight: float | None = None,
     threshold: float = 0.25,
     seed: int | None = None,
-    omega: float = 0.05,
+    omega: float = 0.2,
     input_bits: Sequence[bool] | None = None,
     permute: bool = True,
     weight_range: tuple[float, float] = (-1.0, 1.0),

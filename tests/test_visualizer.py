@@ -228,7 +228,7 @@ def test_cli_defaults_to_a_free_running_learning_window(monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(viz, "show", lambda grid, w, h, fast=False, teacher=None, **kw: calls.append((fast, teacher is not None, kw.get("report_seconds"))))
     assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1"]) == 0
-    assert calls == [(True, True, 30.0)]
+    assert calls == [(True, True, 1.0)]
     calls.clear()
     assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--step", "--no-learn", "--report", "5"]) == 0
     assert calls == [(False, False, 5.0)]
@@ -285,3 +285,35 @@ def test_free_run_calls_on_report_after_each_report(monkeypatch, capsys):
     viz.show(grid, 200, 150, fast=True, fps=50, teacher=teacher, report_seconds=0,
              log=reports.append, on_report=lambda: saves.append(grid.epoch))
     assert len(saves) == len(reports) >= 2
+
+
+def test_free_run_records_history_before_each_checkpoint(monkeypatch, capsys):
+    from walnutbutter.learning import Teacher
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    grid = main(columns=8, rows=4, weight=None, seed=1)
+    teacher = Teacher(grid, seed=1)
+    seen_at_checkpoint = []
+    scripted = [[], [], [pygame.event.Event(pygame.QUIT)]]
+    monkeypatch.setattr(pygame.event, "get", lambda: scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)])
+    viz.show(grid, 200, 150, fast=True, fps=50, teacher=teacher, report_seconds=0, log=lambda line: None,
+             on_report=lambda: seen_at_checkpoint.append(len(teacher.history)))
+    assert len(teacher.history) >= 2
+    assert seen_at_checkpoint == list(range(1, len(teacher.history) + 1))  # each checkpoint saw the entry just added
+    assert all(e["elapsed"] is not None and e["epochs_per_second"] is not None for e in teacher.history)
+
+
+def test_discs_do_not_overlap_and_leave_a_gap():
+    grid = GridOfNeurons(columns=6, rows=4, omega=0)
+    surface = pygame.Surface((400, 300))
+    viz.draw_grid(surface, grid)
+    radius, ox, oy = viz.layout(grid, 400, 300)
+    disc = radius * viz.SQRT3 / 2 * viz.DISC_FILL
+    spacing = radius * viz.SQRT3  # centre to centre for neighbours
+    assert 2 * disc < spacing  # two neighbouring discs never overlap
+    a = grid.get_neuron(0, 0)
+    b = grid.get_neuron(1, 0)
+    ax, ay = viz.axial_to_pixel(*a.position, radius)
+    bx, by = viz.axial_to_pixel(*b.position, radius)
+    midpoint = (round(ox + (ax + bx) / 2), round(oy + (ay + by) / 2))
+    assert surface.get_at(midpoint)[:3] == viz.BACKGROUND  # the gap between them shows the background
+    assert surface.get_at((round(ox + ax), round(oy + ay)))[:3] == viz.UNFIRED  # the disc itself is painted

@@ -143,7 +143,7 @@ def test_teacher_validates_tracks_and_reports():
     second = teacher.epoch(verbose=False)
     assert teacher.epochs == 2 and 0 <= teacher.average <= 1 and 0 <= second <= 1
     assert grid.epoch == 2
-    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-06 toward 0.4 in [-5, 5]): accuracy" in teacher.status()
+    assert "learning reversed (perturb, lr 0.01, sigma 0.1, homeostasis 1e-06 toward 0.5 in [-5, 5], unstick 0.001): accuracy" in teacher.status()
     hebb = Teacher(grid, eligibility="hebb")
     assert hebb.sigma == 0.0  # no exploration noise for the Hebbian variant
 
@@ -189,13 +189,32 @@ def test_rates_track_firing_and_stuck_neurons_are_counted():
     always, never = grid.get_neuron_at(0, 0), grid.get_neuron_at(1, 0)
     for _ in range(600):
         grid.reset()
-        always.fire()
+        always.fire(wave=1)  # fired by the network, not forced
         update_rates(grid)
     assert always.rate > 0.99 and never.rate < 0.01
     on, off = stuck_neurons(grid)
     assert always in on and never in off
-    assert not any(n in on or n in off for n in grid.input_row())  # the input row is never counted
     assert abs((0.5 + RATE_MEMORY * 0.5) - 0.505) < 1e-12  # one step from the initial 0.5 toward 1
+
+
+def test_forced_neurons_are_left_out_of_rates_and_homeostasis_but_unforced_inputs_are_not():
+    from walnutbutter.learning import forced, homeostasis, update_rates
+    grid = GridOfNeurons(columns=4, rows=3, omega=0)
+    grid.set_input([True, False, True, False])
+    grid.fire_input()
+    row = grid.input_row()
+    forced_input, unforced_input = row[0], row[1]
+    assert forced(forced_input) and not forced(unforced_input)
+    rates_before = {n: n.rate for n in grid.neurons.values()}
+    update_rates(grid)
+    assert forced_input.rate == rates_before[forced_input]  # its firing was not the network's doing
+    assert unforced_input.rate != rates_before[unforced_input]  # an ordinary neuron: its rate moved
+    forced_input.rate, unforced_input.rate = 1.0, 1.0
+    thresholds = {n: n.threshold for n in grid.neurons.values()}
+    moved = homeostasis(grid, rate=0.1, target=0.5)
+    assert moved == len(grid.neurons) - len(grid.input_neurons())  # everyone except the two forced this epoch
+    assert forced_input.threshold == thresholds[forced_input]
+    assert unforced_input.threshold == pytest.approx(thresholds[unforced_input] + 0.05)
 
 
 def test_homeostasis_moves_thresholds_toward_the_target_rate_and_stays_in_range():
@@ -204,18 +223,17 @@ def test_homeostasis_moves_thresholds_toward_the_target_rate_and_stays_in_range(
     hot, cold = grid.get_neuron_at(0, 0), grid.get_neuron_at(1, 0)
     hot.rate, cold.rate = 1.0, 0.0
     before = {n: n.threshold for n in grid.neurons.values()}
-    assert homeostasis(grid, rate=0.1, target=0.5) == 8  # 12 neurons minus the 4 in the input row
+    assert homeostasis(grid, rate=0.1, target=0.5) == 12  # nothing has been forced: every neuron is eligible
     assert hot.threshold == pytest.approx(before[hot] + 0.05)
     assert cold.threshold == pytest.approx(before[cold] - 0.05)
     hot.threshold, cold.threshold = before[hot], before[cold]
-    homeostasis(grid, rate=0.1)  # the default target is 0.4
-    assert hot.threshold == pytest.approx(before[hot] + 0.06)
-    assert cold.threshold == pytest.approx(before[cold] - 0.04)
+    homeostasis(grid, rate=0.1)  # the default target is 0.5
+    assert hot.threshold == pytest.approx(before[hot] + 0.05)
+    assert cold.threshold == pytest.approx(before[cold] - 0.05)
     hot.threshold, cold.threshold = before[hot], before[cold]
     homeostasis(grid, rate=0.1, target=0.5)
     assert hot.threshold == pytest.approx(before[hot] + 0.05)
     assert cold.threshold == pytest.approx(before[cold] - 0.05)
-    assert all(n.threshold == before[n] for n in grid.input_row())
     assert homeostasis(grid, rate=0.0) == 0
     for _ in range(500):
         homeostasis(grid, rate=1.0)
@@ -242,11 +260,11 @@ def test_teacher_validates_homeostasis_and_reports_it():
         Teacher(grid, target_rate=1.5)
     teacher = Teacher(grid, homeostasis=0.01, target_rate=0.4, seed=1)
     teacher.step()
-    assert "homeostasis 0.01 toward 0.4 in [-5, 5]" in teacher.status() and "stuck" in teacher.status()
+    assert "homeostasis 0.01 toward 0.4 in [-5, 5]" in teacher.status() and "stuck" not in teacher.status()
     default = Teacher(grid, seed=1)
     default.step()
-    assert "homeostasis 1e-06 toward 0.4" in default.status() and "sigma 0.1" in default.status()
-    assert default.homeostasis == 1e-6 and default.target_rate == 0.4
+    assert "homeostasis 1e-06 toward 0.5" in default.status() and "sigma 0.1" in default.status()
+    assert default.homeostasis == 1e-6 and default.target_rate == 0.5
     off = Teacher(grid, seed=1, homeostasis=0)
     off.step()
     assert "homeostasis" not in off.status()
@@ -275,3 +293,75 @@ def test_discharge_is_the_default_and_carry_over_is_available():
     carrying = Teacher(grid, seed=1, carry_over=True)
     carrying.step()
     assert "carry-over" in carrying.status()
+
+
+
+# --- un-sticking from the output end -------------------------------------------
+
+
+def test_unstick_touches_only_stuck_output_neurons():
+    from walnutbutter.learning import unstick_outputs
+    grid = GridOfNeurons(columns=6, rows=4, omega=0)
+    outputs = output_row(grid)
+    hot, cold, fine = outputs[0], outputs[1], outputs[2]
+    hot.rate, cold.rate, fine.rate = 1.0, 0.0, 0.5
+    interior = grid.get_neuron_at(3, 1)
+    interior.rate = 1.0  # stuck, but not an output: must be left alone
+    before = {n: n.threshold for n in grid.neurons.values()}
+    nudged = unstick_outputs(grid, rate=0.1)
+    assert nudged == [hot, cold]
+    assert hot.threshold == pytest.approx(before[hot] + 0.05)
+    assert cold.threshold == pytest.approx(before[cold] - 0.05)
+    assert fine.threshold == before[fine] and interior.threshold == before[interior]
+    assert unstick_outputs(grid, rate=0.0) == []
+
+
+def test_unstick_stops_once_the_neuron_is_no_longer_stuck_and_respects_the_range():
+    from walnutbutter.learning import unstick_outputs
+    grid = GridOfNeurons(columns=6, rows=4, omega=0)
+    hot = output_row(grid)[0]
+    hot.rate = 1.0
+    for _ in range(300):
+        unstick_outputs(grid, rate=1.0, threshold_range=(-2.0, 2.0))
+    assert hot.threshold == 2.0
+    hot.rate = 0.6  # out of the stuck band: nothing more happens
+    assert unstick_outputs(grid, rate=1.0) == []
+    assert hot.threshold == 2.0
+
+
+def test_teacher_applies_unsticking_and_reports_it():
+    grid = main(columns=8, rows=4, weight=1.0, seed=1)  # weight 1: every output fires every epoch
+    teacher = Teacher(grid, seed=1, unstick=0.01, homeostasis=0)
+    for _ in range(600):
+        teacher.epoch(verbose=False)
+    assert teacher.unstuck_count > 0
+    assert any(n.threshold > 0.25 for n in output_row(grid))
+    assert "unstick 0.01" in teacher.status()
+    off = Teacher(grid, seed=1, unstick=0)
+    off.step()
+    assert "unstick" not in off.status() and off.unstuck_count == 0
+    with pytest.raises(ValueError):
+        Teacher(grid, unstick=-1)
+    with pytest.raises(ValueError):
+        Teacher(grid, unstick_target=0)
+
+
+def test_unstick_defaults_on_at_one_thousandth():
+    teacher = Teacher(main(columns=8, rows=4, seed=1))
+    assert teacher.unstick == 1e-3 and teacher.unstick_target == 0.5
+
+
+
+def test_record_appends_the_current_figures_to_the_history():
+    grid = main(columns=8, rows=4, seed=1)
+    teacher = Teacher(grid, seed=1)
+    assert teacher.history == []
+    teacher.step()
+    entry = teacher.record(elapsed=12.34, epochs_per_second=2500.6)
+    assert teacher.history == [entry]
+    assert entry["epoch"] == 1 and entry["elapsed"] == 12.3 and entry["epochs_per_second"] == 2501
+    assert entry["accuracy_to_date"] == round(teacher.accuracy_to_date, 4) and entry["recent"] == round(teacher.average, 4)
+    assert entry["stuck_on"] + entry["stuck_off"] <= len(grid.neurons) - grid.columns
+    teacher.epoch(verbose=False)
+    teacher.record()
+    assert len(teacher.history) == 2 and teacher.history[1]["epoch"] == 2 and teacher.history[1]["elapsed"] is None

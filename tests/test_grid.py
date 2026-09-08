@@ -310,10 +310,10 @@ def test_repr_marks_small_world_connections():
     assert repr(grid.local_connections()[0]).endswith(", active)")
 
 
-def test_default_omega_is_five_percent():
+def test_default_omega_is_one_fifth():
     grid = GridOfNeurons(columns=10, rows=8, seed=1)
-    assert grid.omega == 0.05
-    assert len(grid.small_world_connections()) == round(0.05 * len(grid.local_connections()) / 0.95)
+    assert grid.omega == 0.2
+    assert len(grid.small_world_connections()) == round(0.2 * len(grid.local_connections()) / 0.8)
 
 
 

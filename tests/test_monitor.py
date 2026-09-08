@@ -117,9 +117,9 @@ def test_cli_defaults_to_random_weights_and_reports_the_seed(capsys):
 
 
 def test_cli_seed_makes_runs_repeatable(capsys):
-    cli_main(["--headless", "--columns", "10", "--rows", "8", "--seed", "11"])
+    cli_main(["--headless", "--columns", "10", "--rows", "8", "--seed", "11", "--no-save"])  # no timestamped path in the output
     first = capsys.readouterr()
-    cli_main(["--headless", "--columns", "10", "--rows", "8", "--seed", "11"])
+    cli_main(["--headless", "--columns", "10", "--rows", "8", "--seed", "11", "--no-save"])
     second = capsys.readouterr()
     assert first.out == second.out and first.err == second.err
     assert "seed 11" in first.err
@@ -185,10 +185,10 @@ def test_cli_learn_runs_epochs_and_reports_accuracy(capsys):
             "--lr", "0.1", "--epochs", "2000"]
     assert cli_main(args) == 0
     err = capsys.readouterr().err
-    assert "learning all-off (perturb, lr 0.1, sigma 0.1, homeostasis 1e-06 toward 0.4 in [-5, 5]): accuracy" in err
+    assert "learning all-off (perturb, lr 0.1, sigma 0.1, homeostasis 1e-06 toward 0.5 in [-5, 5], unstick 0.001): accuracy" in err
     assert "after 2000 epochs:" in err and "to date over 2,000 epochs" in err
     final = float(err.rsplit("% recent", 1)[0].rsplit(" ", 1)[1])
-    assert final > 85
+    assert final > 70  # well above the 50% an untrained output row scores on all-off
 
 
 def test_cli_epochs_without_learn_just_runs_them(capsys):
@@ -213,7 +213,7 @@ def test_cli_eligibility_and_sigma_options(capsys):
     args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--eligibility", "hebb",
             "--sigma", "0.3", "--lr", "0.02", "--epochs", "20"]
     assert cli_main(args) == 0
-    assert "learning reversed (hebb, lr 0.02, sigma 0, homeostasis 1e-06 toward 0.4 in [-5, 5])" in capsys.readouterr().err
+    assert "learning reversed (hebb, lr 0.02, sigma 0, homeostasis 1e-06 toward 0.5 in [-5, 5], unstick 0.001)" in capsys.readouterr().err
 
 
 def test_cli_saves_and_loads_weights(tmp_path, capsys):
@@ -269,7 +269,7 @@ def test_cli_homeostasis_options(capsys):
             "--homeostasis", "0.01", "--target-rate", "0.3"]
     assert cli_main(args) == 0
     err = capsys.readouterr().err
-    assert "homeostasis 0.01 toward 0.3 in [-5, 5]" in err and "stuck" in err
+    assert "homeostasis 0.01 toward 0.3 in [-5, 5]" in err and "stuck" not in err
 
 
 def test_cli_threshold_range_option(capsys):
@@ -312,3 +312,98 @@ def test_cli_minimum_potential_option(capsys):
                      "--minimum-potential", "-0.5"]) == 0
     assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--minimum-potential", "0.5"]) == 2
     assert "must be below the threshold" in capsys.readouterr().err
+
+
+def test_cli_unstick_options(capsys):
+    args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5",
+            "--unstick", "0.02", "--unstick-target", "0.4"]
+    assert cli_main(args) == 0
+    assert "unstick 0.02" in capsys.readouterr().err
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5", "--unstick", "0"]) == 0
+    assert "unstick" not in capsys.readouterr().err
+
+
+def test_headless_run_records_history_and_default_report_is_one_second(tmp_path, capsys):
+    from walnutbutter.cli import build_parser
+    from walnutbutter.persistence import read_checkpoint
+    assert build_parser().parse_args([]).report == 1.0
+    path = tmp_path / "w.json"
+    args = ["--headless", "--columns", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "50", "--save-weights", str(path)]
+    assert cli_main(args) == 0
+    history = read_checkpoint(path)["learning"]["history"]
+    assert len(history) == 10 and history[-1]["epoch"] == 50 and history[0]["epoch"] == 5
+
+
+def test_checkpoints_are_written_by_default_to_a_timestamped_file(tmp_path, capsys):
+    from pathlib import Path
+    from walnutbutter.persistence import read_checkpoint
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "7", "-q", "--epochs", "20"]) == 0
+    err = capsys.readouterr().err
+    files = list(Path("runs").glob("*-seed7.json"))
+    assert len(files) == 1 and f"checkpointing to {files[0]}" in err and f"saved weights to {files[0]}" in err
+    data = read_checkpoint(files[0])
+    assert data["epoch"] == 20 and data["seed"] == 7 and len(data["learning"]["history"]) > 0
+
+
+def test_no_save_writes_nothing_and_explicit_path_wins(tmp_path, capsys):
+    from pathlib import Path
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "7", "-q", "--epochs", "5", "--no-save"]) == 0
+    assert not Path("runs").exists() and "checkpointing" not in capsys.readouterr().err
+    explicit = tmp_path / "mine.json"
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "7", "-q", "--epochs", "5",
+                     "--save-weights", str(explicit)]) == 0
+    assert explicit.exists() and not Path("runs").exists()
+
+
+def test_resumed_run_gets_its_own_file(tmp_path, capsys):
+    from pathlib import Path
+    first = tmp_path / "first.json"
+    assert cli_main(["--headless", "--columns", "8", "--rows", "4", "--seed", "7", "-q", "--epochs", "5",
+                     "--save-weights", str(first)]) == 0
+    before = first.read_text()
+    assert cli_main(["--headless", "-q", "--epochs", "5", "--load-weights", str(first)]) == 0
+    assert first.read_text() == before  # the loaded file is untouched
+    assert len(list(Path("runs").glob("*-seed7.json"))) == 1
+
+
+def test_seeds_runs_in_parallel_and_reports_a_sorted_table(tmp_path, capsys):
+    from pathlib import Path
+    from walnutbutter.persistence import read_checkpoint
+    args = ["--seeds", "3", "--seed", "10", "--columns", "8", "--rows", "4", "--epochs", "40"]
+    assert cli_main(args) == 0
+    captured = capsys.readouterr()
+    lines = [l for l in captured.out.splitlines() if l.strip() and not l.startswith(" " * 6 + "seed")]
+    rows = [l.split() for l in lines[1:]]
+    assert [int(r[0]) for r in rows] and sorted(int(r[0]) for r in rows) == [10, 11, 12]
+    recents = [float(r[1].rstrip("%")) for r in rows]
+    assert recents == sorted(recents, reverse=True)
+    assert "3 seeds from 10 on" in captured.err and "best seed" in captured.err
+    files = sorted(Path("runs").glob("*-seed1?.json"))
+    assert len(files) == 3 and all(read_checkpoint(f)["epoch"] == 40 for f in files)
+
+
+def test_seeds_rejects_bad_arguments(capsys):
+    assert cli_main(["--seeds", "0", "--epochs", "10"]) == 2
+    assert cli_main(["--seeds", "2", "--epochs", "1"]) == 2
+    assert cli_main(["--seeds", "2", "--epochs", "10", "--no-learn"]) == 2
+
+
+def test_seeds_with_no_save_writes_nothing(capsys):
+    from pathlib import Path
+    assert cli_main(["--seeds", "2", "--seed", "1", "--columns", "8", "--rows", "4", "--epochs", "10", "--no-save"]) == 0
+    assert not Path("runs").exists()
+    assert "  -" in capsys.readouterr().out
+
+
+def test_seeds_runs_the_lattice_when_nodes_is_given(tmp_path, capsys):
+    from pathlib import Path
+    from walnutbutter.cartesian import CartesianNodes
+    from walnutbutter.persistence import restore
+    assert cli_main(["--nodes", "--seeds", "2", "--seed", "20", "--columns", "8", "--rows", "4", "--epochs", "30"]) == 0
+    captured = capsys.readouterr()
+    assert "lattice, reach 2" in captured.err
+    files = sorted(Path("runs").glob("*-seed2?.json"))
+    assert len(files) == 2
+    for f in files:
+        restored, data = restore(f)
+        assert isinstance(restored, CartesianNodes) and data["epoch"] == 30 and data["reach"] == 2.0

@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import math
 import random
 import sys
+import time
+import os
+from datetime import datetime
+from multiprocessing import Pool
+from pathlib import Path
 
 from .cartesian import CartesianNodes
+from .grid import GridOfNeurons
 from .inputs import parse_bits
 from .learning import ELIGIBILITIES, TARGETS, Teacher
 from .monitor import main, run_epoch
@@ -41,10 +48,19 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="N",
         nargs="?",
-        const=64,
+        const=0,
         default=None,
-        help="instead of the hex grid: N neurons at random Cartesian positions in [-1, 1] x [-1, 1] "
-        "(N defaults to 64; shown, not yet wired)",
+        help="Cartesian neurons instead of the hex grid: a --columns x --rows hexagonal lattice at unit spacing, "
+        "wired by distance (--receptive-field-sigma) and learning like the grid; or with N, that many neurons at "
+        "random in a --columns x --rows unit region, just shown",
+    )
+    parser.add_argument(
+        "--reach",
+        type=float,
+        default=2.0,
+        metavar="UNITS",
+        help="with --nodes: a neuron connects to every neuron within this many unit distances "
+        "(default: 2, the two hex rings at unit density)",
     )
     parser.add_argument(
         "--window",
@@ -65,8 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         "--omega",
         type=float,
-        default=0.05,
-        help="proportion of connections that are small-world shortcuts, 0 to <1 (default: 0.05)",
+        default=0.2,
+        help="proportion of connections that are small-world shortcuts, 0 to <1 (default: 0.2)",
     )
     parser.add_argument(
         "-i",
@@ -91,6 +107,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.001,
         help="the smallest weight allowed under --positive-weights (default: 0.001)",
+    )
+    parser.add_argument(
+        "--seeds",
+        type=int,
+        metavar="N",
+        default=None,
+        help="run N seeds in parallel (consecutive from --seed, or from a random base), headless, for --epochs "
+        "each; print a table sorted best first and checkpoint every run",
     )
     parser.add_argument(
         "--seed",
@@ -118,9 +142,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--report",
         type=float,
-        default=30.0,
+        default=1.0,
         metavar="SECONDS",
-        help="while free-running, print a progress line this often (default: 30)",
+        help="while free-running, print a progress line (and record it in the checkpoint history) this often (default: 1)",
     )
     parser.add_argument(
         "--no-learn",
@@ -161,8 +185,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target-rate",
         type=float,
-        default=0.4,
-        help="firing rate homeostasis aims for, 0 to 1 (default: 0.4)",
+        default=0.5,
+        help="firing rate homeostasis aims for, 0 to 1 (default: 0.5)",
+    )
+    parser.add_argument(
+        "--unstick",
+        type=float,
+        default=1e-3,
+        metavar="RATE",
+        help="per-epoch rate at which a stuck output neuron's threshold moves toward --unstick-target; only "
+        "output neurons firing >99%% or <1%% of the time are touched, only while stuck (default: 0.001; 0 = off)",
+    )
+    parser.add_argument(
+        "--unstick-target",
+        type=float,
+        default=0.5,
+        help="firing rate the output un-sticking aims for (default: 0.5)",
     )
     parser.add_argument(
         "--threshold-range",
@@ -198,7 +236,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--save-weights",
         metavar="FILE",
-        help="write a checkpoint of the learned weights here at every progress report and on exit",
+        help="checkpoint file, written at every progress report and on exit "
+        "(default: runs/<date>-<time>-seed<seed>.json)",
+    )
+    parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help="do not write a checkpoint",
     )
     parser.add_argument(
         "--load-weights",
@@ -239,8 +283,13 @@ def _run(args: argparse.Namespace) -> int:
                 )
                 return 2
         width, height = args.window
-        if args.nodes is not None:
-            return _run_nodes(args, width, height)
+        if args.nodes is not None and args.nodes < 0:
+            print(f"error: --nodes cannot be negative, got {args.nodes}", file=sys.stderr)
+            return 2
+        if args.nodes is not None and args.nodes > 0:
+            return _run_nodes(args, width, height)  # a random scatter: shown, not learnable (no rows)
+        if args.seeds is not None:
+            return _run_seeds(args)  # grid, or the lattice with bare --nodes
         loaded = None
         if args.load_weights:
             try:
@@ -251,6 +300,8 @@ def _run(args: argparse.Namespace) -> int:
             grid_from_file, data = loaded
             args.seed = data["seed"]
             args.columns, args.rows, args.omega = data["columns"], data["rows"], data["omega"]
+            if data.get("container") == "lattice":
+                args.nodes = 0
             args.threshold = data["threshold"]
             args.minimum_potential = data.get("minimum_potential", -1.0)
             args.weight = None if data["random_weights"] else data["weight"]
@@ -262,6 +313,12 @@ def _run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
         seed = args.seed if args.seed is not None else random.randrange(2**31)
+        if args.save_weights is None and not args.no_save:
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            args.save_weights = str(Path("runs") / f"{stamp}-seed{seed}.json")
+        if args.save_weights:
+            Path(args.save_weights).parent.mkdir(parents=True, exist_ok=True)
+            print(f"checkpointing to {args.save_weights}", file=sys.stderr)
         settings = dict(
             columns=args.columns,
             rows=args.rows,
@@ -288,9 +345,24 @@ def _run(args: argparse.Namespace) -> int:
             input_bits = parse_bits(args.input) if args.input is not None else None
             if loaded:
                 grid, data = loaded
-                run_epoch(grid, input_bits)  # first epoch on the restored weights
+            elif args.nodes is not None:
+                if args.reach < 0:
+                    print(f"error: --reach must not be negative, got {args.reach}", file=sys.stderr)
+                    return 2
+                grid = CartesianNodes(
+                    columns=args.columns, rows=args.rows, seed=seed, threshold=args.threshold,
+                    minimum_potential=args.minimum_potential, permute=not args.no_permute,
+                    weight_range=settings["weight_range"],
+                )
+                grid.connect_within(reach=args.reach, weight=args.weight)
             else:
-                grid = main(**settings, input_bits=input_bits)
+                grid = GridOfNeurons(**settings)
+            if isinstance(grid, CartesianNodes):
+                print(
+                    f"{grid!r}, wired: {len(grid.connections)} one-way connections, every pair within "
+                    f"{grid.reach:g} units ({grid.mean_out_degree():.1f} per neuron)",
+                    file=sys.stderr,
+                )
             if not args.no_permute or loaded:
                 print(f"input permutation: bottom-row column i shows coded bit {grid.permutation}", file=sys.stderr)
             teacher = None
@@ -306,10 +378,14 @@ def _run(args: argparse.Namespace) -> int:
                     target_rate=args.target_rate,
                     threshold_range=tuple(args.threshold_range),
                     carry_over=args.carry_over,
+                    unstick=args.unstick,
+                    unstick_target=args.unstick_target,
                 )
                 if loaded:
                     resume_teacher(teacher, data)
-                teacher.step()  # the first epoch ran without exploration; still score and learn from it
+                teacher.epoch(input_bits)  # the first epoch, with exploration, like every other
+            else:
+                run_epoch(grid, input_bits, discharge=not args.carry_over)
 
             def save_checkpoint():
                 if args.save_weights:
@@ -323,10 +399,13 @@ def _run(args: argparse.Namespace) -> int:
                 )
             else:
                 report_every = max(1, args.epochs // 10)
+                started = time.perf_counter()
                 for epoch in range(2, args.epochs + 1):
                     if teacher:
                         teacher.epoch()  # --quiet drops the per-neuron lines, not the per-epoch line
                         if epoch % report_every == 0 or epoch == args.epochs:
+                            elapsed = time.perf_counter() - started
+                            teacher.record(elapsed, (epoch - 1) / elapsed if elapsed else None)
                             print(f"epoch {epoch}: {teacher.status()}", file=sys.stderr)
                             save_checkpoint()
                     else:
@@ -335,7 +414,7 @@ def _run(args: argparse.Namespace) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 2
 
-        if args.omega > 0:
+        if args.omega > 0 and not isinstance(grid, CartesianNodes):
             print(
                 f"omega {args.omega:g}: {len(grid.small_world_connections())} small-world "
                 f"connections among {len(grid.connections)}",
@@ -362,16 +441,26 @@ def _run(args: argparse.Namespace) -> int:
 
 def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
     """--nodes [N]: place a Cartesian population and show it. No wiring, input or learning yet."""
-    if args.nodes < 1:
-        print(f"error: --nodes needs at least 1 neuron, got {args.nodes}", file=sys.stderr)
+    if args.nodes < 0:
+        print(f"error: --nodes cannot be negative, got {args.nodes}", file=sys.stderr)
         return 2
     seed = args.seed if args.seed is not None else random.randrange(2**31)
-    nodes = CartesianNodes(count=args.nodes, seed=seed, threshold=args.threshold)
-    (x_min, x_max), (y_min, y_max) = nodes.bounds
+    common = dict(columns=args.columns, rows=args.rows, seed=seed, threshold=args.threshold,
+                  minimum_potential=args.minimum_potential)
     print(f"seed {seed}", file=sys.stderr)
+    if args.nodes == 0:
+        nodes = CartesianNodes(layout="hex", **common)
+        print(f"{nodes!r}", file=sys.stderr)
+    else:
+        nodes = CartesianNodes(layout="random", count=args.nodes, **common)
+        print(f"{nodes!r} ({len(nodes) / (nodes.width * nodes.height):.2f} per unit area)", file=sys.stderr)
+    if args.reach < 0:
+        print(f"error: --reach must not be negative, got {args.reach}", file=sys.stderr)
+        return 2
+    made = nodes.connect_within(reach=args.reach, weight=args.weight)
     print(
-        f"{len(nodes)} nodes placed at random in [{x_min:g}, {x_max:g}] x [{y_min:g}, {y_max:g}]; "
-        "connections, input and learning are not defined for nodes yet",
+        f"wired: {made} one-way connections, {nodes.mean_out_degree():.1f} outgoing per neuron, every pair within "
+        f"{args.reach:g} units; input and learning are not defined for a scatter (it has no rows)",
         file=sys.stderr,
     )
     if args.save or args.show:
@@ -389,4 +478,109 @@ def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
         for neuron in nodes:
             x, y = neuron.position
             print(f"{neuron.name}: ({x:+.3f}, {y:+.3f})")
+    return 0
+
+
+def _seed_worker(job: dict) -> dict:
+    """One seed's headless run, in its own process. Returns a summary row."""
+    Neuron.verbose = False
+    seed, epochs = job["seed"], job["epochs"]
+    if job.get("lattice"):
+        settings = job["settings"]
+        grid = CartesianNodes(
+            columns=settings["columns"], rows=settings["rows"], seed=seed, threshold=settings["threshold"],
+            minimum_potential=settings["minimum_potential"], permute=settings["permute"],
+            weight_range=settings["weight_range"],
+        )
+        grid.connect_within(reach=job["lattice"]["reach"], weight=settings["weight"])
+    else:
+        grid = GridOfNeurons(**job["settings"], seed=seed)
+    teacher = Teacher(grid, seed=seed, **job["teacher"])
+    report_every = max(1, epochs // 10)
+    started = time.perf_counter()
+    rewards = [teacher.epoch(verbose=False)]
+    for epoch in range(2, epochs + 1):
+        rewards.append(teacher.epoch(verbose=False))
+        if epoch % report_every == 0 or epoch == epochs:
+            elapsed = time.perf_counter() - started
+            teacher.record(elapsed, (epoch - 1) / elapsed if elapsed else None)
+    if job["save"]:
+        checkpoint(grid, job["save"], teacher)
+    tail = rewards[-max(1, len(rewards) // 10):]  # the last tenth of the run
+    return {
+        "seed": seed,
+        "to_date": teacher.accuracy_to_date,
+        "recent": sum(tail) / len(tail),
+        "epochs": teacher.epochs,
+        "save": job["save"],
+    }
+
+
+def _run_seeds(args: argparse.Namespace) -> int:
+    """--seeds N: N headless runs in parallel, one table at the end, a checkpoint per run."""
+    if args.seeds < 1:
+        print(f"error: --seeds needs at least 1, got {args.seeds}", file=sys.stderr)
+        return 2
+    if args.epochs < 2:
+        print("error: --seeds needs --epochs of at least 2", file=sys.stderr)
+        return 2
+    base = args.seed if args.seed is not None else random.randrange(2**31 - args.seeds)
+    seeds = list(range(base, base + args.seeds))
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    settings = dict(
+        columns=args.columns,
+        rows=args.rows,
+        weight=args.weight,
+        threshold=args.threshold,
+        omega=args.omega,
+        permute=not args.no_permute,
+        weight_range=(args.epsilon, 1.0) if args.positive_weights else (-1.0, 1.0),
+        minimum_potential=args.minimum_potential,
+    )
+    teacher_kwargs = dict(
+        target=args.target,
+        lr=args.lr,
+        sigma=args.sigma,
+        eligibility=args.eligibility,
+        homeostasis=args.homeostasis,
+        target_rate=args.target_rate,
+        threshold_range=tuple(args.threshold_range),
+        carry_over=args.carry_over,
+        unstick=args.unstick,
+        unstick_target=args.unstick_target,
+    )
+    if args.no_learn:
+        print("error: --seeds is for comparing learning runs; drop --no-learn", file=sys.stderr)
+        return 2
+    jobs = []
+    for seed in seeds:
+        save = None
+        if not args.no_save:
+            save = args.save_weights or str(Path("runs") / f"{stamp}-seed{seed}.json")
+            if args.save_weights and args.seeds > 1:
+                save = str(Path(args.save_weights).with_suffix("")) + f"-seed{seed}.json"
+            Path(save).parent.mkdir(parents=True, exist_ok=True)
+        lattice = {"reach": args.reach} if args.nodes is not None else None
+        jobs.append({"seed": seed, "epochs": args.epochs, "settings": settings, "teacher": teacher_kwargs,
+                     "save": save, "lattice": lattice})
+    workers = max(1, min(args.seeds, (os.cpu_count() or 2) - 1))
+    wiring = (f"lattice, reach {args.reach:g}" if args.nodes is not None else f"hex grid, omega {args.omega:g}")
+    print(
+        f"{args.seeds} seeds from {base} on {workers} cores, {args.epochs:,} epochs each, "
+        f"{args.columns}x{args.rows} {wiring}",
+        file=sys.stderr,
+    )
+    started = time.perf_counter()
+    with Pool(workers) as pool:
+        rows = pool.map(_seed_worker, jobs)
+    rows.sort(key=lambda r: (r["recent"], r["to_date"]), reverse=True)
+    print(f"{'seed':>11}  {'last tenth':>10}  {'to date':>8}  checkpoint")
+    for r in rows:
+        print(f"{r['seed']:>11}  {r['recent']:>10.1%}  {r['to_date']:>8.1%}  {r['save'] or '-'}")
+    best = rows[0]
+    print(
+        f"best seed {best['seed']}: {best['recent']:.1%} over its last tenth "
+        f"({time.perf_counter() - started:.0f}s wall)",
+        file=sys.stderr,
+    )
     return 0

@@ -1,7 +1,27 @@
 # walnutbutter
 
-Builds a rectangular mesh of hexagonal neurons, fires the one at the centre,
-and watches the signal spread outward. Each neuron fires at most once per run.
+A living network of simple neurons on a plane, and the substance you build
+it from.
+
+Each neuron is a fire-once threshold unit: weighted input accumulates until
+it crosses a threshold, the neuron fires exactly once per epoch, and its
+signal travels one-way, wave by wave, along weighted connections. The
+network's input is a complement-coded, permuted bit pattern forced onto its
+bottom row; its output is the top row, which is taught to show that pattern
+reversed. Learning is global reinforcement: every epoch a single scalar
+reward, the output's accuracy, is broadcast to every connection and combined
+with each neuron's exploration noise (node-perturbation REINFORCE), with a
+slow homeostatic drift of thresholds and an un-sticking rule for saturated
+outputs. There is no training run and no evaluation run, only one run that
+keeps going: the window is a 30 Hz monitor on a free-running system that
+learns, checkpoints itself, and reports as it goes.
+
+Two containers build networks. The **hex grid** wires every cell to its two
+rings of neighbours plus a few random small-world shortcuts. **Walnut butter**
+is the substance the neurons are made of: spread it on the plane in smears of
+a given density and neurons appear at that density, and butter spread near
+other butter connects, so where you put it and how thick decides the whole
+architecture. The default of each is an 8 x 10 field of 80 neurons.
 
 ## Setup (once)
 
@@ -26,7 +46,7 @@ walnutbutter --input 1011                 # choose the 4 input bits
 walnutbutter --no-permute                 # coded bits in order on the bottom row
 walnutbutter --seed 42       # repeat a particular random mesh
 walnutbutter --weight 1      # a fixed weight on every connection instead
-walnutbutter --omega 0.1     # one connection in ten is a shortcut (default: 0.05)
+walnutbutter --omega 0.1     # one connection in ten is a shortcut (default: 0.2)
 walnutbutter --positive-weights --threshold 2   # no inhibition: weights kept in [epsilon, 1]
 walnutbutter --omega 0       # plain mesh, no shortcuts
 walnutbutter --weight 0.2 --show   # signal dies at the origin
@@ -45,13 +65,29 @@ and `--seed` reproduces the permutation and the whole sequence of random
 inputs. Columns must be even. From Python, `run_epoch(grid)` resets the
 mesh and presents the next input.
 
+## Comparing seeds
+
+Outcomes vary a lot between seeds: with identical settings, some seeds reach
+the high 80s within a million epochs while others sit in the low 60s. So
+the best use of a many-core machine is to run several seeds at once and
+keep the best:
+
+```bash
+walnutbutter --seeds 15 --epochs 1000000 --seed 1
+```
+
+runs seeds 1 to 15 in parallel, headless, one process per core (add `--nodes`
+for the lattice instead of the grid), prints a table sorted best first (accuracy over each run's last tenth, and to date),
+and checkpoints every run to `runs/` so the winner can be loaded with
+`--load-weights`. Without `--seed` the base seed is random and printed.
+
 ## Seeing the grid
 
 ```bash
 walnutbutter                              # the default: free-running window with learning
 walnutbutter --window 1200 800            # a bigger window
-walnutbutter --report 300                 # a progress line every 5 minutes instead of 30 s
-walnutbutter --save-weights run1.json     # checkpoint the learned weights at every report and on exit
+walnutbutter --report 30                  # a progress line every 30 s instead of every second
+walnutbutter --save-weights run1.json     # choose the checkpoint file (default: runs/<date>-<time>-seed<seed>.json)
 walnutbutter --load-weights run1.json     # continue from a checkpoint (same mesh, seed and permutation)
 walnutbutter --step                       # one epoch per Space press
 walnutbutter --columns 24 --rows 20 --headless --save grid.png
@@ -63,8 +99,12 @@ after every one, with no coupling to the display; the window samples its
 state 30 times a second, always showing a completed epoch. The title bar
 shows the epoch count, the epoch rate, the accuracy to date (the mean over
 every epoch since the start) and the recent accuracy, and the same figures
-go to the terminal every `--report` seconds with an elapsed-time stamp, so a
-run can be left for hours and read back later. **Esc** or **Q** closes the
+go to the terminal every `--report` seconds (default 1) with an elapsed-time
+stamp, so a run can be left for hours and read back later. Each report is
+also appended to an accuracy history (epoch, elapsed seconds, accuracy to
+date, recent accuracy, stuck counts, epoch rate) that `--save-weights`
+stores in the checkpoint and `--load-weights` carries forward, so the
+learning curve survives the window closing. **Esc** or **Q** closes the
 window; the final figures are printed on exit.
 
 With `--step` nothing happens until you press **Space**, which resets every
@@ -72,7 +112,7 @@ neuron (weights, shortcuts and thresholds are kept), draws a fresh random
 input, fires the bottom row and, unless `--no-learn`, teaches. The input
 neurons are ringed in white. Fired neurons are coloured, shading from
 yellow in wave 0 to orange in the last wave, unfired neurons are grey, and the
-neurons that were forced in wave 0 carry a white ring. Adding `--save PATH`
+neurons that were forced in wave 0 carry a white ring. Each neuron is drawn as a disc on its hexagonal cell, sized so neighbouring discs never touch. Adding `--save PATH`
 writes whatever state the mesh is in when the window closes.
 
 ```python
@@ -116,7 +156,7 @@ flag. The grid keeps every connection in `grid.connections`, a dictionary
 keyed by ID starting from 1. A neuron lists the connections it sends along in
 `outgoing` and the ones it receives from in `incoming`.
 
-**Small-world shortcuts.** `omega` (0 up to but not including 1, default 0.05)
+**Small-world shortcuts.** `omega` (0 up to but not including 1, default 0.2)
 is the proportion of all connections that are long-range shortcuts. After the local
 mesh is built with L connections, `omega * L / (1 - omega)` extra connections
 are added, each running one way from a random neuron to a random neuron that
@@ -182,29 +222,45 @@ grid.connection_between(origin, right)   # origin -> right
 grid.connection_between(right, origin)   # right -> origin, a different connection
 ```
 
-## Neurons without a grid
+## Walnut butter
 
-`walnutbutter --nodes` builds a population of 64 such neurons from the seed
-(`--nodes N` for another count) and shows it, or lists their positions with
-`--headless`, or writes a picture with `--save`. Nothing is wired or learned
-for nodes yet.
+Walnut butter is the substance the neurons are made of. It is spread over
+the plane in **smears**: each is a shape (`Rect` or `Disc`, in unit
+distances) with a **density** in neurons per unit area, and placing the
+butter packs neurons on a hexagonal lattice inside each shape at the spacing
+that density implies. Thick butter means many neurons close together, thin
+butter a few far apart, bare plane none. **Butter that is spread near other
+butter connects:** a neuron projects to every neuron within its `reach`
+(default 2 units), so density alone decides how richly a region is wired,
+and a gap in the spread is a gap in the network. Nothing about the topology
+is random; only the weights are drawn from the seed.
 
-`CartesianNodes` is a second container. Each neuron gets an `(x, y)` position
-inside a bounding box, by default the square from -1 to 1 on both axes.
-`add(x, y)` places a neuron exactly; `add()` places it at random, each
-coordinate drawn uniformly from the box using the container's `seed`.
-Coordinates outside the box are rejected. The container makes no
-connections; `nearest` and `within` help decide them. Propagation and the
-neurons themselves work exactly as in the grid.
+The default network is one rectangular smear at unit density, which is the
+8 x 10 hexagonal lattice at unit spacing: `CartesianNodes()` builds it
+directly, and with a reach of 2 each interior neuron has eighteen neighbours,
+six at distance 1, six at √3 and six at 2, the same as the hex grid's two
+rings. Its bottom row is the input and its top row the output, addressed
+like the grid with `get_neuron_at(column, row)`. A free spread has no rows,
+so input and output zones for it are still to be defined.
 
 ```python
+from walnutbutter.butter import Disc, Rect, WalnutButter, UNIT_DENSITY
 from walnutbutter.cartesian import CartesianNodes
 
-nodes = CartesianNodes(count=50, seed=1)     # 50 neurons scattered in [-1, 1] x [-1, 1]
-centre = nodes.add(0.0, 0.0)                 # one placed by hand
-for other in nodes.within(0.0, 0.0, radius=0.3, exclude=centre):
-    centre.connect(other, weight=0.5)
+recipe = (WalnutButter()
+          .spread(Rect(-4, -4, 4, 4), UNIT_DENSITY)        # a lattice-density slab
+          .spread(Disc(0, 0, 1.5), 3 * UNIT_DENSITY))      # a dense knot in the middle
+nodes = CartesianNodes.from_butter(recipe, seed=1)
+nodes.connect_within(reach=2.0, weight=None)               # near butter connects
 ```
+
+`walnutbutter --nodes` builds the default lattice, wires it with `--reach`
+(default 2), and then does everything the grid does: learns, reports,
+checkpoints to `runs/` (lattice checkpoints record the wiring and load back
+with `--load-weights`), and shows in the window or runs headless with
+`--epochs`. `--nodes N` scatters N neurons at random instead; a scatter has
+no rows, so it is shown, not trained. The earlier Gaussian receptive-field
+wiring (`connect_by_distance`) remains in the library for reference.
 
 ## Teaching the network
 
@@ -232,8 +288,10 @@ and weights stay within [-1, 1]. `Teacher` wraps all this; use
 `teacher.epoch()` instead of `run_epoch(grid)` so the exploration noise is
 injected.
 
-**Saving what it learned.** `--save-weights FILE` writes a JSON checkpoint
-at every progress report and on exit: every weight by connection ID, plus
+**Saving what it learned.** Every run writes a JSON checkpoint at every
+progress report and on exit, by default to `runs/<date>-<time>-seed<seed>.json`
+(the path is printed at the start; `runs/` is ignored by git). `--save-weights FILE`
+chooses the file, `--no-save` skips it. A checkpoint holds: every weight by connection ID, plus
 the mesh size, omega, threshold, seed, input permutation, epoch count and
 the learning statistics. `--load-weights FILE` rebuilds that exact mesh from
 the stored seed and settings, restores the weights, and carries on counting
@@ -246,12 +304,25 @@ From Python: `persistence.checkpoint(grid, path, teacher)` and
 **Stuck neurons and homeostasis.** A neuron whose input sits far from its
 threshold is never flipped by the exploration noise, so it gets no learning
 signal and stays "stuck" always on or always off; on a long run most hidden
-neurons end up that way. The status line counts them. To counter it, every
-neuron outside the input row tracks its own firing rate and slowly moves its
-threshold toward a target rate (`--homeostasis`, default 1e-6 per epoch,
-`--target-rate`, default 0.4); firing too often raises the threshold, too
-rarely lowers it. `--homeostasis 0` switches it off. Per-neuron thresholds
-are saved in checkpoints.
+neurons end up that way. To counter it, every
+neuron tracks its own firing rate and slowly moves its threshold toward a
+target rate (`--homeostasis`, default 1e-6 per epoch,
+`--target-rate`, default 0.5); firing too often raises the threshold, too
+rarely lowers it. Neurons forced in wave 0 are left out for that epoch, as
+reinforcement leaves them out; an unforced input neuron is treated like any
+other. `--homeostasis 0` switches it off. Per-neuron thresholds are saved in
+checkpoints.
+
+**Un-sticking the outputs.** A saturated output neuron, one that fires on
+every input or on none, gets no learning signal at all, because the
+exploration noise never changes what it does. `--unstick RATE` (default
+0.001) moves the threshold of any output neuron that is stuck, firing more
+than 99% or less than 1% of the time, toward `--unstick-target` (default
+0.5), and stops the moment it is no longer stuck. Nothing else in the mesh
+is touched, so what the network has already learned is preserved. On a
+trained checkpoint this freed both stuck outputs without disturbing the
+six correct ones; routing the missing bit to them additionally needs the
+interior to loosen, which is the slow global homeostasis's job.
 
 Accuracy **to date** is the mean over every epoch since the start; the
 **recent** figure is an exponential average over roughly the last 200.
@@ -288,7 +359,8 @@ src/walnutbutter/
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
   propagation.py Signal queue and wave-by-wave propagate()
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
-  cartesian.py CartesianNodes: neurons at (x, y) positions in a box, placed or random; no grid
+  butter.py    WalnutButter: smears of neuron density on the plane; shapes Rect and Disc
+  cartesian.py CartesianNodes: the lattice, a scatter, or a placed recipe; reach wiring
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input
   learning.py  output targets, reward, the global-reinforcement rule, and Teacher

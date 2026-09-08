@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .cartesian import CartesianNodes
 from .grid import GridOfNeurons
 
 FORMAT = 1
@@ -19,26 +20,38 @@ FORMAT = 1
 
 def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
     """Write the grid's weights and settings to `path`. Returns what was written."""
+    lattice = isinstance(grid, CartesianNodes)
     data = {
         "format": FORMAT,
+        "container": "lattice" if lattice else "grid",
         "columns": grid.columns,
         "rows": grid.rows,
-        "omega": grid.omega,
+        "omega": getattr(grid, "omega", 0.0),
         "threshold": grid.threshold,
         "minimum_potential": grid.minimum_potential,
         "seed": grid.seed,
-        "random_weights": grid.weight is None,
-        "weight": grid.weight,
+        "weight": getattr(grid, "weight", None),
         "weight_range": list(grid.weight_range),
         "permutation": grid.permutation,
+        "random_weights": grid.weight is None if not lattice else True,
         "epoch": grid.epoch,
         "connections": len(grid.connections),
-        # the shortcuts are the only random part of the topology: record them so a load can verify the mesh
-        "shortcuts": [[c.source.name, c.target.name] for c in grid.small_world_connections()],
+        # the shortcuts are the only random part of a grid's topology: record them so a load can verify the mesh
+        "shortcuts": [] if lattice else [[c.source.name, c.target.name] for c in grid.small_world_connections()],
         "weights": [grid.connections[i].weight for i in range(1, len(grid.connections) + 1)],
-        "thresholds": [n.threshold for n in grid.neurons.values()],
-        "rates": [n.rate for n in grid.neurons.values()],
+        "thresholds": [n.threshold for n in grid.all_neurons()],
+        "rates": [n.rate for n in grid.all_neurons()],
     }
+    if lattice:
+        index = {n: i for i, n in enumerate(grid.neurons)}
+        data["layout"] = grid.layout
+        data["reach"] = getattr(grid, "reach", None)
+        data["receptive_field_sigma"] = getattr(grid, "receptive_field_sigma", None)  # the earlier Gaussian rule, if used
+        data["positions"] = grid.positions()
+        # the whole wiring, so a restore rebuilds it exactly without redrawing anything
+        data["connection_list"] = [
+            [index[c.source], index[c.target], c.kind] for c in (grid.connections[i] for i in range(1, len(grid.connections) + 1))
+        ]
     if teacher is not None:
         data["learning"] = {
             "target": teacher.target,
@@ -49,6 +62,9 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
             "homeostasis": teacher.homeostasis,
             "target_rate": teacher.target_rate,
             "threshold_range": list(teacher.threshold_range),
+            "unstick": teacher.unstick,
+            "unstick_target": teacher.unstick_target,
+            "history": teacher.history,
             "total_reward": teacher.total_reward,
             "baseline": teacher.baseline,
             "average": teacher.average,
@@ -72,6 +88,8 @@ def restore(path: str | Path) -> tuple[GridOfNeurons, dict]:
     Returns the grid and the checkpoint data (so a Teacher can be resumed).
     """
     data = read_checkpoint(path)
+    if data.get("container") == "lattice":
+        return _restore_lattice(data), data
     if data["seed"] is None:
         raise ValueError(f"{path}: the mesh was built without a seed, so its shortcuts cannot be rebuilt")
     grid = GridOfNeurons(
@@ -105,7 +123,7 @@ def load_weights(grid: GridOfNeurons, data: dict) -> None:
         raise ValueError("checkpoint shortcuts differ from the mesh's: it was built from a different seed")
     for connection_id, weight in enumerate(data["weights"], start=1):
         grid.connections[connection_id].weight = weight
-    neurons = list(grid.neurons.values())
+    neurons = list(grid.all_neurons())
     for neuron, threshold in zip(neurons, data.get("thresholds", [])):
         neuron.threshold = threshold
     for neuron, rate in zip(neurons, data.get("rates", [])):
@@ -121,3 +139,34 @@ def resume_teacher(teacher, data: dict) -> None:
     teacher.total_reward = record["total_reward"]
     teacher.baseline = record["baseline"]
     teacher.average = record["average"]
+    teacher.history = list(record.get("history", []))
+
+
+def _restore_lattice(data: dict) -> CartesianNodes:
+    """Rebuild a CartesianNodes network from its checkpoint: positions, wiring, weights, thresholds."""
+    nodes = CartesianNodes(
+        columns=data["columns"],
+        rows=data["rows"],
+        layout=data.get("layout", "hex"),
+        count=0 if data.get("layout") == "random" else None,
+        seed=data["seed"],
+        threshold=data["threshold"],
+        minimum_potential=data.get("minimum_potential", -1.0),
+        permute=False,
+        weight_range=tuple(data.get("weight_range", (-1.0, 1.0))),
+    )
+    if data.get("layout") == "random":
+        for x, y in data["positions"]:
+            nodes.add(x, y)
+    nodes.permutation = list(data["permutation"])
+    nodes.receptive_field_sigma = data.get("receptive_field_sigma")
+    nodes.reach = data.get("reach")
+    neurons = nodes.neurons
+    for connection_id, ((s_idx, t_idx, kind), weight) in enumerate(zip(data["connection_list"], data["weights"]), start=1):
+        nodes.connections[connection_id] = neurons[s_idx].connect(neurons[t_idx], connection_id, weight, kind=kind)
+    for neuron, threshold in zip(neurons, data.get("thresholds", [])):
+        neuron.threshold = threshold
+    for neuron, rate in zip(neurons, data.get("rates", [])):
+        neuron.rate = rate
+    nodes.epoch = data["epoch"]
+    return nodes

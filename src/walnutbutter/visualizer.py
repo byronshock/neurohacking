@@ -88,20 +88,30 @@ def neuron_colour(fired_in_wave: int | None, last_wave: int):
 # --- drawing ------------------------------------------------------------------
 
 
+DISC_FILL = 0.95  # a neuron's disc radius as a fraction of its cell's inscribed radius: a small gap between discs
+
+
 def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) -> None:
-    """Paint the whole grid onto `surface`, scaled to fit."""
+    """Paint the whole grid onto `surface`, scaled to fit.
+
+    Each neuron is a disc centred on its hexagonal cell. The disc radius is just
+    under the cell's inscribed radius (sqrt(3)/2 of the hex radius), so
+    neighbouring discs never touch or overlap.
+    """
     width, height = surface.get_size()
     hex_radius, offset_x, offset_y = layout(grid, width, height, margin)
 
     waves = [n.fired_in_wave for n in grid.neurons.values() if n.fired_in_wave is not None]
     last_wave = max(waves) if waves else 0
 
+    disc = hex_radius * SQRT3 / 2 * DISC_FILL
+    outline = max(1, round(hex_radius / 12))
     surface.fill(BACKGROUND)
     for (q, r), neuron in grid.neurons.items():
         dx, dy = axial_to_pixel(q, r, hex_radius)
-        points = hexagon_points(offset_x + dx, offset_y + dy, hex_radius)
-        pygame.draw.polygon(surface, neuron_colour(neuron.fired_in_wave, last_wave), points)
-        pygame.draw.polygon(surface, OUTLINE, points, width=max(1, round(hex_radius / 12)))
+        centre = (offset_x + dx, offset_y + dy)
+        pygame.draw.circle(surface, neuron_colour(neuron.fired_in_wave, last_wave), centre, disc)
+        pygame.draw.circle(surface, OUTLINE, centre, disc, width=outline)
 
     # Ring the stimulus: the neurons that fired in wave 0, or the input neurons
     # that will be forced when the mesh is fired, or failing both the origin.
@@ -110,31 +120,34 @@ def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) ->
         stimulus = [grid.get_origin_neuron()]
     for neuron in stimulus:
         dx, dy = axial_to_pixel(*neuron.position, hex_radius)
-        points = hexagon_points(offset_x + dx, offset_y + dy, hex_radius * 0.55)
-        pygame.draw.polygon(surface, ORIGIN_RING, points, width=max(1, round(hex_radius / 8)))
+        pygame.draw.circle(surface, ORIGIN_RING, (offset_x + dx, offset_y + dy), hex_radius * 0.55, width=max(1, round(hex_radius / 8)))
 
 
 # --- Cartesian populations ------------------------------------------------------
 
 
 def node_layout(nodes: CartesianNodes, width: int, height: int, margin: int = 24):
-    """Map the population's bounds onto the surface, preserving aspect ratio.
+    """Map unit distances onto pixels so the region and every neuron fit, preserving aspect ratio.
 
     Returns (to_pixel, node_radius, box) where box is the pygame.Rect the
-    bounds occupy on screen.
+    placement region occupies on screen and node_radius is a quarter of a unit
+    distance in pixels (so neurons within a unit of each other nearly touch).
     """
-    (x_min, x_max), (y_min, y_max) = nodes.bounds
+    (rx0, rx1), (ry0, ry1) = nodes.region
+    (ex0, ex1), (ey0, ey1) = nodes.extent()
+    x_min, x_max = min(rx0, ex0) - 0.5, max(rx1, ex1) + 0.5  # half a unit of breathing room
+    y_min, y_max = min(ry0, ey0) - 0.5, max(ry1, ey1) + 0.5
     scale = min((width - 2 * margin) / (x_max - x_min), (height - 2 * margin) / (y_max - y_min))
     span_w, span_h = scale * (x_max - x_min), scale * (y_max - y_min)
     left, top = (width - span_w) / 2, (height - span_h) / 2
 
     def to_pixel(x: float, y: float) -> tuple[float, float]:
-        # y grows upward in the box but downward on the screen
+        # y grows upward in the plane but downward on the screen
         return left + (x - x_min) * scale, top + (y_max - y) * scale
 
-    area_per_node = span_w * span_h / max(1, len(nodes))
-    radius = max(3.0, min(0.3 * math.sqrt(area_per_node), scale * 0.05))
-    box = pygame.Rect(round(left), round(top), round(span_w), round(span_h))
+    radius = max(2.0, scale * 0.25)
+    bx, by = to_pixel(rx0, ry1)
+    box = pygame.Rect(round(bx), round(by), round((rx1 - rx0) * scale), round((ry1 - ry0) * scale))
     return to_pixel, radius, box
 
 
@@ -145,7 +158,7 @@ def draw_nodes(surface: pygame.Surface, nodes: CartesianNodes, margin: int = 24)
     waves = [n.fired_in_wave for n in nodes if n.fired_in_wave is not None]
     last_wave = max(waves) if waves else 0
     surface.fill(BACKGROUND)
-    pygame.draw.rect(surface, UNFIRED, box, width=1)  # the bounding box the neurons live in
+    pygame.draw.rect(surface, UNFIRED, box, width=1)  # the random placement region, in unit distances
     for neuron in nodes:
         px, py = to_pixel(*neuron.position)
         pygame.draw.circle(surface, neuron_colour(neuron.fired_in_wave, last_wave), (px, py), radius)
@@ -165,9 +178,8 @@ def show_nodes(nodes: CartesianNodes, width: int = 800, height: int = 600, fps: 
     pygame.init()
     try:
         screen = pygame.display.set_mode((width, height))
-        (x_min, x_max), (y_min, y_max) = nodes.bounds
         pygame.display.set_caption(
-            f"walnutbutter: {len(nodes)} nodes in [{x_min:g}, {x_max:g}] x [{y_min:g}, {y_max:g}]   [Esc] quit"
+            f"walnutbutter: {len(nodes)} nodes in a {nodes.width:g} x {nodes.height:g} unit region   [Esc] quit"
         )
         draw_nodes(screen, nodes)
         pygame.display.flip()
@@ -187,10 +199,18 @@ def show_nodes(nodes: CartesianNodes, width: int = 800, height: int = 600, fps: 
 # --- the hex grid -----------------------------------------------------------------
 
 
-def save(grid: GridOfNeurons, path: str, width: int = 800, height: int = 600) -> None:
-    """Render the grid to an image file (PNG by extension). Needs no display."""
+def draw(surface: pygame.Surface, network, margin: int = 24) -> None:
+    """Paint whichever container this is: discs on hex cells for the grid, discs at positions for nodes."""
+    if isinstance(network, CartesianNodes):
+        draw_nodes(surface, network, margin)
+    else:
+        draw_grid(surface, network, margin)
+
+
+def save(grid, path: str, width: int = 800, height: int = 600) -> None:
+    """Render the network to an image file (PNG by extension). Needs no display."""
     surface = pygame.Surface((width, height))
-    draw_grid(surface, grid)
+    draw(surface, grid)
     pygame.image.save(surface, path)
 
 
@@ -203,7 +223,9 @@ def format_elapsed(seconds: float) -> str:
 def caption(grid: GridOfNeurons, teacher: Teacher | None = None) -> str:
     fired = len(grid.fired_neurons())
     state = f"{fired} of {len(grid.neurons)} fired in {len(grid.waves)} waves" if fired else "unfired"
-    omega = f" omega {grid.omega:g}" if grid.omega else ""
+    omega = f" omega {grid.omega:g}" if getattr(grid, "omega", 0) else ""
+    if isinstance(grid, CartesianNodes) and getattr(grid, "reach", None) is not None:
+        omega = f" lattice, reach {grid.reach:g}"
     epoch = f" epoch {grid.epoch}:" if grid.epoch else ":"
     learning = f"   {teacher.status()}" if teacher else ""
     return f"walnutbutter {grid.columns}x{grid.rows}{omega}{epoch} {state}{learning}   [Space] new input  [Esc] quit"
@@ -278,7 +300,7 @@ def show(
             Neuron.verbose = False
         while running:
             if needs_redraw:
-                draw_grid(screen, grid)
+                draw(screen, grid)
                 pygame.display.set_caption(
                     caption_fast(grid, epochs_per_second, fps, teacher) if fast else caption(grid, teacher)
                 )
@@ -304,6 +326,7 @@ def show(
                 now = time.perf_counter()
                 if teacher and report_seconds is not None and now - last_report >= report_seconds:
                     last_report = now
+                    teacher.record(now - started, epochs_per_second)
                     log(f"[{format_elapsed(now - started)}] epoch {grid.epoch:,}: {teacher.status()}, {epochs_per_second:,.0f} epochs/s")
                     if on_report:
                         on_report()

@@ -29,10 +29,13 @@ weight_range, [-1, 1] by default.
 
 **Homeostasis.** A neuron whose input sits far from its threshold is never
 flipped by the exploration noise, gets no learning signal, and stays "stuck"
-on or off. Every neuron outside the input row therefore tracks its own
-firing rate and nudges its threshold toward a target rate each epoch:
-firing too often raises the threshold, too rarely lowers it. The default
-rate of 1e-6 toward a target of 0.4 is a very slow drift (a fully stuck
+on or off. Every neuron therefore tracks its own firing rate and nudges its
+threshold toward a target rate each epoch: firing too often raises the
+threshold, too rarely lowers it. Neurons forced in wave 0 this epoch are
+left out of both, exactly as reinforcement leaves their incoming weights
+alone: their firing was not the network's doing. An unforced input neuron
+is an ordinary neuron and is treated as one. The default
+rate of 1e-6 toward a target of 0.5 is a very slow drift (a fully stuck
 neuron moves its threshold by about 0.0006 per thousand epochs, so the
 effect belongs to runs of millions of epochs); a rate of 0 switches it off. Thresholds may go negative, within `THRESHOLD_RANGE`.
 """
@@ -87,37 +90,72 @@ def accuracy(grid: GridOfNeurons, target: str = "reversed") -> float:
     return sum(1 for e in errors.values() if e == 0) / len(errors)
 
 
+def forced(neuron: Neuron) -> bool:
+    """True if the neuron was forced to fire in wave 0 this epoch (an external stimulus)."""
+    return neuron.fired_in_wave == 0
+
+
 def update_rates(grid: GridOfNeurons) -> None:
-    """Move every neuron's running firing-rate estimate toward what it did this epoch."""
-    for neuron in grid.neurons.values():
-        neuron.rate += RATE_MEMORY * ((1.0 if neuron.has_fired else 0.0) - neuron.rate)
+    """Move every neuron's running firing-rate estimate toward what it did this epoch.
+
+    A neuron forced this epoch is skipped: that firing says nothing about the network.
+    """
+    for neuron in grid.all_neurons():
+        if not forced(neuron):
+            neuron.rate += RATE_MEMORY * ((1.0 if neuron.has_fired else 0.0) - neuron.rate)
 
 
 def stuck_neurons(grid: GridOfNeurons) -> tuple[list[Neuron], list[Neuron]]:
-    """Neurons outside the input row whose running rate is (almost) always on, and always off."""
-    inputs = set(grid.input_row())
-    candidates = [n for n in grid.neurons.values() if n not in inputs]
-    on = [n for n in candidates if n.rate > STUCK_ABOVE]
-    off = [n for n in candidates if n.rate < STUCK_BELOW]
+    """Neurons whose running rate is (almost) always on, and always off."""
+    on = [n for n in grid.all_neurons() if n.rate > STUCK_ABOVE]
+    off = [n for n in grid.all_neurons() if n.rate < STUCK_BELOW]
     return on, off
 
 
 def homeostasis(
-    grid: GridOfNeurons, rate: float, target: float = 0.4, threshold_range: tuple[float, float] = THRESHOLD_RANGE
+    grid: GridOfNeurons, rate: float, target: float = 0.5, threshold_range: tuple[float, float] = THRESHOLD_RANGE
 ) -> int:
-    """Nudge each non-input neuron's threshold toward its target firing rate. Returns neurons moved."""
+    """Nudge each neuron's threshold toward its target firing rate, except those forced this epoch.
+
+    Returns the number of neurons moved.
+    """
     if rate <= 0:
         return 0
     low, high = threshold_range
-    inputs = set(grid.input_row())
     moved = 0
-    for neuron in grid.neurons.values():
-        if neuron in inputs:
+    for neuron in grid.all_neurons():
+        if forced(neuron):
             continue
         threshold = neuron.threshold + rate * (neuron.rate - target)
         neuron.threshold = max(low, min(high, threshold))
         moved += 1
     return moved
+
+
+def unstick_outputs(
+    grid: GridOfNeurons,
+    rate: float,
+    target: float = 0.5,
+    threshold_range: tuple[float, float] = THRESHOLD_RANGE,
+) -> list[Neuron]:
+    """Nudge the threshold of every *stuck* output neuron toward a target firing rate.
+
+    Only output neurons whose running rate is beyond the stuck band (almost
+    always on, or almost always off) are touched, and only while they are.
+    A saturated output gets no learning signal because the exploration noise
+    never changes whether it fires; moving its threshold back toward the
+    region where the noise matters gives the rule a gradient there, and
+    nothing else in the mesh is disturbed. Returns the neurons nudged.
+    """
+    if rate <= 0:
+        return []
+    low, high = threshold_range
+    nudged = []
+    for neuron in output_row(grid):
+        if neuron.rate > STUCK_ABOVE or neuron.rate < STUCK_BELOW:
+            neuron.threshold = max(low, min(high, neuron.threshold + rate * (neuron.rate - target)))
+            nudged.append(neuron)
+    return nudged
 
 
 def delivered_connections(grid: GridOfNeurons) -> list:
@@ -182,16 +220,24 @@ class Teacher:
         window: int = 200,
         seed: int | None = None,
         homeostasis: float = 1e-6,
-        target_rate: float = 0.4,
+        target_rate: float = 0.5,
         threshold_range: tuple[float, float] = THRESHOLD_RANGE,
         carry_over: bool = False,
+        unstick: float = 1e-3,
+        unstick_target: float = 0.5,
     ):
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")
         if eligibility not in ELIGIBILITIES:
             raise ValueError(f"unknown eligibility {eligibility!r}; choose from {', '.join(ELIGIBILITIES)}")
-        if lr < 0 or sigma < 0 or homeostasis < 0:
-            raise ValueError("learning rate, sigma and homeostasis rate must not be negative")
+        if lr < 0 or sigma < 0 or homeostasis < 0 or unstick < 0:
+            raise ValueError("learning rate, sigma, homeostasis and unstick rates must not be negative")
+        if not 0.0 < unstick_target < 1.0:
+            raise ValueError(f"unstick target firing rate must be between 0 and 1, got {unstick_target}")
+        self.unstick = unstick
+        self.unstick_target = unstick_target
+        self.unstuck_count = 0  # how many epoch-nudges the output un-sticking has applied
+        self.history: list[dict] = []  # one entry per progress report; saved in checkpoints
         if not 0.0 < target_rate < 1.0:
             raise ValueError(f"target firing rate must be between 0 and 1, got {target_rate}")
         low, high = threshold_range
@@ -229,6 +275,7 @@ class Teacher:
         reinforce(self.grid, advantage, self.lr, self.sigma, self.eligibility)
         update_rates(self.grid)
         homeostasis(self.grid, self.homeostasis, self.target_rate, self.threshold_range)
+        self.unstuck_count += len(unstick_outputs(self.grid, self.unstick, self.unstick_target, self.threshold_range))
         self.baseline += self.baseline_rate * (reward - self.baseline)
         self.epochs += 1
         self.total_reward += reward
@@ -245,11 +292,20 @@ class Teacher:
         """Mean reward over every epoch taught so far."""
         return self.total_reward / self.epochs if self.epochs else None
 
-    def stuck(self) -> str:
-        """Short summary of stuck neurons, e.g. '26 on + 17 off of 56 stuck'."""
+    def record(self, elapsed: float | None = None, epochs_per_second: float | None = None) -> dict:
+        """Append the current figures to the history (called at each progress report). Returns the entry."""
         on, off = stuck_neurons(self.grid)
-        total = len(self.grid.neurons) - self.grid.columns
-        return f"{len(on)} on + {len(off)} off of {total} stuck"
+        entry = {
+            "epoch": self.grid.epoch,
+            "elapsed": None if elapsed is None else round(elapsed, 1),
+            "accuracy_to_date": None if self.accuracy_to_date is None else round(self.accuracy_to_date, 4),
+            "recent": None if self.average is None else round(self.average, 4),
+            "stuck_on": len(on),
+            "stuck_off": len(off),
+            "epochs_per_second": None if epochs_per_second is None else round(epochs_per_second),
+        }
+        self.history.append(entry)
+        return entry
 
     def status(self) -> str:
         if self.average is None:
@@ -258,10 +314,12 @@ class Teacher:
         if self.homeostasis:
             low, high = self.threshold_range
             settings += f", homeostasis {self.homeostasis:g} toward {self.target_rate:g} in [{low:g}, {high:g}]"
+        if self.unstick:
+            settings += f", unstick {self.unstick:g}"
         if self.carry_over:
             settings += ", carry-over"
         return (
             f"learning {self.target} ({settings}): "
             f"accuracy {self.accuracy_to_date:.1%} to date over {self.epochs:,} epochs, "
-            f"{self.average:.0%} recent, {self.stuck()}"
+            f"{self.average:.0%} recent"
         )
