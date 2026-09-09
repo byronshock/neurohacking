@@ -24,13 +24,15 @@ def test_forced_fire_travels_down_a_chain_one_wave_per_hop(capsys):
 def test_waves_record_the_signals_delivered(capsys):
     a, b = chain(2)
     waves = propagate(fire=[a])
-    (signal,) = waves[1].delivered
+    assert waves[1].delivered == [a.connection_to(b)]  # the queue is the connections themselves
+    (signal,) = waves[1].signals()
     assert isinstance(signal, Signal)
     assert signal.connection is a.connection_to(b)
     assert signal.target is b and signal.amount == 1.0 and signal.wave == 1
 
 
-def test_two_way_pair_fires_once_each(capsys):
+def test_two_way_pair_fires_once_each(capsys, monkeypatch):
+    monkeypatch.setattr(Neuron, "verbose", True)
     a, b = Neuron("a"), Neuron("b")
     a.connect(b)
     b.connect(a)
@@ -74,7 +76,8 @@ def test_external_inputs_fire_only_when_they_reach_threshold(capsys):
     assert waves[0].fired == [a]
 
 
-def test_forced_neuron_ignores_threshold_and_is_not_fired_twice(capsys):
+def test_forced_neuron_ignores_threshold_and_is_not_fired_twice(capsys, monkeypatch):
+    monkeypatch.setattr(Neuron, "verbose", True)
     a = Neuron("a", threshold=100.0)
     propagate(fire=[a, a])
     assert a.fired_in_wave == 0

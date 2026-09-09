@@ -256,7 +256,7 @@ def delivered_signals(grid: GridOfNeurons) -> list:
     of its active outgoing connections carries at most one signal. This
     includes signals that arrived after their target had fired; see `landed`.
     """
-    return [signal for wave in grid.waves for signal in wave.delivered]
+    return [signal for wave in grid.waves for signal in wave.signals()]
 
 
 def landed(signal) -> bool:
@@ -272,7 +272,7 @@ def landed(signal) -> bool:
 
 def delivered_connections(grid: GridOfNeurons) -> list:
     """Every connection that carried a signal in the last epoch, landed or not (see delivered_signals)."""
-    return [signal.connection for signal in delivered_signals(grid)]
+    return [connection for wave in grid.waves for connection in wave.delivered]
 
 
 def reinforce(
@@ -299,21 +299,23 @@ def reinforce(
     step = lr * advantage
     perturb = eligibility == "perturb"
     changed = 0
-    for signal in delivered_signals(grid):
-        target = signal.target
-        fired_in = target.fired_in_wave
-        if fired_in == 0:
-            continue  # a forced input: its firing was not the network's doing
-        connection = signal.connection
-        if perturb:
-            e = target.noise / sigma if sigma else 0.0
-        else:
-            e = 1.0 if target.has_fired else -1.0
-        if fired_in is not None and signal.wave > fired_in and late != "count":
-            if late == "ignore":
-                continue  # dropped on arrival: it changed nothing this epoch
-            e = -e  # arrived after the firing: the synapse is weakened where an early one would be strengthened
-        if e:
+    for wave in grid.waves:
+        arrived = wave.number
+        for connection in wave.delivered:
+            target = connection.target
+            fired_in = target.fired_in_wave
+            if fired_in == 0:
+                continue  # a forced input: its firing was not the network's doing
+            if perturb:
+                e = target.noise / sigma if sigma else 0.0
+            else:
+                e = 1.0 if target.has_fired else -1.0
+            if late != "count" and fired_in is not None and arrived > fired_in:
+                if late == "ignore":
+                    continue  # dropped on arrival: it changed nothing this epoch
+                e = -e  # arrived after the firing: weakened where an early one would be strengthened
+            if not e:
+                continue
             weight = connection.weight + step * e
             if weight < low:
                 weight = low

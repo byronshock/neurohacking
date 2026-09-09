@@ -297,7 +297,7 @@ def cli_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.columns is None:
         args.columns = 2 * CODES[args.ecc].code_bits if args.ecc else 8
-    args.show = not args.headless
+    args.show = not args.headless and args.seeds is None  # a seed batch is headless by definition
     args.fast = args.show and not args.step
     args.learn = not args.no_learn
     was_verbose = Neuron.verbose

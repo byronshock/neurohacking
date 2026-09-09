@@ -175,7 +175,7 @@ def test_cli_is_silent_by_default_and_verbose_on_request(capsys):
     assert cli_main(["--headless", "--columns", "6", "--rows", "3", "--weight", "1", "--no-save"]) == 0
     out = capsys.readouterr().out
     assert out == ""  # nothing per epoch and nothing per neuron: printing is slower than learning
-    assert Neuron.verbose is True  # the process-wide flag is restored once the command finishes
+    assert Neuron.verbose is False  # the process-wide flag is restored once the command finishes
     assert cli_main(["--headless", "-v", "--columns", "6", "--rows", "3", "--weight", "1", "--no-save"]) == 0
     out = capsys.readouterr().out
     assert "fired in wave" in out and "epoch 1: input" in out

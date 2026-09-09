@@ -1,7 +1,8 @@
 import math
 
-import pygame
 import pytest
+
+pygame = pytest.importorskip("pygame")  # the visualizer is optional: without it these tests skip
 
 from walnutbutter import main
 from walnutbutter.cli import cli_main
@@ -214,7 +215,7 @@ def test_fast_mode_free_runs_between_monitor_frames(monkeypatch, capsys):
     assert frames[1] - frames[0] > 1  # many epochs per frame, not one: the system is not paced by the display
     assert grid.epoch == frames[-1]  # no epochs after the quit
     assert capsys.readouterr().out == ""  # the free run is silent
-    assert Neuron.verbose  # and printing is restored afterwards
+    assert not Neuron.verbose  # and the flag is restored afterwards
 
 
 def test_fast_caption_reports_the_rate(capsys):

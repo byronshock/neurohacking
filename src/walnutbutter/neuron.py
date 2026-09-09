@@ -4,7 +4,7 @@ from .connection import Connection
 
 
 class Neuron:
-    verbose = True  # class-wide: print a line each time any neuron fires
+    verbose = False  # class-wide: print a line each time any neuron fires (off unless asked: walnutbutter -v)
 
     def __init__(self, name: str = "Neuron", threshold: float = 0.25, minimum_potential: float = -1.0):
         self.name = name

@@ -171,7 +171,7 @@ def test_cli_nodes_rejects_negative(capsys):
 
 
 def test_cli_nodes_saves_a_picture_and_opens_the_window(tmp_path, monkeypatch, capsys):
-    import pygame
+    pygame = pytest.importorskip('pygame')
     from walnutbutter import visualizer as viz
     from walnutbutter.cli import cli_main
     out = tmp_path / "nodes.png"
@@ -184,7 +184,7 @@ def test_cli_nodes_saves_a_picture_and_opens_the_window(tmp_path, monkeypatch, c
 
 
 def test_draw_nodes_scales_unit_distances_and_includes_outliers():
-    import pygame
+    pygame = pytest.importorskip('pygame')
     from walnutbutter import visualizer as viz
     nodes = CartesianNodes(layout="random", count=0, width=8, height=8)
     a = nodes.add(0.0, 0.0)
@@ -210,7 +210,7 @@ def test_draw_nodes_scales_unit_distances_and_includes_outliers():
 
 
 def test_show_nodes_returns_on_quit(monkeypatch):
-    import pygame
+    pygame = pytest.importorskip('pygame')
     from walnutbutter import visualizer as viz
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     nodes = CartesianNodes(columns=4, rows=3)

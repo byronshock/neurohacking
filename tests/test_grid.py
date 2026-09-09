@@ -1,6 +1,7 @@
 import pytest
 
 from walnutbutter.grid import DIRECTIONS, DIRECTIONS2, GridOfNeurons, axial_to_offset, hex_distance, offset_to_axial
+from walnutbutter.neuron import Neuron
 
 
 @pytest.fixture
@@ -131,7 +132,8 @@ def test_connection_between_returns_the_registered_object(grid):
 # --- propagation on the grid --------------------------------------------------
 
 
-def test_activate_origin_reaches_every_neuron_exactly_once(grid, capsys):
+def test_activate_origin_reaches_every_neuron_exactly_once(grid, capsys, monkeypatch):
+    monkeypatch.setattr(Neuron, "verbose", True)
     grid.activate_origin()
     assert len(grid.fired_neurons()) == len(grid.neurons)
     assert capsys.readouterr().out.count("fired") == len(grid.neurons)

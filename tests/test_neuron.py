@@ -20,7 +20,8 @@ def test_connection_to_targets_and_sources():
     assert a.targets() == [b] and b.sources() == [a]
 
 
-def test_fire_marks_wave_and_returns_active_outgoing_connections(capsys):
+def test_fire_marks_wave_and_returns_active_outgoing_connections(capsys, monkeypatch):
+    monkeypatch.setattr(Neuron, "verbose", True)
     a, b, c = Neuron("a"), Neuron("b"), Neuron("c")
     to_b = a.connect(b)
     a.connect(c).is_active = False

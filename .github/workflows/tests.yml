@@ -16,5 +16,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: pytest -q
+      - run: pytest -q && pip uninstall -y pygame && pytest -q   # with the visualizer, then without
 # This comment exists only to make the file exactly twenty lines long.

@@ -200,10 +200,13 @@ Negative weights lower the potential, so they act as inhibitory connections.
 The input neurons are fired directly as an external stimulus, which ignores
 the threshold.
 
-**Propagation** is not recursive. `propagation.propagate` keeps a first-in,
-first-out queue of `Signal` messages, each tagged with a wave number. In each
-wave it first delivers every queued signal, then fires every neuron that has
-reached its threshold, queueing their outgoing signals for the next wave.
+**Propagation** is not recursive. `propagation.propagate` keeps a queue of
+waves: one list of connections whose signals are in flight, filled by the
+neurons that fired in the previous wave. In each wave it first delivers every
+queued signal, then fires every neuron that has reached its threshold,
+queueing their outgoing connections for the next wave. Every neuron and
+connection stays an object that receives and fires for itself; the queue
+adds no allocation per signal, which nearly doubled the epoch rate.
 Delivering everything before deciding who fires means the outcome never
 depends on the order neurons are stored in, and there is no recursion limit
 on grid size. Each neuron records `fired_in_wave`, the grid keeps the list of
@@ -340,7 +343,9 @@ injected.
 summary: printing is far slower than learning, and a headless run of millions
 of epochs would otherwise spend its time writing to the terminal. `-v` /
 `--verbose` prints a line for every epoch's input and every neuron that
-fires, for short inspections.
+fires, for short inspections. From Python the same switch is
+`Neuron.verbose`, off by default; `run_epoch(grid)` prints its one input
+line unless told `verbose=False`.
 
 **Saving what it learned.** Every run writes a JSON checkpoint at every
 progress report and on exit, by default to `runs/<date>-<time>-seed<seed>.json`
@@ -411,7 +416,7 @@ pytest
 src/walnutbutter/
   connection.py Connection: ID, source and target neurons, weight, is_active, kind
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
-  propagation.py Signal queue and wave-by-wave propagate()
+  propagation.py wave-by-wave propagate(): one list of connections in flight per wave
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
   butter.py    WalnutButter: smears of neuron density (per unit cell) on the plane; shapes Rect and Disc
   cartesian.py CartesianNodes: the lattice, a scatter, or a placed recipe; reach wiring
