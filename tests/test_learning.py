@@ -9,6 +9,8 @@ from walnutbutter.learning import (
     Teacher,
     accuracy,
     delivered_connections,
+    delivered_signals,
+    landed,
     expected_outputs,
     output_errors,
     output_row,
@@ -83,6 +85,22 @@ def test_reinforce_moves_delivered_weights_by_advantage_times_noise():
     for c in grid.connections.values():
         if c.target.fired_in_wave == 0 or c not in delivered_connections(grid):
             assert c.weight == before[c.id]  # forced inputs and idle connections untouched
+        else:
+            expected = max(-1.0, min(1.0, before[c.id] + 0.01 * 0.5 * c.target.noise / 0.1))
+            assert c.weight == pytest.approx(expected)
+
+
+def test_ignoring_late_signals_skips_those_that_arrived_after_their_target_fired():
+    grid = GridOfNeurons(columns=8, rows=4, weight=None, seed=2, omega=0)
+    run_epoch(grid, verbose=False, noise=0.1, rng=random.Random(2))
+    before = {c.id: c.weight for c in grid.connections.values()}
+    counted = {s.connection for s in delivered_signals(grid) if landed(s) and s.target.fired_in_wave != 0}
+    late = {s.connection for s in delivered_signals(grid) if not landed(s)}
+    assert counted and late  # some signals arrived too late to count
+    reinforce(grid, advantage=0.5, lr=0.01, sigma=0.1, late="ignore")
+    for c in grid.connections.values():
+        if c not in counted:
+            assert c.weight == before[c.id]  # forced inputs, idle connections and late signals untouched
         else:
             expected = max(-1.0, min(1.0, before[c.id] + 0.01 * 0.5 * c.target.noise / 0.1))
             assert c.weight == pytest.approx(expected)
@@ -365,3 +383,42 @@ def test_record_appends_the_current_figures_to_the_history():
     teacher.epoch(verbose=False)
     teacher.record()
     assert len(teacher.history) == 2 and teacher.history[1]["epoch"] == 2 and teacher.history[1]["elapsed"] is None
+
+
+def test_a_late_signal_counts_by_default_and_is_ignored_or_depressed_on_request():
+    """a fires in wave 0 and drives both b and c in wave 1; c's signal reaches b in wave 2, after b fired."""
+    from walnutbutter.propagation import propagate
+
+    a, b, c = Neuron("a"), Neuron("b"), Neuron("c")
+    a_b = a.connect(b, 1, weight=1.0)
+    a_c = a.connect(c, 2, weight=1.0)
+    c_b = c.connect(b, 3, weight=0.5)
+    b.noise = c.noise = 0.1  # both perturbed, so both would be eligible if timing were ignored
+
+    class Tiny:
+        waves = propagate(fire=[a])
+        weight_range = (-1.0, 1.0)
+
+    assert b.fired_in_wave == 1 and c.fired_in_wave == 1
+    late = [s for s in delivered_signals(Tiny) if s.connection is c_b]
+    assert late and late[0].wave == 2 and not landed(late[0])
+    assert all(landed(s) for s in delivered_signals(Tiny) if s.connection in (a_b, a_c))
+    changed = reinforce(Tiny, advantage=1.0, lr=0.1, sigma=0.1, late="ignore")
+    assert changed == 2
+    assert a_b.weight == pytest.approx(1.0) and a_c.weight == pytest.approx(1.0)  # clipped at the top
+    assert c_b.weight == 0.5  # untouched: it changed nothing in this epoch
+    reinforce(Tiny, advantage=-1.0, lr=0.1, eligibility="hebb", late="ignore")
+    assert c_b.weight == 0.5  # the Hebbian variant respects timing too, when late signals are ignored
+    assert a_b.weight < 1.0
+    assert reinforce(Tiny, advantage=1.0, lr=0.1, sigma=0.1) == 3  # by default the late signal counts
+    assert c_b.weight == pytest.approx(0.6)  # pre fired, post fired, reward was good: local rule, global signal
+    assert reinforce(Tiny, advantage=1.0, lr=0.1, sigma=0.1, late="depress") == 3
+    assert c_b.weight == pytest.approx(0.5)  # post before pre: the same good epoch now weakens it
+    with pytest.raises(ValueError):
+        reinforce(Tiny, advantage=1.0, late="whenever")
+    ignoring = Teacher(GridOfNeurons(columns=4, rows=3, omega=0, weight=None, seed=1), late="ignore", seed=1)
+    ignoring.epoch(verbose=False)
+    assert ignoring.late == "ignore" and "late signals ignored" in ignoring.status()
+    assert Teacher(GridOfNeurons(columns=4, rows=3, omega=0)).late == "count"
+    with pytest.raises(ValueError):
+        Teacher(GridOfNeurons(columns=4, rows=3, omega=0), late="whenever")

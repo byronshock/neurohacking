@@ -14,7 +14,23 @@ Nothing is traced back through the network. Instead each epoch:
 3. **Reinforce.** Every connection that carried a signal (its source fired)
    into a neuron that was not a forced input is moved by
    `lr * advantage * eligibility`, where the eligibility is the target's
-   exploration noise (normalised). A neuron nudged towards firing in an
+   exploration noise (normalised).
+
+**Late signals.** A signal that arrives after its target has already fired
+is dropped on delivery (Neuron.receive) and has no effect on the epoch, yet
+by default its connection is still updated: the rule is local, pre fired
+and post fired in the same epoch, and the global reward says whether that
+coincidence was good. Strictly that is a reward-modulated Hebbian term
+riding on the perturbation estimator, a bias with respect to the reward
+gradient, but it is the biological shape of the rule (local eligibility,
+global signal) and on the 8x10 reversed task it learned faster on every
+seed tried (100k epochs: last-tenth 0.76-0.91 with late signals against
+0.61-0.75 without). `late` chooses what a late signal earns: "count" (the
+default, the same update as one that landed), "ignore" (nothing: the
+node-perturbation estimator proper, only the signals that landed) or
+"depress" (the opposite update, the shape of spike-timing-dependent
+plasticity, where a presynaptic spike after the postsynaptic one weakens
+the synapse). A neuron nudged towards firing in an
    epoch that turned out better than usual gets stronger inputs from the
    neurons that fed it; in a worse epoch, weaker.
 
@@ -59,6 +75,7 @@ TARGETS: dict[str, Target] = {
 }
 
 ELIGIBILITIES = ("perturb", "hebb")
+LATE = ("count", "ignore", "depress")  # what a signal that arrived after its target fired earns
 RATE_MEMORY = 0.01  # per-epoch update of a neuron's running firing rate (about the last 100 epochs)
 STUCK_BELOW, STUCK_ABOVE = 0.01, 0.99  # a neuron firing less or more often than this is "stuck"
 THRESHOLD_RANGE = (-5.0, 5.0)  # default limits on what homeostasis may move a threshold to
@@ -232,13 +249,30 @@ def unstick_outputs(
     return nudged
 
 
-def delivered_connections(grid: GridOfNeurons) -> list:
-    """Every connection that carried a signal in the last epoch, each exactly once.
+def delivered_signals(grid: GridOfNeurons) -> list:
+    """Every signal delivered in the last epoch, in wave order, each exactly once.
 
     No deduplication is needed: a neuron fires at most once per epoch, so each
-    of its active outgoing connections carries at most one signal.
+    of its active outgoing connections carries at most one signal. This
+    includes signals that arrived after their target had fired; see `landed`.
     """
-    return [signal.connection for wave in grid.waves for signal in wave.delivered]
+    return [signal for wave in grid.waves for signal in wave.delivered]
+
+
+def landed(signal) -> bool:
+    """True if the signal was taken in: its target had not fired before the wave it arrived in.
+
+    A neuron ignores input once it has fired (Neuron.receive), but propagation
+    still records the delivery. A signal from a later wave than the target's
+    firing wave changed nothing and must earn no credit or blame.
+    """
+    fired_in = signal.target.fired_in_wave
+    return fired_in is None or signal.wave <= fired_in
+
+
+def delivered_connections(grid: GridOfNeurons) -> list:
+    """Every connection that carried a signal in the last epoch, landed or not (see delivered_signals)."""
+    return [signal.connection for signal in delivered_signals(grid)]
 
 
 def reinforce(
@@ -247,24 +281,38 @@ def reinforce(
     lr: float = 0.03,
     sigma: float = 0.1,
     eligibility: str = "perturb",
+    late: str = "count",
 ) -> int:
-    """Apply the global-reward update for the epoch that has just run. Returns connections changed."""
+    """Apply the global-reward update for the epoch that has just run. Returns connections changed.
+
+    `late` says what a signal that arrived after its target fired (see `landed`)
+    earns: "count" the same update as one that landed, "ignore" none, or
+    "depress" the opposite.
+    """
     if eligibility not in ELIGIBILITIES:
         raise ValueError(f"unknown eligibility {eligibility!r}; choose from {', '.join(ELIGIBILITIES)}")
+    if late not in LATE:
+        raise ValueError(f"unknown late-signal rule {late!r}; choose from {', '.join(LATE)}")
     if not advantage:
         return 0
     low, high = grid.weight_range
     step = lr * advantage
     perturb = eligibility == "perturb"
     changed = 0
-    for connection in delivered_connections(grid):
-        target = connection.target
-        if target.fired_in_wave == 0:
+    for signal in delivered_signals(grid):
+        target = signal.target
+        fired_in = target.fired_in_wave
+        if fired_in == 0:
             continue  # a forced input: its firing was not the network's doing
+        connection = signal.connection
         if perturb:
             e = target.noise / sigma if sigma else 0.0
         else:
             e = 1.0 if target.has_fired else -1.0
+        if fired_in is not None and signal.wave > fired_in and late != "count":
+            if late == "ignore":
+                continue  # dropped on arrival: it changed nothing this epoch
+            e = -e  # arrived after the firing: the synapse is weakened where an early one would be strengthened
         if e:
             weight = connection.weight + step * e
             if weight < low:
@@ -300,6 +348,7 @@ class Teacher:
         unstick: float = 1e-3,
         unstick_target: float = 0.5,
         critic: str = "row",
+        late: str = "count",
     ):
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")
@@ -308,6 +357,9 @@ class Teacher:
         if critic != "row" and target not in ("reversed", "copy"):
             raise ValueError(f"the {critic} critic reads the output as a word, which needs the reversed or copy target")
         self.critic = critic
+        if late not in LATE:
+            raise ValueError(f"unknown late-signal rule {late!r}; choose from {', '.join(LATE)}")
+        self.late = late  # what a signal arriving after its target fired earns
         if eligibility not in ELIGIBILITIES:
             raise ValueError(f"unknown eligibility {eligibility!r}; choose from {', '.join(ELIGIBILITIES)}")
         if lr < 0 or sigma < 0 or homeostasis < 0 or unstick < 0:
@@ -352,7 +404,7 @@ class Teacher:
         if self.baseline is None:
             self.baseline = reward
         advantage = reward - self.baseline
-        reinforce(self.grid, advantage, self.lr, self.sigma, self.eligibility)
+        reinforce(self.grid, advantage, self.lr, self.sigma, self.eligibility, self.late)
         update_rates(self.grid)
         homeostasis(self.grid, self.homeostasis, self.target_rate, self.threshold_range)
         self.unstuck_count += len(unstick_outputs(self.grid, self.unstick, self.unstick_target, self.threshold_range))
@@ -393,6 +445,8 @@ class Teacher:
         settings = f"{self.eligibility}, lr {self.lr:g}, sigma {self.sigma:g}"
         if self.critic != "row":
             settings += f", critic {self.critic}"
+        if self.late != "count":
+            settings += f", late signals {self.late}d"
         if self.homeostasis:
             low, high = self.threshold_range
             settings += f", homeostasis {self.homeostasis:g} toward {self.target_rate:g} in [{low:g}, {high:g}]"

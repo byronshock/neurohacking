@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from walnutbutter.butter import ROW_SPACING, UNIT_DENSITY, Disc, Rect, WalnutButter, spacing_for
+from walnutbutter.butter import CELL_AREA, ROW_SPACING, UNIT_DENSITY, Disc, Rect, WalnutButter, per_unit_area, spacing_for
 from walnutbutter.cartesian import CartesianNodes
 from walnutbutter.neuron import Neuron
 from walnutbutter.propagation import propagate
@@ -14,8 +14,9 @@ def quiet(monkeypatch):
 
 
 def test_unit_density_means_unit_spacing():
-    assert spacing_for(UNIT_DENSITY) == pytest.approx(1.0)
-    assert spacing_for(4 * UNIT_DENSITY) == pytest.approx(0.5)  # four times as dense: half the spacing
+    assert UNIT_DENSITY == 1.0 and spacing_for(1.0) == 1.0  # density is neurons per unit cell
+    assert spacing_for(4.0) == pytest.approx(0.5)  # four times as dense: half the spacing
+    assert CELL_AREA == pytest.approx(math.sqrt(3) / 2) and per_unit_area(1.0) == pytest.approx(1.1547, abs=1e-4)
     with pytest.raises(ValueError):
         spacing_for(0)
 
@@ -46,8 +47,8 @@ def test_denser_butter_packs_more_neurons_into_the_same_shape():
     thick = WalnutButter().spread(disc, 4 * UNIT_DENSITY)
     assert len(thin.positions()) < len(unit.positions()) < len(thick.positions())
     area = math.pi * 9
-    assert len(unit.positions()) == pytest.approx(area * UNIT_DENSITY, rel=0.15)
-    assert len(thick.positions()) == pytest.approx(area * 4 * UNIT_DENSITY, rel=0.1)
+    assert len(unit.positions()) == pytest.approx(area * per_unit_area(UNIT_DENSITY), rel=0.15)
+    assert len(thick.positions()) == pytest.approx(area * per_unit_area(4 * UNIT_DENSITY), rel=0.1)
     assert all(disc.contains(x, y) for x, y in thick.positions())
 
 

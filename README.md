@@ -252,14 +252,22 @@ grid.connection_between(right, origin)   # right -> origin, a different connecti
 
 Walnut butter is the substance the neurons are made of. It is spread over
 the plane in **smears**: each is a shape (`Rect` or `Disc`, in unit
-distances) with a **density** in neurons per unit area, and placing the
-butter packs neurons on a hexagonal lattice inside each shape at the spacing
-that density implies. Thick butter means many neurons close together, thin
-butter a few far apart, bare plane none. **Butter that is spread near other
-butter connects:** a neuron projects to every neuron within its `reach`
-(default 2 units), so density alone decides how richly a region is wired,
-and a gap in the spread is a gap in the network. Nothing about the topology
-is random; only the weights are drawn from the seed.
+distances) with a **density**, and placing the butter packs neurons on a
+hexagonal lattice inside each shape at the spacing that density implies.
+Thick butter means many neurons close together, thin butter a few far
+apart, bare plane none. **Butter that is spread near other butter
+connects:** a neuron projects to every neuron within its `reach` (default 2
+units), so density alone decides how richly a region is wired, and a gap in
+the spread is a gap in the network. Nothing about the topology is random;
+only the weights are drawn from the seed.
+
+Butterspace has one scale, the **unit distance**. Density is measured in
+neurons per unit cell, the hexagon a neuron owns in a lattice at unit
+spacing, so unit density (`UNIT_DENSITY`, which is 1) means neighbours one
+unit apart, and a density of 4 packs four neurons into each cell, half a
+unit apart. Every distance in the substance is compared with that one unit
+whatever the local density: a reach of 2 is two units everywhere, so butter
+four times as thick has four times the neurons within reach.
 
 The default network is one rectangular smear at unit density, which is the
 8 x 10 hexagonal lattice at unit spacing: `CartesianNodes()` builds it
@@ -274,8 +282,8 @@ from walnutbutter.butter import Disc, Rect, WalnutButter, UNIT_DENSITY
 from walnutbutter.cartesian import CartesianNodes
 
 recipe = (WalnutButter()
-          .spread(Rect(-4, -4, 4, 4), UNIT_DENSITY)        # a lattice-density slab
-          .spread(Disc(0, 0, 1.5), 3 * UNIT_DENSITY))      # a dense knot in the middle
+          .spread(Rect(-4, -4, 4, 4), UNIT_DENSITY)        # a lattice-density slab (density 1)
+          .spread(Disc(0, 0, 1.5), 3.0))                   # a dense knot in the middle
 nodes = CartesianNodes.from_butter(recipe, seed=1)
 nodes.connect_within(reach=2.0, weight=None)               # near butter connects
 ```
@@ -310,7 +318,21 @@ is the REINFORCE / node-perturbation estimator, a three-factor rule:
 presynaptic activity x postsynaptic perturbation x global reward.
 `--eligibility hebb` swaps the perturbation for a plain Hebbian term (+1 if
 the target fired, -1 if not) with no noise. Forced inputs are never adjusted
-and weights stay within [-1, 1]. `Teacher` wraps all this; use
+and weights stay within [-1, 1].
+
+A signal that arrives after its target has already fired is dropped on
+delivery and changes nothing in the epoch, yet by default its connection is
+still reinforced: pre fired, post fired, and the global reward says whether
+the coincidence was good. That is a local Hebbian term riding on the
+perturbation estimator, strictly a bias with respect to the reward
+gradient, but it is the biological shape of the rule (local eligibility,
+global signal) and it learns faster: on the 8x10 reversed task at 100k
+epochs, every seed tried did better with it (last tenth 0.76-0.91 against
+0.61-0.75). `--late` chooses what a late signal earns: `count` (the
+default), `ignore` (nothing: only the signals that landed, the
+node-perturbation estimator proper) or `depress` (the opposite update, the
+shape of spike-timing-dependent plasticity, where a presynaptic spike after
+the postsynaptic one weakens the synapse). `Teacher` wraps all this; use
 `teacher.epoch()` instead of `run_epoch(grid)` so the exploration noise is
 injected.
 
@@ -391,7 +413,7 @@ src/walnutbutter/
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
   propagation.py Signal queue and wave-by-wave propagate()
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
-  butter.py    WalnutButter: smears of neuron density on the plane; shapes Rect and Disc
+  butter.py    WalnutButter: smears of neuron density (per unit cell) on the plane; shapes Rect and Disc
   cartesian.py CartesianNodes: the lattice, a scatter, or a placed recipe; reach wiring
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input

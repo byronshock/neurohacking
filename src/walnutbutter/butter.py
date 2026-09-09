@@ -1,12 +1,21 @@
 """Walnut butter: the substance the neurons are made of.
 
 Butter is spread over the plane in smears. Each smear is a shape with a
-density, in neurons per unit area, and placing the butter packs neurons on a
-hexagonal lattice inside each shape at the spacing that density implies.
-Thick butter means many neurons close together; thin butter means a few far
-apart; bare plane means none. Butter that is spread near other butter connects:
-a neuron projects to every neuron within its reach, so density alone decides
-how richly wired a region is, and a gap in the spread is a gap in the network.
+density, and placing the butter packs neurons on a hexagonal lattice inside
+each shape at the spacing that density implies. Thick butter means many
+neurons close together; thin butter means a few far apart; bare plane means
+none. Butter that is spread near other butter connects: a neuron projects to
+every neuron within its reach, so density alone decides how richly wired a
+region is, and a gap in the spread is a gap in the network.
+
+Butterspace has one scale, the unit distance. Density is measured in
+neurons per unit cell, where a cell is the hexagon a neuron owns in a
+lattice at unit spacing (area sqrt(3)/2 square units), so unit density
+means unit spacing: neighbours are exactly one unit distance apart, their
+neighbours two. A density of 4 packs four neurons into every cell, half a
+unit apart. Every distance in the substance, a reach included, is compared
+with this one unit, whatever the density: butter four times as thick has
+four times the neurons within the same reach.
 
 The default network is one rectangular smear at unit density: an 8 x 10
 lattice at unit spacing.
@@ -19,14 +28,20 @@ from dataclasses import dataclass
 from typing import Iterable
 
 ROW_SPACING = math.sqrt(3) / 2
-UNIT_DENSITY = 2.0 / math.sqrt(3)  # neurons per unit area of a hex lattice at unit spacing (about 1.155)
+CELL_AREA = math.sqrt(3) / 2  # square units per neuron in a hex lattice at unit spacing: the unit cell
+UNIT_DENSITY = 1.0  # one neuron per unit cell: the lattice at unit spacing
 
 
 def spacing_for(density: float) -> float:
-    """Hex-lattice spacing, in units, that gives `density` neurons per unit area."""
+    """Hex-lattice spacing, in unit distances, that gives `density` neurons per unit cell: 1 / sqrt(density)."""
     if density <= 0:
         raise ValueError(f"density must be positive, got {density}")
-    return math.sqrt(2.0 / (math.sqrt(3) * density))
+    return 1.0 / math.sqrt(density)
+
+
+def per_unit_area(density: float) -> float:
+    """Convert a density in neurons per unit cell to neurons per square unit."""
+    return density / CELL_AREA
 
 
 @dataclass(frozen=True)
@@ -71,7 +86,7 @@ class Disc:
 @dataclass(frozen=True)
 class Smear:
     shape: Rect | Disc
-    density: float  # neurons per unit area
+    density: float  # neurons per unit cell (1 = unit spacing)
 
     def positions(self) -> list[tuple[float, float]]:
         """Hex-lattice points inside the shape at this smear's spacing, packed from the bottom-left corner.

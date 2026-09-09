@@ -263,10 +263,11 @@ class CartesianNodes(Network):
         """Butter that is spread near other butter connects: every ordered pair within `reach` units.
 
         Deterministic: no draws decide the topology, only the positions do (the
-        weights are still drawn when `weight` is None). At unit spacing a reach
-        of 2 gives each interior neuron its eighteen neighbours, the hex grid's
-        two rings; denser butter packs more neurons inside the same reach.
-        Returns the number of connections made.
+        weights are still drawn when `weight` is None). Distances are compared
+        with the unit distance, the same unit everywhere in the spread: a reach
+        of 2 means two units. At unit density that gives each interior neuron
+        its eighteen neighbours, the hex grid's two rings; denser butter packs
+        more neurons inside the same reach. Returns the number of connections made.
         """
         if reach < 0 or epsilon < 0:
             raise ValueError("reach and epsilon must not be negative")

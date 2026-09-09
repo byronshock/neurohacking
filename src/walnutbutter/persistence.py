@@ -66,6 +66,7 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
             "unstick": teacher.unstick,
             "unstick_target": teacher.unstick_target,
             "critic": teacher.critic,
+            "late": teacher.late,
             "history": teacher.history,
             "total_reward": teacher.total_reward,
             "baseline": teacher.baseline,

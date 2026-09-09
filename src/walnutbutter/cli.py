@@ -12,10 +12,11 @@ from datetime import datetime
 from multiprocessing import Pool
 from pathlib import Path
 
+from .butter import CELL_AREA
 from .cartesian import CartesianNodes
 from .grid import GridOfNeurons
 from .inputs import CODES, DEFAULT_CODE, parse_bits
-from .learning import CRITICS, ELIGIBILITIES, TARGETS, Teacher
+from .learning import CRITICS, ELIGIBILITIES, LATE, TARGETS, Teacher
 from .monitor import main, run_epoch
 from .neuron import Neuron
 from .persistence import checkpoint, restore, resume_teacher
@@ -167,6 +168,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(TARGETS),
         default="reversed",
         help="what the top row should show, derived from the input row (default: reversed)",
+    )
+    parser.add_argument(
+        "--late",
+        choices=LATE,
+        default="count",
+        help="what a signal arriving after its target has already fired earns: count (default: the same update "
+        "as one that landed, a local Hebbian term under the global reward), ignore (nothing: the "
+        "node-perturbation estimator proper) or depress (the opposite update, the shape of spike-timing-dependent "
+        "plasticity)",
     )
     parser.add_argument(
         "--critic",
@@ -422,6 +432,7 @@ def _run(args: argparse.Namespace) -> int:
                     unstick=args.unstick,
                     unstick_target=args.unstick_target,
                     critic=args.critic,
+                    late=args.late,
                 )
                 if loaded:
                     resume_teacher(teacher, data)
@@ -495,7 +506,7 @@ def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
         print(f"{nodes!r}", file=sys.stderr)
     else:
         nodes = CartesianNodes(layout="random", count=args.nodes, **common)
-        print(f"{nodes!r} ({len(nodes) / (nodes.width * nodes.height):.2f} per unit area)", file=sys.stderr)
+        print(f"{nodes!r} ({len(nodes) * CELL_AREA / (nodes.width * nodes.height):.2f} per unit cell)", file=sys.stderr)
     if args.reach < 0:
         print(f"error: --reach must not be negative, got {args.reach}", file=sys.stderr)
         return 2
@@ -593,6 +604,7 @@ def _run_seeds(args: argparse.Namespace) -> int:
         unstick=args.unstick,
         unstick_target=args.unstick_target,
         critic=args.critic,
+        late=args.late,
     )
     if args.no_learn:
         print("error: --seeds is for comparing learning runs; drop --no-learn", file=sys.stderr)
