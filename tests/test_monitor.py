@@ -1,3 +1,4 @@
+import random
 import pytest
 
 from walnutbutter import main
@@ -67,7 +68,7 @@ def test_run_epoch_clears_every_neuron_before_firing(capsys):
     assert grid.waves[0].fired == grid.input_neurons()
     assert grid.input_pattern == [False, True, False, True, False, True]
     assert any(fired_before[n.name] != n.fired_in_wave for n in grid.neurons.values())
-    assert "epoch 2: input 010 -> coded 010101 -> bottom row 010101" in capsys.readouterr().out
+    assert "epoch 2 at 10 ms: input 010 -> coded 010101 -> bottom row 010101" in capsys.readouterr().out
 
 
 def test_run_epoch_keeps_weights_and_shortcuts(capsys):
@@ -98,7 +99,7 @@ def test_cli_runs_and_returns_zero(capsys):
 def test_cli_input_option_sets_the_pattern(capsys):
     assert cli_main(["--headless", "-v", "--across", "6", "--rows", "3", "--weight", "1", "--input", "110", "--no-permute"]) == 0
     captured = capsys.readouterr()
-    assert "epoch 1: input 110 -> coded 110001 -> bottom row 110001" in captured.out
+    assert "epoch 1 at 0 ms: input 110 -> coded 110001 -> bottom row 110001" in captured.out
     assert captured.out.count("fired in wave 0.") == 3
     assert "input permutation:" not in captured.err
 
@@ -178,7 +179,7 @@ def test_cli_is_silent_by_default_and_verbose_on_request(capsys):
     assert Neuron.verbose is False  # the process-wide flag is restored once the command finishes
     assert cli_main(["--headless", "-v", "--across", "6", "--rows", "3", "--weight", "1", "--no-save"]) == 0
     out = capsys.readouterr().out
-    assert "fired in wave" in out and "epoch 1: input" in out
+    assert "fired in wave" in out and "epoch 1 at 0 ms: input" in out
     assert cli_main(["--headless", "-v", "-q", "--across", "6", "--rows", "3", "--weight", "1", "--no-save"]) == 0
     assert capsys.readouterr().out == ""  # --quiet still wins if both are given
 
@@ -197,7 +198,7 @@ def test_cli_learn_runs_epochs_and_reports_accuracy(capsys):
 def test_cli_epochs_without_learn_just_runs_them(capsys):
     assert cli_main(["--headless", "-v", "--across", "8", "--rows", "4", "--seed", "1", "--epochs", "5", "--no-learn"]) == 0
     out = capsys.readouterr().out
-    assert out.count("epoch ") == 5 and "epoch 5:" in out
+    assert out.count("epoch ") == 5 and "epoch 5 at 40 ms:" in out
 
 
 def test_cli_rejects_unknown_target():
@@ -282,24 +283,23 @@ def test_cli_threshold_range_option(capsys):
     assert "in [0, 3]" in capsys.readouterr().err
 
 
-def test_run_epoch_discharges_by_default_and_can_carry_over(capsys):
-    import random
-    grid = GridOfNeurons(across=6, rows=4, weight=None, seed=1, omega=0)
+def test_run_epoch_keeps_unfired_potentials_by_default_and_can_discharge(capsys):
+    grid = GridOfNeurons(across=6, rows=4, weight=None, seed=5, threshold=5.0)  # nothing but the input fires
     run_epoch(grid, verbose=False)
-    before = {n: n.potential for n in grid.neurons.values() if not n.has_fired and n.potential != 0}
-    assert before  # some neurons received input without firing
-    run_epoch(grid, verbose=False, discharge=False, noise=0.1, rng=random.Random(5))
-    assert any(n.fired_in_wave is None and n.potential != n.noise for n in before)  # old charge carried
-    run_epoch(grid, verbose=False)  # the default clears everything before the input arrives
+    run_epoch(grid, verbose=False, noise=0.1, rng=random.Random(5))
+    held = [n.potential for n in grid.neurons.values() if not n.has_fired]
+    assert any(p != 0.0 for p in held)  # sub-threshold input and noise survive into the next cascade
     grid.reset()
-    assert all(n.potential == 0.0 for n in grid.neurons.values())
+    assert any(n.potential != 0.0 for n in grid.neurons.values())  # a plain reset keeps them, to leak
+    grid.reset(discharge=True)
+    assert all(n.potential == 0.0 for n in grid.neurons.values())  # zeroed on request
 
 
-def test_cli_carry_over_option(capsys):
-    assert cli_main(["--headless", "--across", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5", "--carry-over"]) == 0
-    assert ", carry-over)" in capsys.readouterr().err
+def test_cli_discharge_option(capsys):
+    assert cli_main(["--headless", "--across", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5", "--discharge"]) == 0
+    assert ", discharge)" in capsys.readouterr().err
     assert cli_main(["--headless", "--across", "8", "--rows", "4", "--seed", "1", "-q", "--epochs", "5"]) == 0
-    assert "carry-over" not in capsys.readouterr().err
+    assert "discharge" not in capsys.readouterr().err
 
 
 def test_noise_respects_the_minimum_potential(capsys):

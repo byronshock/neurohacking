@@ -77,12 +77,16 @@ class Wave:
 def propagate(
     fire: Iterable[Neuron] = (),
     inputs: Mapping[Neuron, float] | None = None,
+    now: float | None = None,
 ) -> list[Wave]:
-    """Run one epoch and return its waves.
+    """Run one cascade at clock time `now` and return its waves.
 
     `fire` lists neurons forced to fire in wave 0 regardless of threshold (an
-    external stimulus). `inputs` maps neurons to external input amounts, which
-    are delivered in wave 0 and fire the neuron only if it reaches threshold.
+    external stimulus); a neuron still refractory at `now` ignores the
+    stimulus. `inputs` maps neurons to external input amounts, which are
+    delivered in wave 0 and fire the neuron only if it reaches threshold.
+    Propagation is instantaneous: every wave happens at `now`, and the clock
+    only advances between cascades. With `now` None the clock is not consulted.
     """
     waves: list[Wave] = []
 
@@ -90,13 +94,13 @@ def propagate(
     wave = Wave(0)
     touched: list[Neuron] = []
     for neuron, amount in (inputs or {}).items():
-        neuron.receive(amount)
+        neuron.receive(amount, now)
         touched.append(neuron)
     pending: list[Connection] = []  # the next wave's queue: connections whose signals are in flight
     for neuron in fire:
-        if not neuron.has_fired:
-            _fire(neuron, wave, pending)
-    _fire_ready(touched, wave, pending)
+        if not neuron.has_fired and not (now is not None and neuron.refractory_at(now)):
+            _fire(neuron, wave, pending, now)
+    _fire_ready(touched, wave, pending, now)
     waves.append(wave)
 
     # Later waves: each drains the queue the previous wave filled.
@@ -106,31 +110,31 @@ def propagate(
         touched = []
         for connection in pending:
             target = connection.target
-            target.receive(connection.weight)
+            target.receive(connection.weight, now)
             if target.touched_stamp != stamp:  # each neuron once per wave, without a set
                 target.touched_stamp = stamp
                 touched.append(target)
         pending = []
         for neuron in touched:
             neuron.settle()  # the floor applies to the wave's total, whatever order it arrived in
-        _fire_ready(touched, wave, pending)
+        _fire_ready(touched, wave, pending, now)
         waves.append(wave)
 
     return waves
 
 
-def _fire_ready(candidates: Iterable[Neuron], wave: Wave, pending: list[Connection]) -> None:
-    """Fire each candidate whose potential has reached its threshold.
+def _fire_ready(candidates: Iterable[Neuron], wave: Wave, pending: list[Connection], now: float | None) -> None:
+    """Fire each candidate whose potential has reached its threshold and is not refractory.
 
     Candidates from a wave are already unique; the stimulus list in wave 0 may
     repeat a neuron, which is harmless because a fired neuron is never ready.
     """
     for neuron in candidates:
-        if neuron.ready:
-            _fire(neuron, wave, pending)
+        if neuron.can_fire(now):
+            _fire(neuron, wave, pending, now)
 
 
-def _fire(neuron: Neuron, wave: Wave, pending: list[Connection]) -> None:
+def _fire(neuron: Neuron, wave: Wave, pending: list[Connection], now: float | None) -> None:
     """Fire one neuron and queue its outgoing signals for the next wave."""
-    pending.extend(neuron.fire(wave.number))
+    pending.extend(neuron.fire(wave.number, now))
     wave.fired.append(neuron)

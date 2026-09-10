@@ -101,11 +101,16 @@ def test_reset_discharges_only_neurons_that_fired():
     assert quiet.potential == 0.1 and not quiet.has_fired  # carried over
 
 
-def test_reset_discharges_by_default():
-    quiet = Neuron("q")
-    quiet.receive(0.1)
-    quiet.reset()
-    assert quiet.potential == 0.0
+def test_reset_keeps_an_unfired_potential_and_discharges_on_request():
+    a = Neuron("a")
+    a.receive(0.1)
+    a.reset()
+    assert a.potential == pytest.approx(0.1)  # unfired: the potential stays, to leak as the clock moves on
+    a.reset(discharge=True)
+    assert a.potential == 0.0  # the old epoch-by-epoch behaviour, on request
+    a.fire(wave=1)
+    a.reset()
+    assert a.potential == 0.0 and not a.has_fired  # a spike resets the potential
 
 
 def test_charge_accumulates_across_epochs_until_the_neuron_fires(capsys):

@@ -367,7 +367,7 @@ class Teacher:
         homeostasis: float = 1e-6,
         target_rate: float = 0.5,
         threshold_range: tuple[float, float] = THRESHOLD_RANGE,
-        carry_over: bool = False,
+        discharge: bool = False,
         unstick: float = 1e-3,
         unstick_target: float = 0.5,
         critic: str = "row",
@@ -401,7 +401,7 @@ class Teacher:
         self.homeostasis = homeostasis
         self.target_rate = target_rate
         self.threshold_range = (float(low), float(high))
-        self.carry_over = carry_over  # unfired neurons keep their potential between epochs
+        self.discharge = discharge  # zero every potential between inputs instead of letting it leak
         self.grid = grid
         self.target = target
         self.lr = lr
@@ -418,7 +418,7 @@ class Teacher:
 
     def epoch(self, bits: Sequence[bool] | None = None, verbose: bool = True) -> float:
         """Run one epoch with exploration noise, then learn from it. Returns its reward."""
-        run_epoch(self.grid, bits, verbose=verbose, noise=self.sigma, rng=self.rng, discharge=not self.carry_over)
+        run_epoch(self.grid, bits, verbose=verbose, noise=self.sigma, rng=self.rng, discharge=self.discharge)
         return self.step()
 
     def step(self) -> float:
@@ -475,8 +475,8 @@ class Teacher:
             settings += f", homeostasis {self.homeostasis:g} toward {self.target_rate:g} in [{low:g}, {high:g}]"
         if self.unstick:
             settings += f", unstick {self.unstick:g}"
-        if self.carry_over:
-            settings += ", carry-over"
+        if self.discharge:
+            settings += ", discharge"
         return (
             f"learning {self.target} ({settings}): "
             f"accuracy {self.accuracy_to_date:.1%} to date over {self.epochs:,} epochs, "

@@ -1,10 +1,26 @@
 from __future__ import annotations
 
+import math
+
 from .connection import Connection
 
 
 class Neuron:
+    """A leaky integrate-and-fire neuron with an absolute refractory period, on a clock in nominal milliseconds.
+
+    The leak is lazy: nothing happens to a quiet neuron. When a signal arrives
+    at time `now`, the potential is first decayed for the time since it was
+    last brought up to date (`potential *= exp(-(now - last_update) / tau)`),
+    then the signal is added. A neuron that fired within the last
+    `refractory` milliseconds ignores every signal, forced stimulus included.
+    `tau` and `refractory` are global properties of neurons, one value for the
+    whole network. Propagation is instantaneous, so the clock only advances
+    between inputs.
+    """
+
     verbose = False  # class-wide: print a line each time any neuron fires (off unless asked: walnutbutter -v)
+    tau = 2.0  # leak time constant, nominal milliseconds (swept September 10, 2026: see docs/tau-sweep.md); math.inf switches the leak off
+    refractory = 5.0  # absolute refractory period, nominal milliseconds
 
     def __init__(self, name: str = "Neuron", threshold: float = 0.25, minimum_potential: float = -1.0):
         self.name = name
@@ -17,8 +33,10 @@ class Neuron:
         self.noise = 0.0  # exploration noise this epoch started with (see learning.py)
         self.touched_stamp = 0  # last wave (a global stamp) in which a signal reached this neuron
         self.rate = 0.5  # running estimate of how often this neuron fires per epoch (see learning.py)
-        self.has_fired = False
+        self.has_fired = False  # fired in the current cascade
         self.fired_in_wave: int | None = None  # set by fire(); None until it fires
+        self.fired_at: float | None = None  # clock time of the last spike, across cascades
+        self.last_update = 0.0  # clock time the potential was last brought up to date
 
     def connect(
         self, target: Neuron, connection_id: int = 0, weight: float = 1.0, kind: str = "local"
@@ -48,16 +66,35 @@ class Neuron:
         """The neurons that can send a signal to this neuron."""
         return [connection.source for connection in self.incoming]
 
-    def receive(self, amount: float) -> None:
-        """Take in weighted input. A neuron that has already fired ignores it.
+    def refractory_at(self, now: float) -> bool:
+        """True if the neuron fired within the refractory period before `now` (a neuron that fired *at* now included)."""
+        return self.fired_at is not None and now < self.fired_at + Neuron.refractory
 
-        Receiving never fires the neuron by itself; the propagation loop checks
-        `ready` once every signal in the wave has been delivered, after
+    def leak(self, now: float) -> None:
+        """Bring the potential up to `now`: decay it for the time since the last update. Lazy, so call it on arrival."""
+        elapsed = now - self.last_update
+        if elapsed > 0.0:
+            if Neuron.tau != math.inf:
+                self.potential *= math.exp(-elapsed / Neuron.tau)
+            self.last_update = now
+
+    def receive(self, amount: float, now: float | None = None) -> None:
+        """Take in weighted input at time `now`: leak first, then integrate.
+
+        A neuron that has already fired in this cascade, or is still refractory
+        from an earlier one, ignores it (forced stimulus included). Receiving
+        never fires the neuron by itself; the propagation loop checks
+        readiness once every signal in the wave has been delivered, after
         `settle()` has applied the floor to the wave's total. Negative weights
-        push the potential down (an inhibitory connection).
+        push the potential down (an inhibitory connection). Without `now` the
+        clock is not consulted: no leak, and only `has_fired` blocks.
         """
         if self.has_fired:
             return
+        if now is not None:
+            if self.refractory_at(now):
+                return
+            self.leak(now)
         self.potential += amount
 
     def settle(self) -> None:
@@ -72,11 +109,17 @@ class Neuron:
 
     @property
     def ready(self) -> bool:
-        """True if this neuron has enough input to fire and has not fired yet."""
+        """True if this neuron has enough input to fire and has not fired in this cascade."""
         return not self.has_fired and self.potential >= self.threshold
 
-    def fire(self, wave: int = 0) -> list[Connection]:
-        """Mark this neuron as fired in `wave` and return the connections to signal along.
+    def can_fire(self, now: float | None) -> bool:
+        """Ready, and not refractory at `now` (the clock is ignored when `now` is None)."""
+        if now is not None and self.refractory_at(now):
+            return False
+        return self.ready
+
+    def fire(self, wave: int = 0, now: float | None = None) -> list[Connection]:
+        """Mark this neuron as fired in `wave` at time `now` and return the connections to signal along.
 
         This does not deliver anything: the caller (see propagation.py) queues
         the returned connections so that all of a wave's signals are delivered
@@ -84,19 +127,24 @@ class Neuron:
         """
         self.has_fired = True
         self.fired_in_wave = wave
+        self.potential = 0.0  # the spike resets the potential
+        if now is not None:
+            self.fired_at = now
+            self.last_update = now
         if Neuron.verbose:
             print(f"{self.name} fired in wave {wave}.")
         return [connection for connection in self.outgoing if connection.is_active]
 
-    def reset(self, discharge: bool = True) -> None:
-        """Allow this neuron to fire again and, by default, clear its potential.
+    def reset(self, discharge: bool = False) -> None:
+        """Start a new cascade: allow the neuron to fire again.
 
-        With `discharge=False` only a neuron that fired is cleared; one that did
-        not fire keeps the sub-threshold input it has accumulated, so charge
-        carries over from epoch to epoch until it eventually fires (an optional
-        mode; see run_epoch's `discharge` and the --carry-over flag).
+        A neuron that did not fire keeps its sub-threshold potential, which the
+        leak then erodes over the time to the next input (a spike has already
+        reset the potential of one that fired). With `discharge=True` every
+        potential is zeroed instead, the old epoch-by-epoch behaviour.
+        `fired_at` is kept: the refractory period outlives the cascade.
         """
-        if self.has_fired or discharge:
+        if discharge:
             self.potential = 0.0
         self.has_fired = False
         self.fired_in_wave = None

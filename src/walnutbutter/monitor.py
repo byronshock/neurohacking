@@ -19,30 +19,33 @@ def run_epoch(
     verbose: bool = True,
     noise: float = 0.0,
     rng: random.Random | None = None,
-    discharge: bool = True,
+    discharge: bool = False,
+    time: float | None = None,
 ) -> list:
-    """Reset every neuron, present an input (random unless `bits` is given), and propagate.
+    """Start a cascade: present an input (random unless `bits` is given) at `time`, and propagate.
 
     Weights, shortcuts and thresholds are untouched. Every neuron's fired
-    state and potential are cleared. With `discharge=False` neurons that did
-    not fire keep the sub-threshold potential they accumulated (carry-over).
-    With `noise` > 0 a Gaussian draw of that standard deviation (the
-    exploration used by learning) is added to every neuron's potential; each
-    neuron remembers it as `noise`. Prints the input unless `verbose` is
-    False. Returns the waves.
+    state is cleared and fired neurons' potentials with it; unfired neurons
+    keep theirs, which leaks as the clock moves to `time` (default: the
+    network's interval after the last input). With `discharge=True` every
+    potential is zeroed first, the old epoch-by-epoch behaviour. With
+    `noise` > 0 a Gaussian draw of that standard deviation (the exploration
+    used by learning) is added to every neuron's potential; each neuron
+    remembers it as `noise`. Prints the input unless `verbose` is False.
+    Returns the waves.
     """
     grid.reset(discharge)
     if bits is None:
-        grid.new_random_input()
+        grid.new_random_input(time)
     else:
-        grid.set_input_bits(bits)
+        grid.set_input_bits(bits, time)
     if noise > 0:
         grid.perturb(noise, rng or random)
     if verbose:
         stages = f"input {format_bits(grid.input_bits)}"
         if grid.code:
             stages = f"data {format_bits(grid.input_data)} -> {grid.code.name} {format_bits(grid.input_bits)}"
-        print(f"epoch {grid.epoch + 1}: {stages} -> coded {format_bits(grid.input_coded)} -> bottom row {format_bits(grid.input_pattern)}")
+        print(f"epoch {grid.epoch + 1} at {grid.input_time:g} ms: {stages} -> coded {format_bits(grid.input_coded)} -> bottom row {format_bits(grid.input_pattern)}")
     return grid.fire_input()
 
 

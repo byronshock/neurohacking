@@ -302,19 +302,15 @@ def test_threshold_range_is_configurable_and_validated():
         Teacher(grid, threshold_range=(3, 1))
 
 
-def test_discharge_is_the_default_and_carry_over_is_available():
-    grid = main(across=8, rows=4, seed=1)
+def test_the_leak_is_the_default_and_discharge_is_available():
+    grid = GridOfNeurons(across=4, rows=3, omega=0, weight=None, seed=1)
     default = Teacher(grid, seed=1)
-    assert default.carry_over is False
-    default.step()
-    assert "carry-over" not in default.status()
-    carrying = Teacher(grid, seed=1, carry_over=True)
-    carrying.step()
-    assert "carry-over" in carrying.status()
-
-
-
-# --- un-sticking from the output end -------------------------------------------
+    assert default.discharge is False
+    default.epoch(verbose=False)
+    assert "discharge" not in default.status()
+    discharging = Teacher(grid, seed=1, discharge=True)
+    discharging.epoch(verbose=False)
+    assert "discharge" in discharging.status()
 
 
 def test_unstick_touches_only_stuck_output_neurons():
