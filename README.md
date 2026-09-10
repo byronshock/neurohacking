@@ -226,7 +226,7 @@ nothing happens to a quiet neuron, and when a signal arrives the potential
 is first decayed for the time since it was last brought up to date,
 `exp(-elapsed / tau)`, then the signal is added. A neuron that fired within
 `--refractory` milliseconds (default 5) ignores every signal, forced
-stimulus included, and a spike resets its potential. `--tau` (default 5)
+stimulus included, and a spike resets its potential. `--tau` (default 2, from the sweep in `docs/tau-sweep.md`)
 and `--refractory` are global properties of neurons, one value for the
 whole network. Unfired neurons therefore keep what is left of their
 potential from one input to the next; `--discharge` zeroes everything

@@ -281,9 +281,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--tau",
         type=float,
-        default=5.0,
+        default=2.0,
         metavar="MS",
-        help="leak time constant of every neuron, nominal milliseconds (default: 5; inf switches the leak off). "
+        help="leak time constant of every neuron, nominal milliseconds (default: 2; inf switches the leak off). "
         "The leak is computed only when a neuron receives a signal",
     )
     parser.add_argument(

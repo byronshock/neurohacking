@@ -22,13 +22,13 @@ def quiet(monkeypatch):
 
 @pytest.fixture
 def clock(monkeypatch):
-    """The defaults, pinned: tau 5 ms, refractory 5 ms."""
-    monkeypatch.setattr(Neuron, "tau", 5.0)
+    """The defaults, pinned: tau 2 ms, refractory 5 ms."""
+    monkeypatch.setattr(Neuron, "tau", 2.0)
     monkeypatch.setattr(Neuron, "refractory", 5.0)
 
 
 def test_the_defaults_are_five_milliseconds_each_and_inputs_ten_apart(clock):
-    assert Neuron.tau == 5.0 and Neuron.refractory == 5.0
+    assert Neuron.tau == 2.0 and Neuron.refractory == 5.0
     grid = GridOfNeurons(across=4, rows=3, omega=0)
     assert grid.interval == 10.0 and grid.time == 0.0 and grid.next_time() == 0.0
     run_epoch(grid, verbose=False)
@@ -45,13 +45,13 @@ def test_the_leak_is_lazy_and_exponential(clock):
     a = Neuron("a")
     a.receive(0.2, now=0.0)
     assert a.potential == pytest.approx(0.2) and a.last_update == 0.0
-    a.receive(0.0, now=5.0)  # one tau later
-    assert a.potential == pytest.approx(0.2 * math.exp(-1)) and a.last_update == 5.0
+    a.receive(0.0, now=2.0)  # one tau later
+    assert a.potential == pytest.approx(0.2 * math.exp(-1)) and a.last_update == 2.0
     quiet = Neuron("q")
     quiet.receive(0.2, now=0.0)
     assert quiet.potential == pytest.approx(0.2)  # nothing happens to a neuron nobody talks to
-    quiet.leak(50.0)
-    assert quiet.potential == pytest.approx(0.2 * math.exp(-10)) and quiet.last_update == 50.0
+    quiet.leak(20.0)
+    assert quiet.potential == pytest.approx(0.2 * math.exp(-10)) and quiet.last_update == 20.0
 
 
 def test_no_leak_when_tau_is_infinite(monkeypatch):
@@ -118,7 +118,8 @@ def test_a_short_tau_is_the_old_discharge_epoch_for_epoch(monkeypatch):
     assert [c.weight for c in leaky.grid.connections.values()] == [c.weight for c in zeroed.grid.connections.values()]
 
 
-def test_with_the_default_tau_memory_carries_between_inputs(clock):
+def test_with_a_long_tau_memory_carries_between_inputs(monkeypatch):
+    monkeypatch.setattr(Neuron, "tau", 5.0)  # 13% of a potential survives a 10 ms gap
     remembering = Teacher(GridOfNeurons(weight=None, seed=4), seed=1)
     forgetting = Teacher(GridOfNeurons(weight=None, seed=4), seed=1, discharge=True)
     same = 0
@@ -126,7 +127,7 @@ def test_with_the_default_tau_memory_carries_between_inputs(clock):
         remembering.epoch(verbose=False)
         forgetting.epoch(verbose=False)
         same += [n.fired_in_wave for n in remembering.grid.all_neurons()] == [n.fired_in_wave for n in forgetting.grid.all_neurons()]
-    assert same < 40  # 13% of a potential survives a 10 ms gap at tau 5, and it shows
+    assert same < 40  # and it shows
 
 
 def test_both_engines_keep_the_same_clock(clock):
@@ -162,7 +163,7 @@ def test_the_clock_survives_a_checkpoint(tmp_path, clock):
         teacher.epoch(verbose=False)
     path = tmp_path / "clock.json"
     data = checkpoint(grid, path, teacher)
-    assert data["time"] == 32.0 and data["interval"] == 4.0 and data["tau"] == 5.0 and data["refractory"] == 5.0
+    assert data["time"] == 32.0 and data["interval"] == 4.0 and data["tau"] == 2.0 and data["refractory"] == 5.0
     assert len(data["potentials"]) == len(data["fired_at"]) == len(data["last_update"]) == 24
     restored, _ = restore(path)
     assert restored.time == 32.0 and restored.interval == 4.0 and restored.next_time() == 36.0
@@ -188,7 +189,7 @@ def test_cli_clock_options_and_validation(tmp_path, capsys):
                      "--save-weights", str(save)]) == 0
     data = json.loads(save.read_text())
     assert data["time"] == 10.0 and data["interval"] == 2.5 and data["tau"] == 3.0 and data["refractory"] == 1.0
-    assert Neuron.tau == 5.0 and Neuron.refractory == 5.0  # restored after the command
+    assert Neuron.tau == 2.0 and Neuron.refractory == 5.0  # restored after the command
     assert cli_main(["--headless", "--seeds", "2", "--seed", "1", "-a", "6", "-r", "4", "--epochs", "5", "--interval", "2", "--no-save"]) == 0
     capsys.readouterr()
     assert cli_main(["--headless", "--tau", "0"]) == 2
