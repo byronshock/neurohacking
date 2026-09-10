@@ -266,9 +266,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="floor on a neuron's potential: inhibition and carried-over charge can go no lower (default: -1)",
     )
     parser.add_argument(
-        "--carry-over",
+        "--discharge",
         action="store_true",
-        help="unfired neurons keep their potential from one epoch to the next (default: every potential is cleared)",
+        help="zero every potential between inputs (the old epoch-by-epoch behaviour) instead of letting it leak",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=10.0,
+        metavar="MS",
+        help="nominal milliseconds between inputs (default: 10). Propagation is instantaneous; the clock only "
+        "advances between inputs, and a neuron that fired within --refractory of an input ignores it",
+    )
+    parser.add_argument(
+        "--tau",
+        type=float,
+        default=5.0,
+        metavar="MS",
+        help="leak time constant of every neuron, nominal milliseconds (default: 5; inf switches the leak off). "
+        "The leak is computed only when a neuron receives a signal",
+    )
+    parser.add_argument(
+        "--refractory",
+        type=float,
+        default=5.0,
+        metavar="MS",
+        help="absolute refractory period of every neuron, nominal milliseconds (default: 5)",
     )
     parser.add_argument(
         "--epochs",
@@ -320,12 +343,16 @@ def cli_main(argv: list[str] | None = None) -> int:
     args.show = not args.headless and args.seeds is None  # a seed batch is headless by definition
     args.fast = args.show and not args.step
     args.learn = not args.no_learn
-    was_verbose = Neuron.verbose
+    was_verbose, was_tau, was_refractory = Neuron.verbose, Neuron.tau, Neuron.refractory
     Neuron.verbose = bool(args.verbose) and not args.fast and not args.quiet
+    if args.tau <= 0 or args.refractory < 0 or args.interval <= 0:
+        print("error: --tau and --interval must be positive and --refractory must not be negative", file=sys.stderr)
+        return 2
+    Neuron.tau, Neuron.refractory = args.tau, args.refractory
     try:
         return _run(args)
     finally:
-        Neuron.verbose = was_verbose
+        Neuron.verbose, Neuron.tau, Neuron.refractory = was_verbose, was_tau, was_refractory
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -421,6 +448,7 @@ def _run(args: argparse.Namespace) -> int:
                 grid.connect_within(reach=args.reach, weight=args.weight)
             else:
                 grid = GridOfNeurons(**settings)
+            grid.interval = args.interval
             if args.ecc:
                 try:
                     grid.use_ecc(args.ecc)
@@ -463,7 +491,7 @@ def _run(args: argparse.Namespace) -> int:
                     homeostasis=args.homeostasis,
                     target_rate=args.target_rate,
                     threshold_range=tuple(args.threshold_range),
-                    carry_over=args.carry_over,
+                    discharge=args.discharge,
                     unstick=args.unstick,
                     unstick_target=args.unstick_target,
                     critic=args.critic,
@@ -473,7 +501,7 @@ def _run(args: argparse.Namespace) -> int:
                     resume_teacher(teacher, data)
                 teacher.epoch(input_bits, verbose=Neuron.verbose)  # the first epoch, with exploration, like every other
             else:
-                run_epoch(grid, input_bits, verbose=Neuron.verbose, discharge=not args.carry_over)
+                run_epoch(grid, input_bits, verbose=Neuron.verbose, discharge=args.discharge)
 
             def save_checkpoint():
                 if args.save_weights:
@@ -497,7 +525,7 @@ def _run(args: argparse.Namespace) -> int:
                             print(f"epoch {epoch}: {teacher.status()}", file=sys.stderr)
                             save_checkpoint()
                     else:
-                        run_epoch(grid, verbose=Neuron.verbose, discharge=not args.carry_over)
+                        run_epoch(grid, verbose=Neuron.verbose, discharge=args.discharge)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
@@ -588,6 +616,8 @@ def _seed_worker(job: dict) -> dict:
         grid = HexColumns(layers=job["layers"], **job["settings"], seed=seed)
     if job.get("ecc"):
         grid.use_ecc(job["ecc"])
+    Neuron.tau, Neuron.refractory = job.get("tau", Neuron.tau), job.get("refractory", Neuron.refractory)
+    grid.interval = job.get("interval", grid.interval)
     if job.get("engine") == "arrays":
         from .arrays import ArrayNetwork
         grid = ArrayNetwork(grid)
@@ -641,7 +671,7 @@ def _run_seeds(args: argparse.Namespace) -> int:
         homeostasis=args.homeostasis,
         target_rate=args.target_rate,
         threshold_range=tuple(args.threshold_range),
-        carry_over=args.carry_over,
+        discharge=args.discharge,
         unstick=args.unstick,
         unstick_target=args.unstick_target,
         critic=args.critic,
@@ -661,7 +691,7 @@ def _run_seeds(args: argparse.Namespace) -> int:
         lattice = {"reach": args.reach} if args.nodes is not None else None
         jobs.append({"seed": seed, "epochs": args.epochs, "settings": settings, "teacher": teacher_kwargs,
                      "save": save, "lattice": lattice, "ecc": args.ecc, "engine": args.engine or "objects",
-                     "layers": args.layers})
+                     "layers": args.layers, "tau": args.tau, "refractory": args.refractory, "interval": args.interval})
     if args.engine == "arrays":
         try:
             import numpy, scipy  # noqa: F401

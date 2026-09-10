@@ -217,6 +217,26 @@ and the order of arrival cannot matter there either. Each neuron records
 `fired_in_wave`, the grid keeps the list of `Wave` objects from its last
 epoch in `grid.waves`, and the visualizer shades fired neurons by wave.
 
+**Time.** The network runs on a clock in nominal milliseconds, and the
+neurons are leaky integrate-and-fire neurons with an absolute refractory
+period. Propagation is instantaneous: a cascade happens at one instant and
+the clock only advances between inputs, `--interval` milliseconds apart
+(default 10) unless an input is given its own time. The leak is lazy:
+nothing happens to a quiet neuron, and when a signal arrives the potential
+is first decayed for the time since it was last brought up to date,
+`exp(-elapsed / tau)`, then the signal is added. A neuron that fired within
+`--refractory` milliseconds (default 5) ignores every signal, forced
+stimulus included, and a spike resets its potential. `--tau` (default 5)
+and `--refractory` are global properties of neurons, one value for the
+whole network. Unfired neurons therefore keep what is left of their
+potential from one input to the next; `--discharge` zeroes everything
+between inputs instead, the old epoch-by-epoch behaviour, and a tau short
+against the interval is the same thing. Each output neuron carries the
+time of the cascade it fired in (`grid.output_times()`), so a run's output
+is a sequence of (neuron, time) pairs rather than one row per epoch.
+Checkpoints save the clock and every neuron's potential, last spike and
+last update, so a resumed run continues rather than restarts.
+
 **Two engines, one network.** The object engine above is the one you watch:
 every neuron and connection is an object that receives and fires for
 itself. `--engine arrays` runs the same network as numpy vectors and a scipy
@@ -384,7 +404,8 @@ target neuron's exploration noise. A neuron that was nudged towards firing
 in a better-than-usual epoch gets stronger inputs from whoever fed it. This
 is the REINFORCE / node-perturbation estimator, a three-factor rule:
 presynaptic activity x postsynaptic perturbation x global reward.
-`--eligibility hebb` swaps the perturbation for a plain Hebbian term (+1 if
+The exploration noise is added on top of what survived the gap and leaks
+from there like everything else. `--eligibility hebb` swaps the perturbation for a plain Hebbian term (+1 if
 the target fired, -1 if not) with no noise. Forced inputs are never adjusted
 and weights stay within [-1, 1].
 

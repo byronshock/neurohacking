@@ -15,6 +15,7 @@ from pathlib import Path
 from .cartesian import CartesianNodes
 from .columns import HexColumns
 from .grid import GridOfNeurons
+from .neuron import Neuron
 
 FORMAT = 1
 
@@ -44,12 +45,20 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         "engine": engine,
         "random_weights": grid.weight is None if not lattice else True,
         "epoch": grid.epoch,
+        "time": grid.time,  # the clock, nominal milliseconds
+        "interval": grid.interval,
+        "tau": Neuron.tau,
+        "refractory": Neuron.refractory,
         "connections": len(grid.connections),
         # the shortcuts are the only random part of a grid's topology: record them so a load can verify the mesh
         "shortcuts": [] if lattice else [[c.source.name, c.target.name] for c in grid.small_world_connections()],
         "weights": [grid.connections[i].weight for i in range(1, len(grid.connections) + 1)],
         "thresholds": [n.threshold for n in grid.all_neurons()],
         "rates": [n.rate for n in grid.all_neurons()],
+        # the state the clock leaves behind, so a resumed run continues rather than restarts
+        "potentials": [n.potential for n in grid.all_neurons()],
+        "fired_at": [n.fired_at for n in grid.all_neurons()],
+        "last_update": [n.last_update for n in grid.all_neurons()],
     }
     if lattice:
         index = {n: i for i, n in enumerate(grid.neurons)}
@@ -175,6 +184,7 @@ def load_weights(grid: GridOfNeurons, data: dict) -> None:
         neuron.threshold = threshold
     for neuron, rate in zip(neurons, data.get("rates", [])):
         neuron.rate = rate
+    _restore_clock(grid, data)
 
 
 def resume_teacher(teacher, data: dict) -> None:
@@ -216,8 +226,22 @@ def _restore_lattice(data: dict) -> CartesianNodes:
         neuron.threshold = threshold
     for neuron, rate in zip(neurons, data.get("rates", [])):
         neuron.rate = rate
+    _restore_clock(nodes, data)
     nodes.epoch = data["epoch"]
     return nodes
+
+
+def _restore_clock(grid, data: dict) -> None:
+    """Continue the clock: time, interval and each neuron's potential, last spike and last update."""
+    grid.time = data.get("time", 0.0)
+    grid.interval = data.get("interval", grid.interval)
+    neurons = list(grid.all_neurons())
+    for neuron, potential in zip(neurons, data.get("potentials", [])):
+        neuron.potential = potential
+    for neuron, fired_at in zip(neurons, data.get("fired_at", [])):
+        neuron.fired_at = fired_at
+    for neuron, last in zip(neurons, data.get("last_update", [])):
+        neuron.last_update = last
 
 
 def _ecc_name(data: dict) -> str | None:

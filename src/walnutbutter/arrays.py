@@ -33,6 +33,7 @@ from scipy.sparse import csr_array
 from .exploration import TWO_PI, uniforms
 from .learning_rules import RATE_MEMORY, STUCK_ABOVE, STUCK_BELOW
 from .network import Network
+from .neuron import Neuron
 from .propagation import Wave
 
 
@@ -61,6 +62,7 @@ class ArrayNetwork(Network):
         self.permutation = list(mesh.permutation)
         self.ecc = mesh.ecc
         self.epoch = mesh.epoch
+        self.time, self.interval, self.input_time = mesh.time, mesh.interval, mesh.input_time
         self.seed = mesh.seed
         self.threshold = mesh.threshold
         self.minimum_potential = mesh.minimum_potential
@@ -82,6 +84,9 @@ class ArrayNetwork(Network):
         for x in neurons:
             if x.has_fired:
                 self.fired_wave[self.index[x]] = x.fired_in_wave
+        # the clock: when each neuron last spiked (-inf: never) and when its potential was last brought up to date
+        self.fired_at = np.array([-np.inf if x.fired_at is None else x.fired_at for x in neurons], dtype=float)
+        self.last_update = np.array([x.last_update for x in neurons], dtype=float)
 
         e = len(mesh.connections)
         connections = [mesh.connections[i] for i in range(1, e + 1)]
@@ -154,17 +159,28 @@ class ArrayNetwork(Network):
     def has_fired(self) -> np.ndarray:
         return self.fired_wave >= 0
 
-    def reset(self, discharge: bool = True) -> None:
+    def reset(self, discharge: bool = False) -> None:
         if discharge:
             self.potential[:] = 0.0
-        else:
-            self.potential[self.fired_wave >= 0] = 0.0
         self.fired_wave[:] = -1
         self.noise[:] = 0.0
         self.waves = []
 
-    def perturb(self, sigma: float, rng) -> None:
+    def leak(self, now: float) -> None:
+        """Bring every potential up to `now`. The object engine does this lazily per neuron on arrival;
+        here it is one vector operation, which is the same arithmetic (decays compose)."""
+        elapsed = now - self.last_update
+        moving = elapsed > 0.0
+        if moving.any():
+            if Neuron.tau != np.inf:
+                self.potential[moving] *= np.exp(-elapsed[moving] / Neuron.tau)
+            self.last_update[moving] = now
+
+    def perturb(self, sigma: float, rng, now: float | None = None) -> None:
         """Exploration: the same Box-Muller draws as the object engine (see exploration.py), done as a vector."""
+        now = self.input_time if now is None else now
+        if now is not None:
+            self.leak(now)
         n = len(self.neurons_list)
         draws = np.array(uniforms(rng, n))
         angle = TWO_PI * draws[0::2]
@@ -178,20 +194,31 @@ class ArrayNetwork(Network):
     def fire_input(self) -> list[ArrayWave]:
         if self.input_pattern is None:
             raise ValueError("no input pattern set; call set_input() first")
+        self.time = self.input_time if self.input_time is not None else self.next_time()
         self.epoch += 1
         forced = self.input_index[np.asarray(self.input_pattern, dtype=bool)]
-        self.waves = self.propagate_forced(forced)
+        self.waves = self.propagate_forced(forced, self.time)
         return self.waves
 
-    def propagate_forced(self, forced: np.ndarray) -> list[ArrayWave]:
-        """Run one epoch from the neurons `forced` to fire in wave 0. Returns the waves."""
+    def output_times(self) -> list[float | None]:
+        return [float(self.fired_at[i]) if self.fired_wave[i] >= 0 else None for i in self.output_index]
+
+    def propagate_forced(self, forced: np.ndarray, now: float | None = None) -> list[ArrayWave]:
+        """Run one cascade at clock time `now` from the neurons `forced` to fire in wave 0. Returns the waves."""
         self._refresh_matrix()
         matrix = self._matrix
         potential, threshold, floor, fired_wave = self.potential, self.threshold_v, self.floor, self.fired_wave
         n = len(potential)
+        if now is None:
+            now = self.time
+        self.leak(now)
+        refractory = self.fired_at + Neuron.refractory > now  # fired within the refractory period before now
+        forced = forced[~refractory[forced]]  # a refractory neuron ignores the stimulus too
         firing = np.zeros(n, dtype=float)
         firing[forced] = 1.0
         fired_wave[forced] = 0
+        self.fired_at[forced] = now
+        potential[forced] = 0.0  # the spike resets the potential
         waves = [ArrayWave(0, np.sort(forced))]
         out_degree = self._out_degree
         while out_degree @ firing > 0:  # signals in flight: the firing neurons have active connections out
@@ -199,10 +226,12 @@ class ArrayNetwork(Network):
             both = matrix @ firing
             incoming, touched = both[:n], both[n:] > 0
             unfired = fired_wave < 0
-            take = touched & unfired
+            take = touched & unfired & ~refractory
             potential[take] = np.maximum(potential[take] + incoming[take], floor[take])
             ready = take & (potential >= threshold)
             fired_wave[ready] = number
+            self.fired_at[ready] = now
+            potential[ready] = 0.0
             waves.append(ArrayWave(number, np.flatnonzero(ready)))  # recorded even if nobody fired, like the object engine
             if not ready.any():
                 break
@@ -278,11 +307,14 @@ class ArrayNetwork(Network):
             neuron.rate = float(self.rate[i])
             neuron.has_fired = wave >= 0
             neuron.fired_in_wave = wave if wave >= 0 else None
+            neuron.fired_at = None if self.fired_at[i] == -np.inf else float(self.fired_at[i])
+            neuron.last_update = float(self.last_update[i])
         connections = self.mesh.connections
         for i, weight in enumerate(self.weight.tolist(), start=1):
             connections[i].weight = weight
         mesh = self.mesh
         mesh.epoch = self.epoch
+        mesh.time, mesh.interval, mesh.input_time = self.time, self.interval, self.input_time
         mesh.waves = [Wave(w.number, [], [self.neurons_list[i] for i in w.fired.tolist()]) for w in self.waves]
         for name in ("input_pattern", "input_bits", "input_coded", "input_data"):
             setattr(mesh, name, getattr(self, name))

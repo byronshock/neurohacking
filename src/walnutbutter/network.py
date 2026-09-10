@@ -35,6 +35,9 @@ class Network:
         self.input_coded: list[bool] | None = None  # the complement-coded bits before permutation
         self.permutation: list[int] = list(range(across))  # place i along the bottom row shows coded bit permutation[i]
         self.epoch = 0  # how many inputs have been presented
+        self.time = 0.0  # the clock, nominal milliseconds: the time of the last input
+        self.interval = 10.0  # default spacing of inputs when no time is given
+        self.input_time: float | None = None  # when the pending input arrives
         self.ecc: str | None = None  # name of the error-correcting code applied before complement coding, if any
         self.input_data: list[bool] | None = None  # the raw data bits when ecc is on
 
@@ -64,12 +67,20 @@ class Network:
         """How many neurons the input covers: one bit of the (coded, permuted) pattern each."""
         return self.across
 
-    def set_input(self, pattern) -> None:
-        """Store the input pattern: one boolean per place along the bottom row."""
+    def next_time(self) -> float:
+        """When the next input arrives if no time is given: the interval after the last one (the first at 0)."""
+        return self.time + self.interval if self.epoch else 0.0
+
+    def set_input(self, pattern, time: float | None = None) -> None:
+        """Store the input pattern, one boolean per input neuron, and the time it arrives (default: next_time())."""
         pattern = [bool(b) for b in pattern]
         if len(pattern) != self.input_width():
             raise ValueError(f"input pattern has {len(pattern)} bits but the input covers {self.input_width()} neurons")
+        time = self.next_time() if time is None else float(time)
+        if self.epoch and time < self.time:
+            raise ValueError(f"input time {time} is before the clock, which stands at {self.time}")
         self.input_pattern = pattern
+        self.input_time = time
 
     @property
     def code(self) -> Code | None:
@@ -97,7 +108,7 @@ class Network:
         self.ecc = code
         self.raw_bit_count()  # validates the count across
 
-    def set_input_bits(self, bits) -> None:
+    def set_input_bits(self, bits, time: float | None = None) -> None:
         """Set the input from raw bits: (ecc-encode them,) complement-code them, then permute.
 
         Without ecc the raw bits number half the count across. With ecc they are
@@ -110,19 +121,19 @@ class Network:
             raise ValueError(f"expected {wanted} input bits for {self.input_width()} input neurons, got {len(bits)}")
         word = self.code.encode(bits) if self.code else bits
         coded = complement_code(word)
-        self.set_input([coded[i] for i in self.permutation])
+        self.set_input([coded[i] for i in self.permutation], time)
         self.input_data = bits if self.code else None
         self.input_bits = word  # the bits that were complement-coded: the codeword with ecc, the raw bits without
         self.input_coded = coded
 
-    def new_random_input(self) -> list[bool]:
+    def new_random_input(self, time: float | None = None) -> list[bool]:
         """Draw fresh raw bits from the network's seeded stream and set them as the input.
 
         Because the stream is the same one used to build the network, a seed
         reproduces the whole sequence of inputs, not just the first.
         """
         bits = [self._rng.random() < 0.5 for _ in range(self.raw_bit_count())]
-        self.set_input_bits(bits)
+        self.set_input_bits(bits, time)
         return bits
 
     def input_neurons(self) -> list[Neuron]:
@@ -132,37 +143,49 @@ class Network:
         return [neuron for neuron, bit in zip(self.input_row(), self.input_pattern) if bit]
 
     def fire_input(self) -> list[Wave]:
-        """Force the input neurons to fire and propagate the signal wave by wave."""
+        """Advance the clock to the input's time, force the input neurons to fire, and propagate wave by wave."""
         if self.input_pattern is None:
             raise ValueError("no input pattern set; call set_input() first")
+        self.time = self.input_time if self.input_time is not None else self.next_time()
         self.epoch += 1
-        return self.propagate(fire=self.input_neurons())
+        return self.propagate(fire=self.input_neurons(), now=self.time)
+
+    def output_times(self) -> list[float | None]:
+        """When each output neuron fired in the last cascade (the cascade's time), or None if it did not."""
+        return [neuron.fired_at if neuron.has_fired else None for neuron in self.output_row()]
 
     # --- running ----------------------------------------------------------
 
-    def propagate(self, fire=(), inputs=None) -> list[Wave]:
-        """Run one epoch from the given stimulus (see propagation.propagate) and keep its waves."""
-        self.waves = propagate(fire=fire, inputs=inputs)
+    def propagate(self, fire=(), inputs=None, now: float | None = None) -> list[Wave]:
+        """Run one cascade from the given stimulus (see propagation.propagate) and keep its waves."""
+        self.waves = propagate(fire=fire, inputs=inputs, now=now)
         return self.waves
 
-    def reset(self, discharge: bool = True) -> None:
-        """Clear every neuron's fired state and, by default, its potential.
+    def reset(self, discharge: bool = False) -> None:
+        """Start a new cascade: clear every neuron's fired state and the potential of those that fired.
 
-        With `discharge=False`, neurons that did not fire keep their
-        accumulated potential (see Neuron.reset).
+        Unfired neurons keep their potential, which leaks lazily as the clock
+        moves on (see Neuron). With `discharge=True` every potential is zeroed,
+        the old epoch-by-epoch behaviour.
         """
         for neuron in self.all_neurons():
             neuron.reset(discharge)
         self.waves = []
 
-    def perturb(self, sigma: float, rng) -> None:
+    def perturb(self, sigma: float, rng, now: float | None = None) -> None:
         """Exploration: add Gaussian noise of standard deviation `sigma` to every potential, floored.
 
-        Each neuron remembers its draw as `noise` (the learning rule's eligibility).
-        The draws come from `exploration.gaussians`, shared with the array engine.
+        The potential is first leaked to `now` (default: the pending input's
+        time), so the noise sits on top of what survived the gap and decays
+        like everything else from there. Each neuron remembers its draw as
+        `noise` (the learning rule's eligibility). The draws come from
+        `exploration.gaussians`, shared with the array engine.
         """
+        now = self.input_time if now is None else now
         neurons = self.all_neurons() if isinstance(self.all_neurons(), list) else list(self.all_neurons())
         for neuron, draw in zip(neurons, gaussians(rng, len(neurons), sigma)):
+            if now is not None:
+                neuron.leak(now)
             neuron.noise = draw
             neuron.potential = max(neuron.minimum_potential, neuron.potential + draw)
 

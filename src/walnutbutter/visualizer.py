@@ -269,7 +269,7 @@ def caption(grid: GridOfNeurons, teacher: Teacher | None = None) -> str:
         omega = f" lattice, reach {grid.reach:g}"
     if isinstance(grid, HexColumns) and grid.layers > 1:
         omega = f"x{grid.layers} layers" + omega
-    epoch = f" epoch {grid.epoch}:" if grid.epoch else ":"
+    epoch = f" epoch {grid.epoch} at {grid.time:g} ms:" if grid.epoch else ":"
     learning = f"   {teacher.status()}" if teacher else ""
     return f"walnutbutter {grid.across}x{grid.rows}{omega}{epoch} {state}{learning}   [Space] new input  [Esc] quit"
 

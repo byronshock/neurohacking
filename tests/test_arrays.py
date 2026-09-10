@@ -118,6 +118,8 @@ def test_carry_over_keeps_the_same_potentials_within_rounding():
         run_epoch(mesh, verbose=False, discharge=False)
         run_epoch(net, verbose=False, discharge=False)
         assert fired_waves(net) == fired_waves(mesh)
+        for n in mesh.all_neurons():
+            n.leak(mesh.time)  # the object engine leaks lazily: bring every neuron up to date before comparing
         assert np.allclose(net.potential, [n.potential for n in mesh.all_neurons()], atol=1e-9)
 
 
