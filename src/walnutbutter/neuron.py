@@ -52,13 +52,22 @@ class Neuron:
         """Take in weighted input. A neuron that has already fired ignores it.
 
         Receiving never fires the neuron by itself; the propagation loop checks
-        `ready` once every signal in the wave has been delivered. Negative
-        weights push the potential down (an inhibitory connection).
+        `ready` once every signal in the wave has been delivered, after
+        `settle()` has applied the floor to the wave's total. Negative weights
+        push the potential down (an inhibitory connection).
         """
         if self.has_fired:
             return
         self.potential += amount
-        if self.potential < self.minimum_potential:  # inhibition saturates at the floor
+
+    def settle(self) -> None:
+        """Apply the floor: inhibition saturates at `minimum_potential`.
+
+        Called once per wave on every neuron that received a signal, so the
+        floor acts on the wave's summed input and the result does not depend
+        on the order the signals arrived in.
+        """
+        if self.potential < self.minimum_potential:
             self.potential = self.minimum_potential
 
     @property

@@ -62,6 +62,7 @@ import random
 from typing import Callable, Sequence
 
 from .grid import GridOfNeurons
+from .learning_rules import RATE_MEMORY, STUCK_ABOVE, STUCK_BELOW, THRESHOLD_RANGE
 from .monitor import run_epoch
 from .neuron import Neuron
 
@@ -76,9 +77,11 @@ TARGETS: dict[str, Target] = {
 
 ELIGIBILITIES = ("perturb", "hebb")
 LATE = ("count", "ignore", "depress")  # what a signal that arrived after its target fired earns
-RATE_MEMORY = 0.01  # per-epoch update of a neuron's running firing rate (about the last 100 epochs)
-STUCK_BELOW, STUCK_ABOVE = 0.01, 0.99  # a neuron firing less or more often than this is "stuck"
-THRESHOLD_RANGE = (-5.0, 5.0)  # default limits on what homeostasis may move a threshold to
+
+
+def arrays(grid) -> bool:
+    """True for the array engine (arrays.ArrayNetwork), which does its own vector updates."""
+    return getattr(grid, "engine", "objects") == "arrays"
 
 
 def output_row(grid: GridOfNeurons) -> list[Neuron]:
@@ -93,18 +96,26 @@ def expected_outputs(grid: GridOfNeurons, target: str = "reversed") -> list[bool
     return TARGETS[target](grid.input_pattern)
 
 
+def output_fired(grid: GridOfNeurons) -> list[bool]:
+    """Whether each output neuron fired this epoch, left to right, whichever engine runs the grid."""
+    if arrays(grid):
+        return grid.output_fired()
+    return [neuron.has_fired for neuron in output_row(grid)]
+
+
 def output_errors(grid: GridOfNeurons, target: str = "reversed") -> dict[Neuron, int]:
     """Error per output neuron: +1 should have fired, -1 should not have, 0 correct."""
     return {
-        neuron: int(want) - int(neuron.has_fired)
-        for neuron, want in zip(output_row(grid), expected_outputs(grid, target))
+        neuron: int(want) - int(fired)
+        for neuron, fired, want in zip(output_row(grid), output_fired(grid), expected_outputs(grid, target))
     }
 
 
 def accuracy(grid: GridOfNeurons, target: str = "reversed") -> float:
     """Fraction of the output row that matches the target, 0 to 1. This is the reward."""
-    errors = output_errors(grid, target)
-    return sum(1 for e in errors.values() if e == 0) / len(errors)
+    fired = output_fired(grid)
+    want = expected_outputs(grid, target)
+    return sum(1 for f, w in zip(fired, want) if f == w) / len(want)
 
 
 # --- reading the output row as a receiver would ------------------------------------
@@ -119,7 +130,7 @@ def read_output_word(grid: GridOfNeurons, target: str = "reversed") -> list[bool
     pair: if exactly one of them fired, the bit is read; if both or neither
     did, the bit is unreadable (None) and counts as an error for the code.
     """
-    fired = [n.has_fired for n in output_row(grid)]
+    fired = output_fired(grid)
     columns = grid.columns
     if target == "reversed":
         placed = fired[::-1]  # placed[i] is what column i of the input arrangement would show
@@ -191,13 +202,17 @@ def update_rates(grid: GridOfNeurons) -> None:
 
     A neuron forced this epoch is skipped: that firing says nothing about the network.
     """
+    if arrays(grid):
+        return grid.update_rates()
     for neuron in grid.all_neurons():
         if not forced(neuron):
             neuron.rate += RATE_MEMORY * ((1.0 if neuron.has_fired else 0.0) - neuron.rate)
 
 
 def stuck_neurons(grid: GridOfNeurons) -> tuple[list[Neuron], list[Neuron]]:
-    """Neurons whose running rate is (almost) always on, and always off."""
+    """Neurons whose running rate is (almost) always on, and always off (indices, for the array engine)."""
+    if arrays(grid):
+        return grid.stuck()
     on = [n for n in grid.all_neurons() if n.rate > STUCK_ABOVE]
     off = [n for n in grid.all_neurons() if n.rate < STUCK_BELOW]
     return on, off
@@ -210,6 +225,8 @@ def homeostasis(
 
     Returns the number of neurons moved.
     """
+    if arrays(grid):
+        return grid.homeostasis(rate, target, threshold_range)
     if rate <= 0:
         return 0
     low, high = threshold_range
@@ -236,8 +253,10 @@ def unstick_outputs(
     A saturated output gets no learning signal because the exploration noise
     never changes whether it fires; moving its threshold back toward the
     region where the noise matters gives the rule a gradient there, and
-    nothing else in the mesh is disturbed. Returns the neurons nudged.
+    nothing else in the mesh is disturbed. Returns the neurons nudged (indices, for the array engine).
     """
+    if arrays(grid):
+        return grid.unstick_outputs(rate, target, threshold_range)
     if rate <= 0:
         return []
     low, high = threshold_range
@@ -293,6 +312,8 @@ def reinforce(
         raise ValueError(f"unknown eligibility {eligibility!r}; choose from {', '.join(ELIGIBILITIES)}")
     if late not in LATE:
         raise ValueError(f"unknown late-signal rule {late!r}; choose from {', '.join(LATE)}")
+    if arrays(grid):
+        return grid.reinforce(advantage, lr, sigma, eligibility, late)
     if not advantage:
         return 0
     low, high = grid.weight_range

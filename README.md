@@ -31,8 +31,10 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-The `dev` extra includes pytest and pygame. To install only what the
-visualizer needs, use `pip install -e ".[viz]"` instead.
+The `dev` extra includes pytest, pygame, numpy and scipy. To install only
+what the visualizer needs, use `pip install -e ".[viz]"`; only what the
+array engine needs, `pip install -e ".[arrays]"`. The object engine has no
+dependencies at all.
 
 ## Usage
 
@@ -209,9 +211,30 @@ connection stays an object that receives and fires for itself; the queue
 adds no allocation per signal, which nearly doubled the epoch rate.
 Delivering everything before deciding who fires means the outcome never
 depends on the order neurons are stored in, and there is no recursion limit
-on grid size. Each neuron records `fired_in_wave`, the grid keeps the list of
-`Wave` objects from its last epoch in `grid.waves`, and the visualizer shades
-fired neurons by wave.
+on grid size. The floor on a potential (`--minimum-potential`, default -1)
+is applied once a wave's signals are all in, so it acts on the wave's total
+and the order of arrival cannot matter there either. Each neuron records
+`fired_in_wave`, the grid keeps the list of `Wave` objects from its last
+epoch in `grid.waves`, and the visualizer shades fired neurons by wave.
+
+**Two engines, one network.** The object engine above is the one you watch:
+every neuron and connection is an object that receives and fires for
+itself. `--engine arrays` runs the same network as numpy vectors and a scipy
+sparse matrix (`arrays.py`): the neurons that fired in a wave, as a 0/1
+vector, times the weight matrix gives every neuron its summed input in one
+product, and the learning rule becomes a handful of elementwise operations
+over the edges. Both engines build the mesh the same way, share connection
+ids, read and write the same checkpoints (a loaded checkpoint keeps the
+engine that wrote it unless `--engine` says otherwise), draw the same
+exploration noise from the same seed, and are run side by side by
+`tests/test_arrays.py`, which checks that they fire the same neurons wave
+by wave and move the same weights. They can differ only in the order
+floating-point additions happen, so on the rare epoch where a potential sits
+within rounding of a threshold the two may decide differently and diverge
+from there, like two seeds. On this machine the array engine runs an 8x10
+mesh about twice as fast as the object engine, a 24x20 mesh five times as
+fast and a 48x40 mesh seven times as fast; the object engine has no
+dependencies and prints per neuron with `-v`, which the array engine does not.
 
 ```python
 from walnutbutter.propagation import propagate
@@ -417,6 +440,9 @@ src/walnutbutter/
   connection.py Connection: ID, source and target neurons, weight, is_active, kind
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
   propagation.py wave-by-wave propagate(): one list of connections in flight per wave
+  arrays.py    ArrayNetwork: the same network as numpy vectors and a scipy sparse matrix (--engine arrays)
+  exploration.py the Box-Muller noise draws both engines share
+  learning_rules.py constants shared by the learning code of both engines
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
   butter.py    WalnutButter: smears of neuron density (per unit cell) on the plane; shapes Rect and Disc
   cartesian.py CartesianNodes: the lattice, a scatter, or a placed recipe; reach wiring

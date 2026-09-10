@@ -199,8 +199,17 @@ def show_nodes(nodes: CartesianNodes, width: int = 800, height: int = 600, fps: 
 # --- the hex grid -----------------------------------------------------------------
 
 
+def as_mesh(network):
+    """The object mesh to draw: an array network is synced back into its mesh first."""
+    if getattr(network, "engine", "objects") == "arrays":
+        network.sync_to_mesh()
+        return network.mesh
+    return network
+
+
 def draw(surface: pygame.Surface, network, margin: int = 24) -> None:
     """Paint whichever container this is: discs on hex cells for the grid, discs at positions for nodes."""
+    network = as_mesh(network)
     if isinstance(network, CartesianNodes):
         draw_nodes(surface, network, margin)
     else:
@@ -221,6 +230,7 @@ def format_elapsed(seconds: float) -> str:
 
 
 def caption(grid: GridOfNeurons, teacher: Teacher | None = None) -> str:
+    grid = as_mesh(grid)
     fired = len(grid.fired_neurons())
     state = f"{fired} of {len(grid.neurons)} fired in {len(grid.waves)} waves" if fired else "unfired"
     omega = f" omega {grid.omega:g}" if getattr(grid, "omega", 0) else ""

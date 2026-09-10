@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from .exploration import gaussians
 from .inputs import CODES, DEFAULT_CODE, Code, complement_code
 from .neuron import Neuron
 from .propagation import Wave, propagate
@@ -144,6 +145,17 @@ class Network:
         for neuron in self.all_neurons():
             neuron.reset(discharge)
         self.waves = []
+
+    def perturb(self, sigma: float, rng) -> None:
+        """Exploration: add Gaussian noise of standard deviation `sigma` to every potential, floored.
+
+        Each neuron remembers its draw as `noise` (the learning rule's eligibility).
+        The draws come from `exploration.gaussians`, shared with the array engine.
+        """
+        neurons = self.all_neurons() if isinstance(self.all_neurons(), list) else list(self.all_neurons())
+        for neuron, draw in zip(neurons, gaussians(rng, len(neurons), sigma)):
+            neuron.noise = draw
+            neuron.potential = max(neuron.minimum_potential, neuron.potential + draw)
 
     def fired_neurons(self) -> list[Neuron]:
         """Return the neurons that have fired since the last reset."""

@@ -56,6 +56,14 @@ def build_parser() -> argparse.ArgumentParser:
         "random in a --columns x --rows unit region, just shown",
     )
     parser.add_argument(
+        "--engine",
+        choices=("objects", "arrays"),
+        default=None,
+        help="how the network is run: objects (default; every neuron and connection is an object and signals "
+        "queue wave by wave) or arrays (the same network as numpy vectors and a scipy sparse matrix, much "
+        "faster, needs numpy and scipy). A loaded checkpoint keeps its engine unless this is given.",
+    )
+    parser.add_argument(
         "--reach",
         type=float,
         default=2.0,
@@ -416,6 +424,15 @@ def _run(args: argparse.Namespace) -> int:
                 )
             if not args.no_permute or loaded:
                 print(f"input permutation: bottom-row column i shows coded bit {grid.permutation}", file=sys.stderr)
+            engine = args.engine or (data.get("engine", "objects") if loaded else "objects")
+            if engine == "arrays":
+                try:
+                    from .arrays import ArrayNetwork
+                except ImportError:
+                    print("error: the array engine needs numpy and scipy; install them with: pip install -e '.[arrays]'", file=sys.stderr)
+                    return 2
+                grid = ArrayNetwork(grid)
+                print(f"engine: arrays ({len(grid)} neurons, {len(grid.weight)} connections as vectors)", file=sys.stderr)
             teacher = None
             if args.learn:
                 teacher = Teacher(
@@ -467,10 +484,11 @@ def _run(args: argparse.Namespace) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 2
 
-        if args.omega > 0 and not isinstance(grid, CartesianNodes):
+        mesh = getattr(grid, "mesh", grid)
+        if args.omega > 0 and not isinstance(mesh, CartesianNodes):
             print(
-                f"omega {args.omega:g}: {len(grid.small_world_connections())} small-world "
-                f"connections among {len(grid.connections)}",
+                f"omega {args.omega:g}: {len(mesh.small_world_connections())} small-world "
+                f"connections among {len(mesh.connections)}",
                 file=sys.stderr,
             )
         if teacher:
@@ -550,6 +568,9 @@ def _seed_worker(job: dict) -> dict:
         grid = GridOfNeurons(**job["settings"], seed=seed)
     if job.get("ecc"):
         grid.use_ecc(job["ecc"])
+    if job.get("engine") == "arrays":
+        from .arrays import ArrayNetwork
+        grid = ArrayNetwork(grid)
     teacher = Teacher(grid, seed=seed, **job["teacher"])
     report_every = max(1, epochs // 10)
     started = time.perf_counter()
@@ -619,7 +640,13 @@ def _run_seeds(args: argparse.Namespace) -> int:
             Path(save).parent.mkdir(parents=True, exist_ok=True)
         lattice = {"reach": args.reach} if args.nodes is not None else None
         jobs.append({"seed": seed, "epochs": args.epochs, "settings": settings, "teacher": teacher_kwargs,
-                     "save": save, "lattice": lattice, "ecc": args.ecc})
+                     "save": save, "lattice": lattice, "ecc": args.ecc, "engine": args.engine or "objects"})
+    if args.engine == "arrays":
+        try:
+            import numpy, scipy  # noqa: F401
+        except ImportError:
+            print("error: the array engine needs numpy and scipy; install them with: pip install -e '.[arrays]'", file=sys.stderr)
+            return 2
     workers = max(1, min(args.seeds, (os.cpu_count() or 2) - 1))
     wiring = (f"lattice, reach {args.reach:g}" if args.nodes is not None else f"hex grid, omega {args.omega:g}")
     print(

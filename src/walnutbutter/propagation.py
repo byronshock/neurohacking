@@ -7,7 +7,8 @@ signals that the neurons firing in wave n send are delivered in wave n+1.
 
 A wave is processed in two phases:
 
-1. deliver every signal for that wave, adding weights to target potentials;
+1. deliver every signal for that wave, adding weights to target potentials,
+   then let each touched neuron settle (apply its floor to the wave's total);
 2. fire every neuron whose potential now meets its threshold.
 
 Because all deliveries finish before any firing decision is made, the result
@@ -110,6 +111,8 @@ def propagate(
                 target.touched_stamp = stamp
                 touched.append(target)
         pending = []
+        for neuron in touched:
+            neuron.settle()  # the floor applies to the wave's total, whatever order it arrived in
         _fire_ready(touched, wave, pending)
         waves.append(wave)
 

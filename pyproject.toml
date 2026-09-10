@@ -11,7 +11,8 @@ dependencies = []
 
 [project.optional-dependencies]
 viz = ["pygame>=2.5"]
-dev = ["pytest>=8", "pygame>=2.5"]
+arrays = ["numpy>=2", "scipy>=1.12"]
+dev = ["pytest>=8", "pygame>=2.5", "numpy>=2", "scipy>=1.12"]
 
 # This makes `walnutbutter` a real command after `pip install -e .`
 [project.scripts]

@@ -20,6 +20,10 @@ FORMAT = 1
 
 def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
     """Write the grid's weights and settings to `path`. Returns what was written."""
+    engine = getattr(grid, "engine", "objects")
+    if engine == "arrays":
+        grid.sync_to_mesh()  # the checkpoint is written from the mesh, whichever engine ran it
+        grid = grid.mesh
     lattice = isinstance(grid, CartesianNodes)
     data = {
         "format": FORMAT,
@@ -34,6 +38,7 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         "weight_range": list(grid.weight_range),
         "permutation": grid.permutation,
         "ecc": grid.ecc,
+        "engine": engine,
         "random_weights": grid.weight is None if not lattice else True,
         "epoch": grid.epoch,
         "connections": len(grid.connections),
