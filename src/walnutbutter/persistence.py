@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 from .cartesian import CartesianNodes
+from .columns import HexColumns
 from .grid import GridOfNeurons
 
 FORMAT = 1
@@ -20,11 +21,17 @@ FORMAT = 1
 
 def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
     """Write the grid's weights and settings to `path`. Returns what was written."""
+    engine = getattr(grid, "engine", "objects")
+    if engine == "arrays":
+        grid.sync_to_mesh()  # the checkpoint is written from the mesh, whichever engine ran it
+        grid = grid.mesh
     lattice = isinstance(grid, CartesianNodes)
+    columns = isinstance(grid, HexColumns)
     data = {
         "format": FORMAT,
-        "container": "lattice" if lattice else "grid",
-        "columns": grid.columns,
+        "container": "lattice" if lattice else "columns" if columns else "grid",
+        "layers": getattr(grid, "layers", 1),
+        "across": grid.across,
         "rows": grid.rows,
         "omega": getattr(grid, "omega", 0.0),
         "threshold": grid.threshold,
@@ -33,6 +40,8 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         "weight": getattr(grid, "weight", None),
         "weight_range": list(grid.weight_range),
         "permutation": grid.permutation,
+        "ecc": grid.ecc,
+        "engine": engine,
         "random_weights": grid.weight is None if not lattice else True,
         "epoch": grid.epoch,
         "connections": len(grid.connections),
@@ -64,6 +73,8 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
             "threshold_range": list(teacher.threshold_range),
             "unstick": teacher.unstick,
             "unstick_target": teacher.unstick_target,
+            "critic": teacher.critic,
+            "late": teacher.late,
             "history": teacher.history,
             "total_reward": teacher.total_reward,
             "baseline": teacher.baseline,
@@ -73,6 +84,11 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
     tmp.write_text(json.dumps(data))
     tmp.replace(path)  # atomic: a crash mid-write never leaves a half checkpoint
     return data
+
+
+def across_of(data: dict) -> int:
+    """The count across a checkpoint's mesh: "across", or "columns" in files written before the rename."""
+    return data["across"] if "across" in data else data["columns"]
 
 
 def read_checkpoint(path: str | Path) -> dict:
@@ -90,10 +106,12 @@ def restore(path: str | Path) -> tuple[GridOfNeurons, dict]:
     data = read_checkpoint(path)
     if data.get("container") == "lattice":
         return _restore_lattice(data), data
+    if data.get("container") == "columns":
+        return _restore_columns(data), data
     if data["seed"] is None:
         raise ValueError(f"{path}: the mesh was built without a seed, so its shortcuts cannot be rebuilt")
     grid = GridOfNeurons(
-        columns=data["columns"],
+        across=across_of(data),
         rows=data["rows"],
         weight=None if data["random_weights"] else data["weight"],
         threshold=data["threshold"],
@@ -104,16 +122,45 @@ def restore(path: str | Path) -> tuple[GridOfNeurons, dict]:
         minimum_potential=data.get("minimum_potential", float("-inf")),  # older checkpoints had no floor
     )
     grid.permutation = list(data["permutation"])
+    grid.ecc = _ecc_name(data)
     load_weights(grid, data)
     grid.epoch = data["epoch"]
     return grid, data
 
 
+def _restore_columns(data: dict) -> HexColumns:
+    """Rebuild a HexColumns stack from its seed and settings, then load its weights."""
+    if data["seed"] is None:
+        raise ValueError(f"{path_of(data)}: the columns were built without a seed, so their shortcuts cannot be rebuilt")
+    columns = HexColumns(
+        across=across_of(data),
+        rows=data["rows"],
+        layers=data.get("layers", 1),
+        weight=None if data["random_weights"] else data["weight"],
+        threshold=data["threshold"],
+        seed=data["seed"],
+        omega=data["omega"],
+        permute=False,
+        weight_range=tuple(data.get("weight_range", (-1.0, 1.0))),
+        minimum_potential=data.get("minimum_potential", -1.0),
+    )
+    columns.permutation = list(data["permutation"])
+    columns.ecc = _ecc_name(data)
+    load_weights(columns, data)
+    columns.epoch = data["epoch"]
+    return columns
+
+
+def path_of(data: dict) -> str:
+    return data.get("path", "checkpoint")
+
+
 def load_weights(grid: GridOfNeurons, data: dict) -> None:
     """Copy a checkpoint's weights into `grid`, which must have the same mesh."""
-    for key in ("columns", "rows", "omega", "seed"):
-        if getattr(grid, key) != data[key]:
-            raise ValueError(f"checkpoint {key} is {data[key]!r} but the mesh has {getattr(grid, key)!r}")
+    wanted = {"across": across_of(data), "rows": data["rows"], "omega": data["omega"], "seed": data["seed"]}
+    for key, value in wanted.items():
+        if getattr(grid, key) != value:
+            raise ValueError(f"checkpoint {key} is {value!r} but the mesh has {getattr(grid, key)!r}")
     if len(grid.connections) != data["connections"] or len(data["weights"]) != data["connections"]:
         raise ValueError(
             f"checkpoint has {data['connections']} connections but the mesh has {len(grid.connections)}"
@@ -145,7 +192,7 @@ def resume_teacher(teacher, data: dict) -> None:
 def _restore_lattice(data: dict) -> CartesianNodes:
     """Rebuild a CartesianNodes network from its checkpoint: positions, wiring, weights, thresholds."""
     nodes = CartesianNodes(
-        columns=data["columns"],
+        across=across_of(data),
         rows=data["rows"],
         layout=data.get("layout", "hex"),
         count=0 if data.get("layout") == "random" else None,
@@ -159,6 +206,7 @@ def _restore_lattice(data: dict) -> CartesianNodes:
         for x, y in data["positions"]:
             nodes.add(x, y)
     nodes.permutation = list(data["permutation"])
+    nodes.ecc = _ecc_name(data)
     nodes.receptive_field_sigma = data.get("receptive_field_sigma")
     nodes.reach = data.get("reach")
     neurons = nodes.neurons
@@ -170,3 +218,10 @@ def _restore_lattice(data: dict) -> CartesianNodes:
         neuron.rate = rate
     nodes.epoch = data["epoch"]
     return nodes
+
+
+def _ecc_name(data: dict) -> str | None:
+    value = data.get("ecc")
+    if value is True:
+        return "parity64"  # written when ecc was a flag and meant the (6, 4) code
+    return value or None

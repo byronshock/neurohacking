@@ -1,7 +1,8 @@
 import math
 
-import pygame
 import pytest
+
+pygame = pytest.importorskip("pygame")  # the visualizer is optional: without it these tests skip
 
 from walnutbutter import main
 from walnutbutter.cli import cli_main
@@ -28,10 +29,10 @@ def test_hexagon_corners_lie_on_the_radius():
         assert math.hypot(x - 50, y - 50) == pytest.approx(20)
 
 
-@pytest.mark.parametrize("columns, rows", [(9, 5), (3, 11), (1, 1), (24, 20)])
-def test_layout_keeps_every_whole_hexagon_inside_the_margin(columns, rows):
+@pytest.mark.parametrize("across, rows", [(9, 5), (3, 11), (1, 1), (24, 20)])
+def test_layout_keeps_every_whole_hexagon_inside_the_margin(across, rows):
     width, height, margin = 640, 480, 10
-    grid = GridOfNeurons(columns=columns, rows=rows)
+    grid = GridOfNeurons(across=across, rows=rows)
     radius, ox, oy = viz.layout(grid, width, height, margin)
     assert radius > 0
     xs, ys = [], []
@@ -49,8 +50,8 @@ def test_layout_keeps_every_whole_hexagon_inside_the_margin(columns, rows):
 
 
 def test_default_grid_fills_the_default_window_in_both_directions():
-    radius, _, _ = viz.layout(GridOfNeurons(columns=24, rows=20), 800, 600)
-    grid_w = radius * viz.SQRT3 * 24.5  # 24 columns plus the half-cell shift of odd rows
+    radius, _, _ = viz.layout(GridOfNeurons(across=24, rows=20), 800, 600)
+    grid_w = radius * viz.SQRT3 * 24.5  # 24 across plus the half-cell shift of odd rows
     grid_h = radius * (1.5 * 19 + 2)
     assert grid_w == pytest.approx(752)  # 800 minus two 24px margins
     assert grid_h / (600 - 48) > 0.95
@@ -64,7 +65,7 @@ def test_unfired_is_grey_and_fired_shades_by_wave():
 
 
 def test_draw_grid_paints_fired_and_unfired_neurons(capsys):
-    grid = GridOfNeurons(columns=5, rows=5)
+    grid = GridOfNeurons(across=5, rows=5)
     surface = pygame.Surface((300, 300))
 
     viz.draw_grid(surface, grid)  # nothing fired yet
@@ -80,7 +81,7 @@ def test_draw_grid_paints_fired_and_unfired_neurons(capsys):
 
 
 def test_save_writes_an_image_file(tmp_path, capsys):
-    grid = GridOfNeurons(columns=5, rows=5)
+    grid = GridOfNeurons(across=5, rows=5)
     grid.activate_origin()
     out = tmp_path / "grid.png"
     viz.save(grid, str(out), width=200, height=200)
@@ -90,14 +91,14 @@ def test_save_writes_an_image_file(tmp_path, capsys):
 
 def test_cli_save_option(tmp_path, capsys):
     out = tmp_path / "cli.png"
-    assert cli_main(["--headless", "--columns", "4", "--rows", "4", "--weight", "1", "--save", str(out)]) == 0
+    assert cli_main(["--headless", "--across", "4", "--rows", "4", "--weight", "1", "--save", str(out)]) == 0
     assert out.exists()
     assert "Saved" in capsys.readouterr().err
 
 
 def test_cli_window_option_sets_image_size(tmp_path, capsys):
     out = tmp_path / "wide.png"
-    assert cli_main(["--headless", "--columns", "4", "--rows", "4", "--save", str(out), "--window", "320", "200"]) == 0
+    assert cli_main(["--headless", "--across", "4", "--rows", "4", "--save", str(out), "--window", "320", "200"]) == 0
     assert pygame.image.load(str(out)).get_size() == (320, 200)
 
 
@@ -109,7 +110,7 @@ def key(k):
 
 
 def test_space_runs_a_new_epoch_every_time(capsys):
-    grid = main(columns=8, rows=4, weight=1.0, seed=1)
+    grid = main(across=8, rows=4, weight=1.0, seed=1)
     inputs = {tuple(grid.input_bits)}
     for expected_epoch in (2, 3, 4, 5):
         assert viz.handle_event(key(pygame.K_SPACE), grid) == (True, True)
@@ -120,13 +121,13 @@ def test_space_runs_a_new_epoch_every_time(capsys):
 
 
 def test_r_key_is_no_longer_special(capsys):
-    grid = main(columns=8, rows=4, weight=1.0, seed=1)
+    grid = main(across=8, rows=4, weight=1.0, seed=1)
     assert viz.handle_event(key(pygame.K_r), grid) == (True, False)
     assert grid.fired_neurons()  # nothing was reset
 
 
 def test_quit_keys_and_window_close_stop_the_loop():
-    grid = GridOfNeurons(columns=4, rows=3)
+    grid = GridOfNeurons(across=4, rows=3)
     assert viz.handle_event(key(pygame.K_ESCAPE), grid) == (False, False)
     assert viz.handle_event(key(pygame.K_q), grid) == (False, False)
     assert viz.handle_event(pygame.event.Event(pygame.QUIT), grid) == (False, False)
@@ -135,7 +136,7 @@ def test_quit_keys_and_window_close_stop_the_loop():
 
 
 def test_caption_reports_state(capsys):
-    grid = GridOfNeurons(columns=4, rows=3, weight=1.0, omega=0)
+    grid = GridOfNeurons(across=4, rows=3, weight=1.0, omega=0)
     assert viz.caption(grid).startswith("walnutbutter 4x3: unfired")
     grid.set_input_bits([True, False])
     grid.fire_input()
@@ -145,7 +146,7 @@ def test_caption_reports_state(capsys):
 
 def test_show_opens_on_the_fired_mesh_and_space_advances_epochs(monkeypatch, capsys):
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    grid = main(columns=8, rows=4, weight=1.0, seed=1)
+    grid = main(across=8, rows=4, weight=1.0, seed=1)
     seen = []
     scripted = [[key(pygame.K_SPACE)], [key(pygame.K_SPACE)], [pygame.event.Event(pygame.QUIT)]]
 
@@ -168,13 +169,13 @@ def test_cli_show_opens_on_an_already_fired_mesh(monkeypatch, capsys):
         shown.append((grid.epoch, len(grid.fired_neurons())))
 
     monkeypatch.setattr(viz, "show", fake_show)
-    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--step"]) == 0
+    assert cli_main(["--across", "4", "--rows", "4", "--weight", "1", "--step"]) == 0
     assert shown == [(1, 16)]
     assert "16 of 16 neurons fired" in capsys.readouterr().err
 
 
 def test_space_input_lands_on_the_bottom_row(capsys):
-    grid = main(columns=4, rows=3, weight=1.0, seed=1)
+    grid = main(across=4, rows=3, weight=1.0, seed=1)
     assert viz.handle_event(key(pygame.K_SPACE), grid) == (True, True)
     bottom = max(r for _, r in grid.neurons)
     assert grid.waves[0].fired == grid.input_neurons()
@@ -183,7 +184,7 @@ def test_space_input_lands_on_the_bottom_row(capsys):
 
 
 def test_stimulus_ring_is_drawn_on_input_neurons_before_firing(capsys):
-    grid = GridOfNeurons(columns=4, rows=3, weight=1.0)
+    grid = GridOfNeurons(across=4, rows=3, weight=1.0)
     grid.set_input([True, False, False, False])
     surface = pygame.Surface((300, 300))
     viz.draw_grid(surface, grid)
@@ -198,7 +199,7 @@ def test_stimulus_ring_is_drawn_on_input_neurons_before_firing(capsys):
 
 def test_fast_mode_free_runs_between_monitor_frames(monkeypatch, capsys):
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    grid = main(columns=8, rows=4, weight=1.0, seed=1)
+    grid = main(across=8, rows=4, weight=1.0, seed=1)
     capsys.readouterr()
     frames = []
     scripted = [[], [], [], [pygame.event.Event(pygame.QUIT)]]
@@ -214,11 +215,11 @@ def test_fast_mode_free_runs_between_monitor_frames(monkeypatch, capsys):
     assert frames[1] - frames[0] > 1  # many epochs per frame, not one: the system is not paced by the display
     assert grid.epoch == frames[-1]  # no epochs after the quit
     assert capsys.readouterr().out == ""  # the free run is silent
-    assert Neuron.verbose  # and printing is restored afterwards
+    assert not Neuron.verbose  # and the flag is restored afterwards
 
 
 def test_fast_caption_reports_the_rate(capsys):
-    grid = main(columns=8, rows=4, weight=1.0, seed=1)
+    grid = main(across=8, rows=4, weight=1.0, seed=1)
     text = viz.caption_fast(grid, 1234.5, 30)
     assert "free-running at 1,234 epochs/s, monitored at 30 Hz" in text
     assert "[Space]" not in text
@@ -227,20 +228,20 @@ def test_fast_caption_reports_the_rate(capsys):
 def test_cli_defaults_to_a_free_running_learning_window(monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(viz, "show", lambda grid, w, h, fast=False, teacher=None, **kw: calls.append((fast, teacher is not None, kw.get("report_seconds"))))
-    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1"]) == 0
+    assert cli_main(["--across", "4", "--rows", "4", "--weight", "1"]) == 0
     assert calls == [(True, True, 1.0)]
     calls.clear()
-    assert cli_main(["--columns", "4", "--rows", "4", "--weight", "1", "--step", "--no-learn", "--report", "5"]) == 0
+    assert cli_main(["--across", "4", "--rows", "4", "--weight", "1", "--step", "--no-learn", "--report", "5"]) == 0
     assert calls == [(False, False, 5.0)]
     calls.clear()
-    assert cli_main(["--headless", "--columns", "4", "--rows", "4", "--weight", "1"]) == 0
+    assert cli_main(["--headless", "--across", "4", "--rows", "4", "--weight", "1"]) == 0
     assert calls == []  # headless never opens the window
 
 
 def test_window_teaches_after_each_epoch_and_shows_accuracy(monkeypatch, capsys):
     from walnutbutter.learning import Teacher
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    grid = main(columns=8, rows=4, weight=None, seed=1)
+    grid = main(across=8, rows=4, weight=None, seed=1)
     teacher = Teacher(grid, target="all-off", lr=0.01, seed=1)
     teacher.step()  # learn from the first epoch, as the command line does
     assert viz.handle_event(key(pygame.K_SPACE), grid, teacher) == (True, True)
@@ -263,7 +264,7 @@ def test_format_elapsed():
 def test_free_run_logs_progress_with_accuracy_to_date(monkeypatch, capsys):
     from walnutbutter.learning import Teacher
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    grid = main(columns=8, rows=4, weight=None, seed=1)
+    grid = main(across=8, rows=4, weight=None, seed=1)
     teacher = Teacher(grid, target="all-off", seed=1)
     lines = []
     scripted = [[], [], [pygame.event.Event(pygame.QUIT)]]
@@ -277,7 +278,7 @@ def test_free_run_logs_progress_with_accuracy_to_date(monkeypatch, capsys):
 def test_free_run_calls_on_report_after_each_report(monkeypatch, capsys):
     from walnutbutter.learning import Teacher
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    grid = main(columns=8, rows=4, weight=None, seed=1)
+    grid = main(across=8, rows=4, weight=None, seed=1)
     teacher = Teacher(grid, seed=1)
     reports, saves = [], []
     scripted = [[], [], [pygame.event.Event(pygame.QUIT)]]
@@ -290,7 +291,7 @@ def test_free_run_calls_on_report_after_each_report(monkeypatch, capsys):
 def test_free_run_records_history_before_each_checkpoint(monkeypatch, capsys):
     from walnutbutter.learning import Teacher
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    grid = main(columns=8, rows=4, weight=None, seed=1)
+    grid = main(across=8, rows=4, weight=None, seed=1)
     teacher = Teacher(grid, seed=1)
     seen_at_checkpoint = []
     scripted = [[], [], [pygame.event.Event(pygame.QUIT)]]
@@ -303,7 +304,7 @@ def test_free_run_records_history_before_each_checkpoint(monkeypatch, capsys):
 
 
 def test_discs_do_not_overlap_and_leave_a_gap():
-    grid = GridOfNeurons(columns=6, rows=4, omega=0)
+    grid = GridOfNeurons(across=6, rows=4, omega=0)
     surface = pygame.Surface((400, 300))
     viz.draw_grid(surface, grid)
     radius, ox, oy = viz.layout(grid, 400, 300)

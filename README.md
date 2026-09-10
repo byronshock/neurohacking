@@ -31,8 +31,10 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-The `dev` extra includes pytest and pygame. To install only what the
-visualizer needs, use `pip install -e ".[viz]"` instead.
+The `dev` extra includes pytest, pygame, numpy and scipy. To install only
+what the visualizer needs, use `pip install -e ".[viz]"`; only what the
+array engine needs, `pip install -e ".[arrays]"`. The object engine has no
+dependencies at all.
 
 ## Usage
 
@@ -41,7 +43,9 @@ walnutbutter                 # open the window, free-run, learn, report accuracy
 walnutbutter --headless --epochs 20000 -q   # the same without a window, for a fixed number of epochs
 walnutbutter --step          # window where each Space press runs one epoch
 walnutbutter --no-learn      # just watch the untrained network
-walnutbutter --columns 24 --rows 20       # a bigger mesh than the default 8 x 10: 12 input bits, coded to 24
+walnutbutter --across 24 --rows 20       # a bigger mesh than the default 8 x 10: 12 input bits, coded to 24
+walnutbutter --ecc                        # 4 data bits -> Hamming (7, 4) -> 14 across, on a 14 x 10 field
+walnutbutter --ecc parity64               # the (6, 4) detect-only code on 12 across instead
 walnutbutter --input 1011                 # choose the 4 input bits
 walnutbutter --no-permute                 # coded bits in order on the bottom row
 walnutbutter --seed 42       # repeat a particular random mesh
@@ -54,8 +58,8 @@ python -m walnutbutter       # same thing without the installed command
 ```
 
 **Input.** The network's input is its bottom row. Each epoch draws 4 random
-bits (half the columns), complement-codes them by appending their negations,
-and scrambles the 8 coded bits with a random permutation of the columns that
+bits (half the count across), complement-codes them by appending their negations,
+and scrambles the 8 coded bits with a random permutation of the places along the row that
 is drawn once per run and never changes. The bottom-row neurons whose bit is
 1 are forced to fire in wave 0, so exactly half of the row fires every time.
 The raw bits, the coded bits and the permuted row are printed, and the
@@ -90,7 +94,7 @@ walnutbutter --report 30                  # a progress line every 30 s instead o
 walnutbutter --save-weights run1.json     # choose the checkpoint file (default: runs/<date>-<time>-seed<seed>.json)
 walnutbutter --load-weights run1.json     # continue from a checkpoint (same mesh, seed and permutation)
 walnutbutter --step                       # one epoch per Space press
-walnutbutter --columns 24 --rows 20 --headless --save grid.png
+walnutbutter --across 24 --rows 20 --headless --save grid.png
 ```
 
 By default the window is a monitor on a free-running system. The network
@@ -118,7 +122,7 @@ writes whatever state the mesh is in when the window closes.
 ```python
 from walnutbutter import main, visualizer
 
-grid = main(columns=8, rows=10)
+grid = main(across=8, rows=10)
 visualizer.save(grid, "grid.png")   # write a picture, no window needed
 visualizer.show(grid, 1200, 800)    # or open a window; Space runs a new epoch, Esc quits
 ```
@@ -129,7 +133,7 @@ visualizer.show(grid, 1200, 800)    # or open a window; Space runs a new epoch, 
 from walnutbutter import main
 from walnutbutter.monitor import run_epoch
 
-grid = main(columns=8, rows=10)  # builds the grid and runs the first epoch on its bottom row
+grid = main(across=8, rows=10)  # builds the grid and runs the first epoch on its bottom row
 run_epoch(grid)                 # reset every neuron and present a new random input
 print(len(grid.fired_neurons()))
 grid.reset()                   # allow every neuron to fire again
@@ -137,7 +141,7 @@ grid.reset()                   # allow every neuron to fire again
 
 ## How the grid works
 
-Neurons sit on a `columns x rows` rectangle of pointy-top hexagons. Every
+Neurons sit on a `across x rows` rectangle of pointy-top hexagons. Every
 odd row is shifted half a cell to the right ("odd-r" layout), which is what
 lets whole hexagons fill a rectangle; the left and right edges are therefore
 slightly jagged rather than cut. Internally each cell is addressed by axial
@@ -145,7 +149,7 @@ coordinates `(q, r)`, centred so the middle cell is `(0, 0)`. Each neuron is
 connected to its six neighbours and to the twelve neighbours of those
 neighbours, so an interior neuron has 18 outgoing and 18 incoming local
 connections (fewer on the edges), and a signal covers two cells per wave.
-`grid.get_neuron_at(column, row)`
+`grid.get_neuron_at(place, row)`
 looks a cell up by its position from the top-left corner; `grid.get_neuron(q, r)`
 by axial coordinates.
 
@@ -166,6 +170,30 @@ second-ring ones `"local2"`), listed by
 `grid.small_world_connections()`, and get weights like any other connection.
 The same `seed` reproduces both the shortcuts and the weights.
 
+**Error-correcting code.** With `--ecc` (or `network.use_ecc()`), the raw
+input is 4 data bits, encoded before complement coding. The default code is
+Hamming's (7, 4): three parity bits, each covering three of the four data
+bits, giving every bit position a distinct syndrome, so any single flipped
+bit is located and corrected (`Code.correct`, `Code.decode`); complement
+coding then fills a 14-place bottom row, so the usual field is 14 across
+by 10 rows. `--ecc parity64` is the (6, 4) code instead: two parity bits,
+minimum distance 2, single errors detected but not corrected, 12 across.
+`--ecc` sets the count across to fit unless told otherwise. The epoch line reads
+`data 1011 -> hamming74 1011010 -> coded ... -> bottom row ...`, and
+checkpoints remember which code is on.
+
+**Critics.** The reward is a single number per epoch, and `--critic` chooses
+how it is judged. `row` (the default) is the fraction of output neurons that
+match the target, neuron by neuron. `decoded` reads the output row the way a
+receiver would: it undoes the target's arrangement and the permutation,
+resolves each complement pair to a bit (a pair whose neurons contradict each
+other is unreadable), runs the word through the code's error correction, and
+rewards the fraction of data bits that come out right; `decoded-exact` gives
+1 only if all of them do. Under Hamming a single wrong output neuron costs
+nothing with the decoding critics, because the code absorbs it: the network
+is judged on the message, not the pixels, and the code's redundancy stands in
+for a population of outputs.
+
 **Firing rule.** Every neuron has a `threshold` (default 0.25) and a running
 `potential`. When a neuron fires, each of its active outgoing connections adds
 its weight to the target's potential. A neuron fires the moment its potential
@@ -174,20 +202,44 @@ Negative weights lower the potential, so they act as inhibitory connections.
 The input neurons are fired directly as an external stimulus, which ignores
 the threshold.
 
-**Propagation** is not recursive. `propagation.propagate` keeps a first-in,
-first-out queue of `Signal` messages, each tagged with a wave number. In each
-wave it first delivers every queued signal, then fires every neuron that has
-reached its threshold, queueing their outgoing signals for the next wave.
+**Propagation** is not recursive. `propagation.propagate` keeps a queue of
+waves: one list of connections whose signals are in flight, filled by the
+neurons that fired in the previous wave. In each wave it first delivers every
+queued signal, then fires every neuron that has reached its threshold,
+queueing their outgoing connections for the next wave. Every neuron and
+connection stays an object that receives and fires for itself; the queue
+adds no allocation per signal, which nearly doubled the epoch rate.
 Delivering everything before deciding who fires means the outcome never
 depends on the order neurons are stored in, and there is no recursion limit
-on grid size. Each neuron records `fired_in_wave`, the grid keeps the list of
-`Wave` objects from its last epoch in `grid.waves`, and the visualizer shades
-fired neurons by wave.
+on grid size. The floor on a potential (`--minimum-potential`, default -1)
+is applied once a wave's signals are all in, so it acts on the wave's total
+and the order of arrival cannot matter there either. Each neuron records
+`fired_in_wave`, the grid keeps the list of `Wave` objects from its last
+epoch in `grid.waves`, and the visualizer shades fired neurons by wave.
+
+**Two engines, one network.** The object engine above is the one you watch:
+every neuron and connection is an object that receives and fires for
+itself. `--engine arrays` runs the same network as numpy vectors and a scipy
+sparse matrix (`arrays.py`): the neurons that fired in a wave, as a 0/1
+vector, times the weight matrix gives every neuron its summed input in one
+product, and the learning rule becomes a handful of elementwise operations
+over the edges. Both engines build the mesh the same way, share connection
+ids, read and write the same checkpoints (a loaded checkpoint keeps the
+engine that wrote it unless `--engine` says otherwise), draw the same
+exploration noise from the same seed, and are run side by side by
+`tests/test_arrays.py`, which checks that they fire the same neurons wave
+by wave and move the same weights. They can differ only in the order
+floating-point additions happen, so on the rare epoch where a potential sits
+within rounding of a threshold the two may decide differently and diverge
+from there, like two seeds. On this machine the array engine runs an 8x10
+mesh about twice as fast as the object engine, a 24x20 mesh five times as
+fast and a 48x40 mesh seven times as fast; the object engine has no
+dependencies and prints per neuron with `-v`, which the array engine does not.
 
 ```python
 from walnutbutter.propagation import propagate
 
-grid = GridOfNeurons(columns=8, rows=10)
+grid = GridOfNeurons(across=8, rows=10)
 origin, corner = grid.get_origin_neuron(), grid.get_neuron_at(0, 0)
 waves = grid.propagate(fire=[origin, corner])          # two stimuli in one epoch
 waves = grid.propagate(inputs={origin: 0.6, corner: 0.6})  # external input amounts instead
@@ -213,7 +265,7 @@ than one fired neighbour. From Python, `GridOfNeurons(weight=None, seed=...)`
 or `grid.randomize_weights(low, high, seed)` do the same.
 
 ```python
-grid = main(columns=8, rows=10)
+grid = main(across=8, rows=10)
 conn = grid.get_connection(1)   # the first registered connection
 conn.weight = 0.5
 conn.is_active = False          # cut that direction only
@@ -226,30 +278,80 @@ grid.connection_between(right, origin)   # right -> origin, a different connecti
 
 Walnut butter is the substance the neurons are made of. It is spread over
 the plane in **smears**: each is a shape (`Rect` or `Disc`, in unit
-distances) with a **density** in neurons per unit area, and placing the
-butter packs neurons on a hexagonal lattice inside each shape at the spacing
-that density implies. Thick butter means many neurons close together, thin
-butter a few far apart, bare plane none. **Butter that is spread near other
-butter connects:** a neuron projects to every neuron within its `reach`
-(default 2 units), so density alone decides how richly a region is wired,
-and a gap in the spread is a gap in the network. Nothing about the topology
-is random; only the weights are drawn from the seed.
+distances) with a **density**, and placing the butter packs neurons on a
+hexagonal lattice inside each shape at the spacing that density implies.
+Thick butter means many neurons close together, thin butter a few far
+apart, bare plane none. **Butter that is spread near other butter
+connects:** a neuron projects to every neuron within its `reach` (default 2
+units), so density alone decides how richly a region is wired, and a gap in
+the spread is a gap in the network. Nothing about the topology is random;
+only the weights are drawn from the seed.
+
+Butterspace has one scale, the **unit distance**. Density is measured in
+neurons per unit cell, the hexagon a neuron owns in a lattice at unit
+spacing, so unit density (`UNIT_DENSITY`, which is 1) means neighbours one
+unit apart, and a density of 4 packs four neurons into each cell, half a
+unit apart. Every distance in the substance is compared with that one unit
+whatever the local density: a reach of 2 is two units everywhere, so butter
+four times as thick has four times the neurons within reach.
 
 The default network is one rectangular smear at unit density, which is the
 8 x 10 hexagonal lattice at unit spacing: `CartesianNodes()` builds it
 directly, and with a reach of 2 each interior neuron has eighteen neighbours,
 six at distance 1, six at √3 and six at 2, the same as the hex grid's two
 rings. Its bottom row is the input and its top row the output, addressed
-like the grid with `get_neuron_at(column, row)`. A free spread has no rows,
+like the grid with `get_neuron_at(place, row)`. A free spread has no rows,
 so input and output zones for it are still to be defined.
+
+## Hexagonal columns
+
+The prespread butter. The plane is tiled with hexagonal cells, one neuron
+per cell, and every cell is extruded into a **column** of `--layers`
+neurons, so the network lives in R3. A cell is one unit across: neurons sit
+half a unit apart in the plane, and the layers of a column an eighth of a
+unit apart, a quarter of the cell spacing, so a column reads as a compact
+stack of neurons much closer to each other than to their neighbours. The
+connection rule is
+
+    same position:                       never
+    horizontal distance <= 1 + epsilon:  always
+    otherwise:                           small-world shortcuts only (--omega)
+
+measured in the plane only, so the guarantee holds at any height: a neuron
+is wired to every neuron of its own column and of the eighteen columns
+around it, in every layer, and everything further away is reached only by
+shortcuts drawn as on the grid. The bottom layer is the **input butter**
+and the top layer the **output butter**: a word is `across x rows` bits per
+layer, complement-coded and permuted as before, and the targets and critics
+read the top layer the same way they read the top row.
+
+With one layer the two surfaces coincide and the stack keeps the grid's
+convention (bottom row in, top row out). It is then the hex grid itself:
+the same neurons in the same order, the same eighteen guaranteed
+connections per neuron with the same ids, and with the same seed the same
+shortcuts, weights and permutation, so `--layers 1` reproduces a plain run
+epoch for epoch. That was the test that the rule changed nothing but the
+ruler.
+
+```bash
+walnutbutter --layers 3                    # 8 x 10 cells, three deep: 80 input neurons, 80 outputs
+walnutbutter --layers 3 --engine arrays    # the array engine wraps a stack like any mesh
+walnutbutter --layers 2 -a 7 -r 2 --ecc    # a code needs 14 input neurons, however they are arranged
+```
+
+Fan-out grows with depth: an interior neuron of an L-layer stack has 19L - 1
+guaranteed connections, so the array engine earns its keep quickly.
+
+The free spread of variable density below is kept in the library but no
+longer sets any default; the columns are where input and output live now.
 
 ```python
 from walnutbutter.butter import Disc, Rect, WalnutButter, UNIT_DENSITY
 from walnutbutter.cartesian import CartesianNodes
 
 recipe = (WalnutButter()
-          .spread(Rect(-4, -4, 4, 4), UNIT_DENSITY)        # a lattice-density slab
-          .spread(Disc(0, 0, 1.5), 3 * UNIT_DENSITY))      # a dense knot in the middle
+          .spread(Rect(-4, -4, 4, 4), UNIT_DENSITY)        # a lattice-density slab (density 1)
+          .spread(Disc(0, 0, 1.5), 3.0))                   # a dense knot in the middle
 nodes = CartesianNodes.from_butter(recipe, seed=1)
 nodes.connect_within(reach=2.0, weight=None)               # near butter connects
 ```
@@ -284,9 +386,31 @@ is the REINFORCE / node-perturbation estimator, a three-factor rule:
 presynaptic activity x postsynaptic perturbation x global reward.
 `--eligibility hebb` swaps the perturbation for a plain Hebbian term (+1 if
 the target fired, -1 if not) with no noise. Forced inputs are never adjusted
-and weights stay within [-1, 1]. `Teacher` wraps all this; use
+and weights stay within [-1, 1].
+
+A signal that arrives after its target has already fired is dropped on
+delivery and changes nothing in the epoch, yet by default its connection is
+still reinforced: pre fired, post fired, and the global reward says whether
+the coincidence was good. That is a local Hebbian term riding on the
+perturbation estimator, strictly a bias with respect to the reward
+gradient, but it is the biological shape of the rule (local eligibility,
+global signal) and it learns faster: on the 8x10 reversed task at 100k
+epochs, every seed tried did better with it (last tenth 0.76-0.91 against
+0.61-0.75). `--late` chooses what a late signal earns: `count` (the
+default), `ignore` (nothing: only the signals that landed, the
+node-perturbation estimator proper) or `depress` (the opposite update, the
+shape of spike-timing-dependent plasticity, where a presynaptic spike after
+the postsynaptic one weakens the synapse). `Teacher` wraps all this; use
 `teacher.epoch()` instead of `run_epoch(grid)` so the exploration noise is
 injected.
+
+**Output.** Runs are silent apart from the progress reports and the final
+summary: printing is far slower than learning, and a headless run of millions
+of epochs would otherwise spend its time writing to the terminal. `-v` /
+`--verbose` prints a line for every epoch's input and every neuron that
+fires, for short inspections. From Python the same switch is
+`Neuron.verbose`, off by default; `run_epoch(grid)` prints its one input
+line unless told `verbose=False`.
 
 **Saving what it learned.** Every run writes a JSON checkpoint at every
 progress report and on exit, by default to `runs/<date>-<time>-seed<seed>.json`
@@ -338,7 +462,7 @@ perturbed.
 
 ```python
 from walnutbutter.learning import Teacher
-grid = main(columns=24, rows=20, seed=1)
+grid = main(across=24, rows=20, seed=1)
 teacher = Teacher(grid, target="reversed", lr=0.03, sigma=0.1, seed=1)
 for _ in range(10000):
     teacher.epoch(verbose=False)   # exploration noise, new input, propagate, reinforce
@@ -357,9 +481,13 @@ pytest
 src/walnutbutter/
   connection.py Connection: ID, source and target neurons, weight, is_active, kind
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
-  propagation.py Signal queue and wave-by-wave propagate()
+  propagation.py wave-by-wave propagate(): one list of connections in flight per wave
+  arrays.py    ArrayNetwork: the same network as numpy vectors and a scipy sparse matrix (--engine arrays)
+  exploration.py the Box-Muller noise draws both engines share
+  learning_rules.py constants shared by the learning code of both engines
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
-  butter.py    WalnutButter: smears of neuron density on the plane; shapes Rect and Disc
+  columns.py   HexColumns: the cells extruded into layers in R3 (--layers); bottom layer in, top layer out
+  butter.py    WalnutButter: smears of neuron density (per unit cell) on the plane; shapes Rect and Disc
   cartesian.py CartesianNodes: the lattice, a scatter, or a placed recipe; reach wiring
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input

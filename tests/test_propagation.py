@@ -24,13 +24,15 @@ def test_forced_fire_travels_down_a_chain_one_wave_per_hop(capsys):
 def test_waves_record_the_signals_delivered(capsys):
     a, b = chain(2)
     waves = propagate(fire=[a])
-    (signal,) = waves[1].delivered
+    assert waves[1].delivered == [a.connection_to(b)]  # the queue is the connections themselves
+    (signal,) = waves[1].signals()
     assert isinstance(signal, Signal)
     assert signal.connection is a.connection_to(b)
     assert signal.target is b and signal.amount == 1.0 and signal.wave == 1
 
 
-def test_two_way_pair_fires_once_each(capsys):
+def test_two_way_pair_fires_once_each(capsys, monkeypatch):
+    monkeypatch.setattr(Neuron, "verbose", True)
     a, b = Neuron("a"), Neuron("b")
     a.connect(b)
     b.connect(a)
@@ -74,7 +76,8 @@ def test_external_inputs_fire_only_when_they_reach_threshold(capsys):
     assert waves[0].fired == [a]
 
 
-def test_forced_neuron_ignores_threshold_and_is_not_fired_twice(capsys):
+def test_forced_neuron_ignores_threshold_and_is_not_fired_twice(capsys, monkeypatch):
+    monkeypatch.setattr(Neuron, "verbose", True)
     a = Neuron("a", threshold=100.0)
     propagate(fire=[a, a])
     assert a.fired_in_wave == 0
@@ -93,7 +96,7 @@ def test_empty_stimulus_gives_one_empty_wave():
 
 
 def test_grid_waves_match_hex_distance_from_origin(capsys):
-    grid = GridOfNeurons(columns=9, rows=7, omega=0)  # shortcuts would let waves jump
+    grid = GridOfNeurons(across=9, rows=7, omega=0)  # shortcuts would let waves jump
     waves = grid.activate_origin()
     assert grid.waves is waves
     assert waves[0].fired == [grid.get_origin_neuron()]
@@ -104,7 +107,7 @@ def test_grid_waves_match_hex_distance_from_origin(capsys):
 
 
 def test_grid_accepts_multiple_stimuli_in_one_epoch(capsys):
-    grid = GridOfNeurons(columns=9, rows=7)
+    grid = GridOfNeurons(across=9, rows=7)
     origin, corner = grid.get_origin_neuron(), grid.get_neuron_at(0, 3)  # centre and left edge
     waves = grid.propagate(fire=[origin, corner])
     assert waves[0].fired == [origin, corner]
@@ -113,14 +116,14 @@ def test_grid_accepts_multiple_stimuli_in_one_epoch(capsys):
 
 
 def test_grid_reset_clears_waves(capsys):
-    grid = GridOfNeurons(columns=3, rows=3)
+    grid = GridOfNeurons(across=3, rows=3)
     grid.activate_origin()
     grid.reset()
     assert grid.waves == [] and grid.fired_neurons() == []
 
 
 def test_large_grid_has_no_recursion_limit(capsys):
-    grid = GridOfNeurons(columns=80, rows=60, omega=0)  # 4800 neurons; recursion died near 1000
+    grid = GridOfNeurons(across=80, rows=60, omega=0)  # 4800 neurons; recursion died near 1000
     grid.activate_origin()
     assert len(grid.fired_neurons()) == len(grid.neurons)
     assert len(grid.waves) > 20  # two cells per wave now; recursion would still have died

@@ -12,13 +12,15 @@ from datetime import datetime
 from multiprocessing import Pool
 from pathlib import Path
 
+from .butter import CELL_AREA
 from .cartesian import CartesianNodes
+from .columns import HexColumns
 from .grid import GridOfNeurons
-from .inputs import parse_bits
-from .learning import ELIGIBILITIES, TARGETS, Teacher
+from .inputs import CODES, DEFAULT_CODE, parse_bits
+from .learning import CRITICS, ELIGIBILITIES, LATE, TARGETS, Teacher
 from .monitor import main, run_epoch
 from .neuron import Neuron
-from .persistence import checkpoint, restore, resume_teacher
+from .persistence import across_of, checkpoint, restore, resume_teacher
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,11 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "-c",
-        "--columns",
+        "-a",
+        "--across",
         type=int,
-        default=8,
-        help="number of hexagons across (default: 8)",
+        default=None,
+        help="number of hexagons across (default: 8, or twice the code length with --ecc)",
     )
     parser.add_argument(
         "-r",
@@ -50,9 +52,28 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const=0,
         default=None,
-        help="Cartesian neurons instead of the hex grid: a --columns x --rows hexagonal lattice at unit spacing, "
+        help="Cartesian neurons instead of the hex grid: a --across x --rows hexagonal lattice at unit spacing, "
         "wired by distance (--receptive-field-sigma) and learning like the grid; or with N, that many neurons at "
-        "random in a --columns x --rows unit region, just shown",
+        "random in a --across x --rows unit region, just shown",
+    )
+    parser.add_argument(
+        "--layers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="hexagonal columns in R3: the --across x --rows field of cells extruded into N layers, one neuron "
+        "per cell per layer, half a unit apart in the plane and an eighth between layers. Butter within one unit "
+        "horizontally always connects, at any "
+        "height; the rest is --omega shortcuts. The bottom layer is the input and the top layer the output "
+        "(with one layer: bottom row in, top row out, and the stack is the hex grid exactly)",
+    )
+    parser.add_argument(
+        "--engine",
+        choices=("objects", "arrays"),
+        default=None,
+        help="how the network is run: objects (default; every neuron and connection is an object and signals "
+        "queue wave by wave) or arrays (the same network as numpy vectors and a scipy sparse matrix, much "
+        "faster, needs numpy and scipy). A loaded checkpoint keeps its engine unless this is given.",
     )
     parser.add_argument(
         "--reach",
@@ -89,7 +110,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--input",
         metavar="BITS",
         default=None,
-        help="raw input bits, one per half column, e.g. 1011 for 8 columns (default: random)",
+        help="raw input bits, one per half place, e.g. 1011 for 8 across (default: random)",
+    )
+    parser.add_argument(
+        "--ecc",
+        nargs="?",
+        const=DEFAULT_CODE,
+        default=None,
+        choices=sorted(CODES),
+        metavar="CODE",
+        help="encode the 4 data bits with an error-correcting code before complement coding: hamming74 "
+        "(the default with bare --ecc; corrects single errors; 14 across) or parity64 (detects only; "
+        "12 across). Sets --across to fit unless given.",
     )
     parser.add_argument(
         "--no-permute",
@@ -156,6 +188,23 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(TARGETS),
         default="reversed",
         help="what the top row should show, derived from the input row (default: reversed)",
+    )
+    parser.add_argument(
+        "--late",
+        choices=LATE,
+        default="count",
+        help="what a signal arriving after its target has already fired earns: count (default: the same update "
+        "as one that landed, a local Hebbian term under the global reward), ignore (nothing: the "
+        "node-perturbation estimator proper) or depress (the opposite update, the shape of spike-timing-dependent "
+        "plasticity)",
+    )
+    parser.add_argument(
+        "--critic",
+        choices=sorted(CRITICS),
+        default="row",
+        help="how the reward is judged: row (fraction of output neurons matching the target), decoded "
+        "(read the row as a word, error-correct it, fraction of data bits right), or decoded-exact "
+        "(all data bits right or nothing). Default: row",
     )
     parser.add_argument(
         "--lr",
@@ -228,10 +277,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --headless: how many epochs to run, printing accuracy along the way (default: 1)",
     )
     parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="print a line for every epoch's input and for every neuron that fires (slow; off by default)",
+    )
+    parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
-        help="do not print a line for every neuron that fires (free-running is always quiet)",
+        help="accepted for compatibility: runs are quiet unless --verbose",
     )
     parser.add_argument(
         "--save-weights",
@@ -260,11 +315,13 @@ def build_parser() -> argparse.ArgumentParser:
 def cli_main(argv: list[str] | None = None) -> int:
     """Run the CLI. Returns a process exit code (0 = success)."""
     args = build_parser().parse_args(argv)
-    args.show = not args.headless
+    if args.across is None:
+        args.across = 2 * CODES[args.ecc].code_bits if args.ecc else 8
+    args.show = not args.headless and args.seeds is None  # a seed batch is headless by definition
     args.fast = args.show and not args.step
     args.learn = not args.no_learn
     was_verbose = Neuron.verbose
-    Neuron.verbose = not (args.quiet or args.fast)
+    Neuron.verbose = bool(args.verbose) and not args.fast and not args.quiet
     try:
         return _run(args)
     finally:
@@ -299,16 +356,17 @@ def _run(args: argparse.Namespace) -> int:
                 return 2
             grid_from_file, data = loaded
             args.seed = data["seed"]
-            args.columns, args.rows, args.omega = data["columns"], data["rows"], data["omega"]
+            args.across, args.rows, args.omega = across_of(data), data["rows"], data["omega"]
             if data.get("container") == "lattice":
                 args.nodes = 0
+            args.ecc = _ecc_from_checkpoint(data)
             args.threshold = data["threshold"]
             args.minimum_potential = data.get("minimum_potential", -1.0)
             args.weight = None if data["random_weights"] else data["weight"]
             low, high = data.get("weight_range", (-1.0, 1.0))
             args.positive_weights, args.epsilon = low > 0, low
             print(
-                f"loaded {args.load_weights}: {args.columns}x{args.rows}, seed {args.seed}, "
+                f"loaded {args.load_weights}: {args.across}x{args.rows}, seed {args.seed}, "
                 f"{data['epoch']:,} epochs so far",
                 file=sys.stderr,
             )
@@ -320,7 +378,7 @@ def _run(args: argparse.Namespace) -> int:
             Path(args.save_weights).parent.mkdir(parents=True, exist_ok=True)
             print(f"checkpointing to {args.save_weights}", file=sys.stderr)
         settings = dict(
-            columns=args.columns,
+            across=args.across,
             rows=args.rows,
             weight=args.weight,
             threshold=args.threshold,
@@ -345,18 +403,37 @@ def _run(args: argparse.Namespace) -> int:
             input_bits = parse_bits(args.input) if args.input is not None else None
             if loaded:
                 grid, data = loaded
+            elif args.layers is not None:
+                if args.layers < 1:
+                    print(f"error: --layers needs at least 1, got {args.layers}", file=sys.stderr)
+                    return 2
+                grid = HexColumns(layers=args.layers, **settings)
+                print(f"{grid!r}: input {len(grid.input_row())} neurons, output {len(grid.output_row())}", file=sys.stderr)
             elif args.nodes is not None:
                 if args.reach < 0:
                     print(f"error: --reach must not be negative, got {args.reach}", file=sys.stderr)
                     return 2
                 grid = CartesianNodes(
-                    columns=args.columns, rows=args.rows, seed=seed, threshold=args.threshold,
+                    across=args.across, rows=args.rows, seed=seed, threshold=args.threshold,
                     minimum_potential=args.minimum_potential, permute=not args.no_permute,
                     weight_range=settings["weight_range"],
                 )
                 grid.connect_within(reach=args.reach, weight=args.weight)
             else:
                 grid = GridOfNeurons(**settings)
+            if args.ecc:
+                try:
+                    grid.use_ecc(args.ecc)
+                except ValueError as exc:
+                    print(f"error: {exc}", file=sys.stderr)
+                    return 2
+                code = CODES[args.ecc]
+                print(
+                    f"input: {code.data_bits} data bits -> {code.name} ({code.code_bits}, {code.data_bits}) code, "
+                    f"{'corrects' if code.corrects_single_errors else 'detects'} single errors -> complement code "
+                    f"-> {2 * code.code_bits} across",
+                    file=sys.stderr,
+                )
             if isinstance(grid, CartesianNodes):
                 print(
                     f"{grid!r}, wired: {len(grid.connections)} one-way connections, every pair within "
@@ -364,7 +441,16 @@ def _run(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
             if not args.no_permute or loaded:
-                print(f"input permutation: bottom-row column i shows coded bit {grid.permutation}", file=sys.stderr)
+                print(f"input permutation: place i along the bottom row shows coded bit {grid.permutation}", file=sys.stderr)
+            engine = args.engine or (data.get("engine", "objects") if loaded else "objects")
+            if engine == "arrays":
+                try:
+                    from .arrays import ArrayNetwork
+                except ImportError:
+                    print("error: the array engine needs numpy and scipy; install them with: pip install -e '.[arrays]'", file=sys.stderr)
+                    return 2
+                grid = ArrayNetwork(grid)
+                print(f"engine: arrays ({len(grid)} neurons, {len(grid.weight)} connections as vectors)", file=sys.stderr)
             teacher = None
             if args.learn:
                 teacher = Teacher(
@@ -380,12 +466,14 @@ def _run(args: argparse.Namespace) -> int:
                     carry_over=args.carry_over,
                     unstick=args.unstick,
                     unstick_target=args.unstick_target,
+                    critic=args.critic,
+                    late=args.late,
                 )
                 if loaded:
                     resume_teacher(teacher, data)
-                teacher.epoch(input_bits)  # the first epoch, with exploration, like every other
+                teacher.epoch(input_bits, verbose=Neuron.verbose)  # the first epoch, with exploration, like every other
             else:
-                run_epoch(grid, input_bits, discharge=not args.carry_over)
+                run_epoch(grid, input_bits, verbose=Neuron.verbose, discharge=not args.carry_over)
 
             def save_checkpoint():
                 if args.save_weights:
@@ -402,22 +490,23 @@ def _run(args: argparse.Namespace) -> int:
                 started = time.perf_counter()
                 for epoch in range(2, args.epochs + 1):
                     if teacher:
-                        teacher.epoch()  # --quiet drops the per-neuron lines, not the per-epoch line
+                        teacher.epoch(verbose=Neuron.verbose)  # silent unless --verbose: printing is slower than learning
                         if epoch % report_every == 0 or epoch == args.epochs:
                             elapsed = time.perf_counter() - started
                             teacher.record(elapsed, (epoch - 1) / elapsed if elapsed else None)
                             print(f"epoch {epoch}: {teacher.status()}", file=sys.stderr)
                             save_checkpoint()
                     else:
-                        run_epoch(grid, discharge=not args.carry_over)
+                        run_epoch(grid, verbose=Neuron.verbose, discharge=not args.carry_over)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
 
-        if args.omega > 0 and not isinstance(grid, CartesianNodes):
+        mesh = getattr(grid, "mesh", grid)
+        if args.omega > 0 and not isinstance(mesh, CartesianNodes):
             print(
-                f"omega {args.omega:g}: {len(grid.small_world_connections())} small-world "
-                f"connections among {len(grid.connections)}",
+                f"omega {args.omega:g}: {len(mesh.small_world_connections())} small-world "
+                f"connections among {len(mesh.connections)}",
                 file=sys.stderr,
             )
         if teacher:
@@ -445,7 +534,7 @@ def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
         print(f"error: --nodes cannot be negative, got {args.nodes}", file=sys.stderr)
         return 2
     seed = args.seed if args.seed is not None else random.randrange(2**31)
-    common = dict(columns=args.columns, rows=args.rows, seed=seed, threshold=args.threshold,
+    common = dict(across=args.across, rows=args.rows, seed=seed, threshold=args.threshold,
                   minimum_potential=args.minimum_potential)
     print(f"seed {seed}", file=sys.stderr)
     if args.nodes == 0:
@@ -453,7 +542,7 @@ def _run_nodes(args: argparse.Namespace, width: int, height: int) -> int:
         print(f"{nodes!r}", file=sys.stderr)
     else:
         nodes = CartesianNodes(layout="random", count=args.nodes, **common)
-        print(f"{nodes!r} ({len(nodes) / (nodes.width * nodes.height):.2f} per unit area)", file=sys.stderr)
+        print(f"{nodes!r} ({len(nodes) * CELL_AREA / (nodes.width * nodes.height):.2f} per unit cell)", file=sys.stderr)
     if args.reach < 0:
         print(f"error: --reach must not be negative, got {args.reach}", file=sys.stderr)
         return 2
@@ -488,13 +577,20 @@ def _seed_worker(job: dict) -> dict:
     if job.get("lattice"):
         settings = job["settings"]
         grid = CartesianNodes(
-            columns=settings["columns"], rows=settings["rows"], seed=seed, threshold=settings["threshold"],
+            across=settings["across"], rows=settings["rows"], seed=seed, threshold=settings["threshold"],
             minimum_potential=settings["minimum_potential"], permute=settings["permute"],
             weight_range=settings["weight_range"],
         )
         grid.connect_within(reach=job["lattice"]["reach"], weight=settings["weight"])
-    else:
+    elif not job.get("layers"):
         grid = GridOfNeurons(**job["settings"], seed=seed)
+    if job.get("layers"):
+        grid = HexColumns(layers=job["layers"], **job["settings"], seed=seed)
+    if job.get("ecc"):
+        grid.use_ecc(job["ecc"])
+    if job.get("engine") == "arrays":
+        from .arrays import ArrayNetwork
+        grid = ArrayNetwork(grid)
     teacher = Teacher(grid, seed=seed, **job["teacher"])
     report_every = max(1, epochs // 10)
     started = time.perf_counter()
@@ -528,7 +624,7 @@ def _run_seeds(args: argparse.Namespace) -> int:
     seeds = list(range(base, base + args.seeds))
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     settings = dict(
-        columns=args.columns,
+        across=args.across,
         rows=args.rows,
         weight=args.weight,
         threshold=args.threshold,
@@ -548,6 +644,8 @@ def _run_seeds(args: argparse.Namespace) -> int:
         carry_over=args.carry_over,
         unstick=args.unstick,
         unstick_target=args.unstick_target,
+        critic=args.critic,
+        late=args.late,
     )
     if args.no_learn:
         print("error: --seeds is for comparing learning runs; drop --no-learn", file=sys.stderr)
@@ -562,12 +660,21 @@ def _run_seeds(args: argparse.Namespace) -> int:
             Path(save).parent.mkdir(parents=True, exist_ok=True)
         lattice = {"reach": args.reach} if args.nodes is not None else None
         jobs.append({"seed": seed, "epochs": args.epochs, "settings": settings, "teacher": teacher_kwargs,
-                     "save": save, "lattice": lattice})
+                     "save": save, "lattice": lattice, "ecc": args.ecc, "engine": args.engine or "objects",
+                     "layers": args.layers})
+    if args.engine == "arrays":
+        try:
+            import numpy, scipy  # noqa: F401
+        except ImportError:
+            print("error: the array engine needs numpy and scipy; install them with: pip install -e '.[arrays]'", file=sys.stderr)
+            return 2
     workers = max(1, min(args.seeds, (os.cpu_count() or 2) - 1))
-    wiring = (f"lattice, reach {args.reach:g}" if args.nodes is not None else f"hex grid, omega {args.omega:g}")
+    wiring = (f"lattice, reach {args.reach:g}" if args.nodes is not None
+              else f"{args.layers} layers of hexagonal columns, omega {args.omega:g}" if args.layers
+              else f"hex grid, omega {args.omega:g}")
     print(
         f"{args.seeds} seeds from {base} on {workers} cores, {args.epochs:,} epochs each, "
-        f"{args.columns}x{args.rows} {wiring}",
+        f"{args.across}x{args.rows} {wiring}",
         file=sys.stderr,
     )
     started = time.perf_counter()
@@ -584,3 +691,11 @@ def _run_seeds(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return 0
+
+
+def _ecc_from_checkpoint(data: dict) -> str | None:
+    """The code a checkpoint used: a name, or the (6, 4) code for files written when ecc was a flag."""
+    value = data.get("ecc")
+    if value is True:
+        return "parity64"
+    return value or None

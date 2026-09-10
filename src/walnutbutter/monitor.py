@@ -37,20 +37,17 @@ def run_epoch(
     else:
         grid.set_input_bits(bits)
     if noise > 0:
-        rng = rng or random
-        for neuron in grid.all_neurons():
-            neuron.noise = rng.gauss(0.0, noise)
-            neuron.potential = max(neuron.minimum_potential, neuron.potential + neuron.noise)
+        grid.perturb(noise, rng or random)
     if verbose:
-        print(
-            f"epoch {grid.epoch + 1}: input {format_bits(grid.input_bits)} -> coded "
-            f"{format_bits(grid.input_coded)} -> bottom row {format_bits(grid.input_pattern)}"
-        )
+        stages = f"input {format_bits(grid.input_bits)}"
+        if grid.code:
+            stages = f"data {format_bits(grid.input_data)} -> {grid.code.name} {format_bits(grid.input_bits)}"
+        print(f"epoch {grid.epoch + 1}: {stages} -> coded {format_bits(grid.input_coded)} -> bottom row {format_bits(grid.input_pattern)}")
     return grid.fire_input()
 
 
 def main(
-    columns: int = 8,
+    across: int = 8,
     rows: int = 10,
     weight: float | None = None,
     threshold: float = 0.25,
@@ -61,19 +58,19 @@ def main(
     weight_range: tuple[float, float] = (-1.0, 1.0),
     minimum_potential: float = -1.0,
 ) -> GridOfNeurons:
-    """Build a columns x rows grid, run one epoch on its bottom row, and return it.
+    """Build a across x rows grid, run one epoch on its bottom row, and return it.
 
     `weight` is given to every connection, or None (the default) for random
     weights uniform between -1 and 1. `threshold` is given to every neuron and
     `omega` is the proportion of small-world shortcuts. `input_bits` are the raw
-    input bits (columns / 2 of them); if None they are drawn at random. They
+    input bits (across / 2 of them); if None they are drawn at random. They
     are complement-coded and, with `permute`, scrambled by a permutation fixed
     for the run. `seed` makes the shortcuts, the weights, the permutation and
     the random inputs all reproducible. Returning the grid lets callers (and
     tests) inspect which neurons fired.
     """
     grid = GridOfNeurons(
-        columns=columns,
+        across=across,
         rows=rows,
         weight=weight,
         threshold=threshold,

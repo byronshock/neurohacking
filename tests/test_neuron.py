@@ -20,7 +20,8 @@ def test_connection_to_targets_and_sources():
     assert a.targets() == [b] and b.sources() == [a]
 
 
-def test_fire_marks_wave_and_returns_active_outgoing_connections(capsys):
+def test_fire_marks_wave_and_returns_active_outgoing_connections(capsys, monkeypatch):
+    monkeypatch.setattr(Neuron, "verbose", True)
     a, b, c = Neuron("a"), Neuron("b"), Neuron("c")
     to_b = a.connect(b)
     a.connect(c).is_active = False
@@ -131,15 +132,31 @@ def test_inhibition_cannot_push_potential_below_the_minimum():
     a = Neuron("a", minimum_potential=-1.0)
     a.receive(-0.7)
     a.receive(-0.7)
-    assert a.potential == -1.0
+    assert a.potential == pytest.approx(-1.4)  # within a wave the signals just add up
+    a.settle()
+    assert a.potential == -1.0  # the floor applies to the wave's total
     a.receive(0.5)
+    a.settle()
     assert a.potential == pytest.approx(-0.5)  # recovery starts from the floor, not from -1.4
+
+
+def test_the_floor_does_not_depend_on_the_order_signals_arrive_in():
+    def total(*amounts):
+        n = Neuron("n", minimum_potential=-1.0)
+        for amount in amounts:
+            n.receive(amount)
+        n.settle()
+        return n.potential
+
+    assert total(-2.0, 0.5) == total(0.5, -2.0) == -1.0
+    assert total(-0.7, -0.7, 0.5) == pytest.approx(-0.9)
 
 
 def test_minimum_potential_defaults_to_minus_one_and_is_configurable():
     assert Neuron("a").minimum_potential == -1.0
     b = Neuron("b", minimum_potential=-0.2)
     b.receive(-5.0)
+    b.settle()
     assert b.potential == -0.2
 
 

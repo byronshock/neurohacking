@@ -15,7 +15,7 @@ def quiet(monkeypatch):
 
 
 def test_checkpoint_round_trips_weights_settings_and_permutation(tmp_path):
-    grid = main(columns=8, rows=6, seed=5, omega=0.1)
+    grid = main(across=8, rows=6, seed=5, omega=0.1)
     teacher = Teacher(grid, seed=5)
     for _ in range(20):
         teacher.epoch(verbose=False)
@@ -24,7 +24,7 @@ def test_checkpoint_round_trips_weights_settings_and_permutation(tmp_path):
 
     restored, data = restore(path)
     assert data == written
-    assert (restored.columns, restored.rows, restored.omega, restored.seed) == (8, 6, 0.1, 5)
+    assert (restored.across, restored.rows, restored.omega, restored.seed) == (8, 6, 0.1, 5)
     assert restored.permutation == grid.permutation
     assert restored.epoch == grid.epoch == 21
     assert [c.weight for c in restored.connections.values()] == [c.weight for c in grid.connections.values()]
@@ -35,7 +35,7 @@ def test_checkpoint_round_trips_weights_settings_and_permutation(tmp_path):
 
 
 def test_checkpoint_is_written_atomically_and_is_json(tmp_path):
-    grid = GridOfNeurons(columns=4, rows=3, seed=1)
+    grid = GridOfNeurons(across=4, rows=3, seed=1)
     path = tmp_path / "w.json"
     checkpoint(grid, path)
     assert json.loads(path.read_text())["connections"] == len(grid.connections)
@@ -43,7 +43,7 @@ def test_checkpoint_is_written_atomically_and_is_json(tmp_path):
 
 
 def test_resume_teacher_continues_the_statistics(tmp_path):
-    grid = main(columns=8, rows=4, seed=2)
+    grid = main(across=8, rows=4, seed=2)
     teacher = Teacher(grid, target="all-off", seed=2)
     for _ in range(30):
         teacher.epoch(verbose=False)
@@ -60,21 +60,21 @@ def test_resume_teacher_continues_the_statistics(tmp_path):
 
 
 def test_load_weights_rejects_a_different_mesh(tmp_path):
-    grid = GridOfNeurons(columns=6, rows=4, seed=1)
+    grid = GridOfNeurons(across=6, rows=4, seed=1)
     path = tmp_path / "w.json"
     checkpoint(grid, path)
     data = read_checkpoint(path)
     with pytest.raises(ValueError):
-        load_weights(GridOfNeurons(columns=6, rows=5, seed=1), data)
+        load_weights(GridOfNeurons(across=6, rows=5, seed=1), data)
     with pytest.raises(ValueError, match="seed"):
-        load_weights(GridOfNeurons(columns=6, rows=4, seed=2), data)  # same size, different shortcuts
+        load_weights(GridOfNeurons(across=6, rows=4, seed=2), data)  # same size, different shortcuts
     forged = dict(data, seed=2)  # even with the seed faked, the recorded shortcuts give it away
     with pytest.raises(ValueError, match="shortcuts"):
-        load_weights(GridOfNeurons(columns=6, rows=4, seed=2), forged)
+        load_weights(GridOfNeurons(across=6, rows=4, seed=2), forged)
 
 
 def test_restore_refuses_an_unseeded_mesh(tmp_path):
-    grid = GridOfNeurons(columns=4, rows=3)  # no seed: shortcuts cannot be rebuilt
+    grid = GridOfNeurons(across=4, rows=3)  # no seed: shortcuts cannot be rebuilt
     path = tmp_path / "w.json"
     checkpoint(grid, path)
     with pytest.raises(ValueError, match="seed"):
@@ -89,7 +89,7 @@ def test_unknown_format_is_rejected(tmp_path):
 
 
 def test_checkpoint_without_teacher_has_no_learning_record(tmp_path):
-    grid = GridOfNeurons(columns=4, rows=3, seed=1)
+    grid = GridOfNeurons(across=4, rows=3, seed=1)
     path = tmp_path / "w.json"
     checkpoint(grid, path)
     data = read_checkpoint(path)
@@ -100,7 +100,7 @@ def test_checkpoint_without_teacher_has_no_learning_record(tmp_path):
 
 
 def test_checkpoint_keeps_the_weight_range(tmp_path):
-    grid = GridOfNeurons(columns=6, rows=4, weight=None, seed=1, weight_range=(0.01, 1.0))
+    grid = GridOfNeurons(across=6, rows=4, weight=None, seed=1, weight_range=(0.01, 1.0))
     path = tmp_path / "w.json"
     checkpoint(grid, path)
     restored, data = restore(path)
@@ -110,7 +110,7 @@ def test_checkpoint_keeps_the_weight_range(tmp_path):
 
 
 def test_checkpoint_keeps_per_neuron_thresholds_and_rates(tmp_path):
-    grid = main(columns=8, rows=4, seed=1)
+    grid = main(across=8, rows=4, seed=1)
     teacher = Teacher(grid, seed=1, homeostasis=0.05)
     for _ in range(200):
         teacher.epoch(verbose=False)
@@ -125,7 +125,7 @@ def test_checkpoint_keeps_per_neuron_thresholds_and_rates(tmp_path):
 
 
 def test_checkpoint_keeps_the_minimum_potential(tmp_path):
-    grid = GridOfNeurons(columns=6, rows=4, seed=1, minimum_potential=-0.4)
+    grid = GridOfNeurons(across=6, rows=4, seed=1, minimum_potential=-0.4)
     path = tmp_path / "w.json"
     checkpoint(grid, path)
     restored, data = restore(path)
@@ -134,7 +134,7 @@ def test_checkpoint_keeps_the_minimum_potential(tmp_path):
 
 
 def test_checkpoint_without_a_floor_restores_without_one(tmp_path):
-    grid = GridOfNeurons(columns=6, rows=4, seed=1)
+    grid = GridOfNeurons(across=6, rows=4, seed=1)
     path = tmp_path / "w.json"
     data = checkpoint(grid, path)
     del data["minimum_potential"]
@@ -144,7 +144,7 @@ def test_checkpoint_without_a_floor_restores_without_one(tmp_path):
 
 
 def test_checkpoint_records_the_unstick_settings(tmp_path):
-    grid = main(columns=8, rows=4, seed=1)
+    grid = main(across=8, rows=4, seed=1)
     teacher = Teacher(grid, seed=1, unstick=0.005, unstick_target=0.45)
     teacher.step()
     path = tmp_path / "w.json"
@@ -153,7 +153,7 @@ def test_checkpoint_records_the_unstick_settings(tmp_path):
 
 
 def test_checkpoint_carries_the_accuracy_history_and_resume_continues_it(tmp_path):
-    grid = main(columns=8, rows=4, seed=1)
+    grid = main(across=8, rows=4, seed=1)
     teacher = Teacher(grid, seed=1)
     teacher.step()
     for i in range(3):
