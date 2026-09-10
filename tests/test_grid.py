@@ -6,17 +6,17 @@ from walnutbutter.neuron import Neuron
 
 @pytest.fixture
 def grid():
-    return GridOfNeurons(columns=7, rows=5, omega=0)  # a plain mesh, no shortcuts
+    return GridOfNeurons(across=7, rows=5, omega=0)  # a plain mesh, no shortcuts
 
 
 def test_grid_has_one_neuron_per_cell(grid):
     assert len(grid.neurons) == 7 * 5
-    assert (grid.columns, grid.rows) == (7, 5)
+    assert (grid.across, grid.rows) == (7, 5)
 
 
-@pytest.mark.parametrize("column, row", [(0, 0), (3, -2), (-4, 5), (2, 7), (-1, -1)])
-def test_offset_and_axial_convert_both_ways(column, row):
-    assert axial_to_offset(*offset_to_axial(column, row)) == (column, row)
+@pytest.mark.parametrize("place, row", [(0, 0), (3, -2), (-4, 5), (2, 7), (-1, -1)])
+def test_offset_and_axial_convert_both_ways(place, row):
+    assert axial_to_offset(*offset_to_axial(place, row)) == (place, row)
 
 
 def test_odd_rows_shift_half_a_cell_right():
@@ -35,8 +35,8 @@ def test_origin_is_the_centre_cell(grid):
 
 def test_every_cell_is_reachable_by_column_and_row(grid):
     for row in range(5):
-        for column in range(7):
-            assert grid.get_neuron_at(column, row) is not None
+        for place in range(7):
+            assert grid.get_neuron_at(place, row) is not None
     assert grid.get_neuron_at(7, 0) is None
     assert grid.get_neuron_at(0, 5) is None
     assert grid.get_neuron(50, 50) is None
@@ -52,7 +52,7 @@ def test_every_cell_connects_to_everything_within_two_steps(grid):
 
 
 def test_first_and_second_ring_kinds():
-    grid = GridOfNeurons(columns=5, rows=5, omega=0)
+    grid = GridOfNeurons(across=5, rows=5, omega=0)
     origin = grid.get_origin_neuron()
     for c in origin.outgoing:
         distance = hex_distance(origin.position, c.target.position)
@@ -68,15 +68,15 @@ def test_neuron_names_and_positions_match_coordinates(grid):
 
 
 def test_single_cell_grid_has_no_connections():
-    grid = GridOfNeurons(columns=1, rows=1, omega=0)
+    grid = GridOfNeurons(across=1, rows=1, omega=0)
     assert len(grid.neurons) == 1 and grid.connections == {}
     assert grid.get_origin_neuron() is not None
 
 
-@pytest.mark.parametrize("columns, rows", [(0, 3), (3, 0), (-1, 2)])
-def test_grid_rejects_empty_dimensions(columns, rows):
+@pytest.mark.parametrize("across, rows", [(0, 3), (3, 0), (-1, 2)])
+def test_grid_rejects_empty_dimensions(across, rows):
     with pytest.raises(ValueError):
-        GridOfNeurons(columns=columns, rows=rows)
+        GridOfNeurons(across=across, rows=rows)
 
 
 # --- connections --------------------------------------------------------------
@@ -160,20 +160,20 @@ def test_deactivating_incoming_origin_connections_does_not_stop_it_sending(grid,
 
 
 def test_grid_applies_weight_and_threshold_to_everything():
-    grid = GridOfNeurons(columns=3, rows=3, weight=0.3, threshold=0.6)
+    grid = GridOfNeurons(across=3, rows=3, weight=0.3, threshold=0.6)
     assert all(c.weight == 0.3 for c in grid.connections.values())
     assert all(n.threshold == 0.6 for n in grid.neurons.values())
 
 
 def test_weights_below_threshold_stop_the_signal_at_the_origin(capsys):
-    grid = GridOfNeurons(columns=7, rows=5, weight=0.5, threshold=1.0)
+    grid = GridOfNeurons(across=7, rows=5, weight=0.5, threshold=1.0)
     grid.activate_origin()
     assert grid.fired_neurons() == [grid.get_origin_neuron()]
     assert grid.get_neuron(1, 0).potential == 0.5  # it heard the origin, but only once
 
 
 def test_low_threshold_lets_the_signal_cross_the_grid(capsys):
-    grid = GridOfNeurons(columns=7, rows=5, weight=0.5, threshold=0.5)
+    grid = GridOfNeurons(across=7, rows=5, weight=0.5, threshold=0.5)
     grid.activate_origin()
     assert len(grid.fired_neurons()) == len(grid.neurons)
 
@@ -196,16 +196,16 @@ def test_random_weights_differ_per_direction(grid):
 
 
 def test_same_seed_gives_same_weights_and_different_seeds_differ():
-    a = GridOfNeurons(columns=5, rows=5, weight=None, seed=7)
-    b = GridOfNeurons(columns=5, rows=5, weight=None, seed=7)
-    c = GridOfNeurons(columns=5, rows=5, weight=None, seed=8)
+    a = GridOfNeurons(across=5, rows=5, weight=None, seed=7)
+    b = GridOfNeurons(across=5, rows=5, weight=None, seed=7)
+    c = GridOfNeurons(across=5, rows=5, weight=None, seed=8)
     weights = lambda g: [x.weight for x in g.connections.values()]
     assert weights(a) == weights(b)
     assert weights(a) != weights(c)
 
 
 def test_weight_none_in_constructor_randomizes():
-    grid = GridOfNeurons(columns=5, rows=5, weight=None, seed=3)
+    grid = GridOfNeurons(across=5, rows=5, weight=None, seed=3)
     assert grid.weight is None and grid.seed == 3
     assert len({c.weight for c in grid.connections.values()}) > 1
 
@@ -221,7 +221,7 @@ def test_fixed_weight_is_still_the_library_default(grid):
 
 
 def test_default_threshold_is_a_quarter():
-    grid = GridOfNeurons(columns=3, rows=3, omega=0)
+    grid = GridOfNeurons(across=3, rows=3, omega=0)
     assert grid.threshold == 0.25
     assert all(n.threshold == 0.25 for n in grid.neurons.values())
 
@@ -243,16 +243,16 @@ def test_omega_zero_adds_no_shortcuts(grid):
 
 @pytest.mark.parametrize("omega", [0.1, 0.25, 0.5])
 def test_omega_is_the_fraction_of_all_connections(omega):
-    grid = GridOfNeurons(columns=10, rows=8, omega=omega, seed=1)
+    grid = GridOfNeurons(across=10, rows=8, omega=omega, seed=1)
     local = len(grid.local_connections())
     shortcuts = len(grid.small_world_connections())
-    assert local == len(GridOfNeurons(columns=10, rows=8, omega=0).connections)  # the mesh itself is untouched
+    assert local == len(GridOfNeurons(across=10, rows=8, omega=0).connections)  # the mesh itself is untouched
     assert shortcuts == round(omega * local / (1 - omega))
     assert shortcuts / len(grid.connections) == pytest.approx(omega, abs=0.01)
 
 
 def test_shortcuts_go_to_non_neighbours_without_duplicates():
-    grid = GridOfNeurons(columns=10, rows=8, omega=0.3, seed=2)
+    grid = GridOfNeurons(across=10, rows=8, omega=0.3, seed=2)
     seen = set()
     for c in grid.small_world_connections():
         assert c.kind == "small_world"
@@ -264,30 +264,30 @@ def test_shortcuts_go_to_non_neighbours_without_duplicates():
 
 
 def test_shortcut_ids_continue_after_local_ones():
-    grid = GridOfNeurons(columns=6, rows=6, omega=0.2, seed=3)
+    grid = GridOfNeurons(across=6, rows=6, omega=0.2, seed=3)
     local_ids = [c.id for c in grid.local_connections()]
     shortcut_ids = [c.id for c in grid.small_world_connections()]
     assert shortcut_ids == list(range(max(local_ids) + 1, len(grid.connections) + 1))
 
 
 def test_same_seed_gives_same_shortcuts_and_weights():
-    a = GridOfNeurons(columns=8, rows=6, weight=None, omega=0.2, seed=9)
-    b = GridOfNeurons(columns=8, rows=6, weight=None, omega=0.2, seed=9)
+    a = GridOfNeurons(across=8, rows=6, weight=None, omega=0.2, seed=9)
+    b = GridOfNeurons(across=8, rows=6, weight=None, omega=0.2, seed=9)
     pairs = lambda g: [(c.source.name, c.target.name, c.weight) for c in g.connections.values()]
     assert pairs(a) == pairs(b)
-    assert pairs(a) != pairs(GridOfNeurons(columns=8, rows=6, weight=None, omega=0.2, seed=10))
+    assert pairs(a) != pairs(GridOfNeurons(across=8, rows=6, weight=None, omega=0.2, seed=10))
 
 
 def test_shortcuts_get_random_weights_too():
-    grid = GridOfNeurons(columns=8, rows=6, weight=None, omega=0.2, seed=4)
+    grid = GridOfNeurons(across=8, rows=6, weight=None, omega=0.2, seed=4)
     weights = {c.weight for c in grid.small_world_connections()}
     assert len(weights) > 1 and all(-1 <= w <= 1 for w in weights)
 
 
 def test_shortcuts_never_lengthen_the_epoch_and_usually_shorten_it(capsys):
-    plain = GridOfNeurons(columns=24, rows=20, weight=1.0, omega=0)
+    plain = GridOfNeurons(across=24, rows=20, weight=1.0, omega=0)
     plain.activate_origin()
-    shortcut = GridOfNeurons(columns=24, rows=20, weight=1.0, omega=0.1, seed=5)
+    shortcut = GridOfNeurons(across=24, rows=20, weight=1.0, omega=0.1, seed=5)
     shortcut.activate_origin()
     assert len(shortcut.fired_neurons()) == len(shortcut.neurons)
     assert len(shortcut.waves) < len(plain.waves)
@@ -296,24 +296,24 @@ def test_shortcuts_never_lengthen_the_epoch_and_usually_shorten_it(capsys):
 @pytest.mark.parametrize("omega", [-0.1, 1.0, 1.5])
 def test_grid_rejects_omega_out_of_range(omega):
     with pytest.raises(ValueError):
-        GridOfNeurons(columns=3, rows=3, omega=omega)
+        GridOfNeurons(across=3, rows=3, omega=omega)
 
 
-@pytest.mark.parametrize("columns, rows", [(1, 1), (2, 2), (3, 3)])
-def test_tiny_meshes_with_omega_do_not_hang(columns, rows):
-    grid = GridOfNeurons(columns=columns, rows=rows, omega=0.5, seed=6)
+@pytest.mark.parametrize("across, rows", [(1, 1), (2, 2), (3, 3)])
+def test_tiny_meshes_with_omega_do_not_hang(across, rows):
+    grid = GridOfNeurons(across=across, rows=rows, omega=0.5, seed=6)
     for c in grid.small_world_connections():
         assert not hex_neighbours(c.source, c.target)
 
 
 def test_repr_marks_small_world_connections():
-    grid = GridOfNeurons(columns=6, rows=6, omega=0.2, seed=7)
+    grid = GridOfNeurons(across=6, rows=6, omega=0.2, seed=7)
     assert repr(grid.small_world_connections()[0]).endswith(", small_world)")
     assert repr(grid.local_connections()[0]).endswith(", active)")
 
 
 def test_default_omega_is_one_fifth():
-    grid = GridOfNeurons(columns=10, rows=8, seed=1)
+    grid = GridOfNeurons(across=10, rows=8, seed=1)
     assert grid.omega == 0.2
     assert len(grid.small_world_connections()) == round(0.2 * len(grid.local_connections()) / 0.8)
 
@@ -324,7 +324,7 @@ def test_default_omega_is_one_fifth():
 
 def test_input_row_is_the_bottom_row_left_to_right(grid):
     row = grid.input_row()
-    assert len(row) == grid.columns
+    assert len(row) == grid.across
     lowest_r = max(r for _, r in grid.neurons)
     assert all(n.position[1] == lowest_r for n in row)
     assert [n.position[0] for n in row] == sorted(n.position[0] for n in row)
@@ -366,23 +366,23 @@ def test_fire_input_without_a_pattern_raises(grid):
 
 
 def test_permutation_is_drawn_once_from_the_seed():
-    a = GridOfNeurons(columns=8, rows=4, seed=3)
-    b = GridOfNeurons(columns=8, rows=4, seed=3)
-    c = GridOfNeurons(columns=8, rows=4, seed=4)
+    a = GridOfNeurons(across=8, rows=4, seed=3)
+    b = GridOfNeurons(across=8, rows=4, seed=3)
+    c = GridOfNeurons(across=8, rows=4, seed=4)
     assert sorted(a.permutation) == list(range(8))
     assert a.permutation == b.permutation
     assert a.permutation != c.permutation
 
 
 def test_permute_false_keeps_the_coded_bits_in_order():
-    grid = GridOfNeurons(columns=8, rows=4, seed=3, permute=False)
+    grid = GridOfNeurons(across=8, rows=4, seed=3, permute=False)
     assert grid.permutation == list(range(8))
     grid.set_input_bits([True, False, False, True])
     assert grid.input_pattern == grid.input_coded == [True, False, False, True, False, True, True, False]
 
 
 def test_set_input_bits_applies_the_permutation():
-    grid = GridOfNeurons(columns=8, rows=4, seed=3)
+    grid = GridOfNeurons(across=8, rows=4, seed=3)
     grid.set_input_bits([True, False, False, True])
     coded = [True, False, False, True, False, True, True, False]
     assert grid.input_coded == coded
@@ -395,13 +395,13 @@ def test_set_input_bits_applies_the_permutation():
 
 
 def test_default_weight_range_is_signed():
-    grid = GridOfNeurons(columns=6, rows=4, weight=None, seed=1)
+    grid = GridOfNeurons(across=6, rows=4, weight=None, seed=1)
     assert grid.weight_range == (-1.0, 1.0)
     assert min(c.weight for c in grid.connections.values()) < 0
 
 
 def test_positive_weight_range_draws_and_clips_within_it():
-    grid = GridOfNeurons(columns=6, rows=4, weight=None, seed=1, weight_range=(0.001, 1.0))
+    grid = GridOfNeurons(across=6, rows=4, weight=None, seed=1, weight_range=(0.001, 1.0))
     weights = [c.weight for c in grid.connections.values()]
     assert all(0.001 <= w <= 1.0 for w in weights) and min(weights) < 0.1 and max(weights) > 0.9
     assert grid.clip_weight(-0.5) == 0.001
@@ -410,19 +410,19 @@ def test_positive_weight_range_draws_and_clips_within_it():
 
 
 def test_randomize_weights_explicit_bounds_still_win():
-    grid = GridOfNeurons(columns=6, rows=4, seed=1, weight_range=(0.001, 1.0))
+    grid = GridOfNeurons(across=6, rows=4, seed=1, weight_range=(0.001, 1.0))
     grid.randomize_weights(low=-0.5, high=-0.4)
     assert all(-0.5 <= c.weight <= -0.4 for c in grid.connections.values())
 
 
 def test_invalid_weight_range_is_rejected():
     with pytest.raises(ValueError):
-        GridOfNeurons(columns=4, rows=3, weight_range=(1.0, 0.0))
+        GridOfNeurons(across=4, rows=3, weight_range=(1.0, 0.0))
 
 
 
 def test_grid_gives_every_neuron_its_minimum_potential():
-    grid = GridOfNeurons(columns=4, rows=3, minimum_potential=-0.3)
+    grid = GridOfNeurons(across=4, rows=3, minimum_potential=-0.3)
     assert grid.minimum_potential == -0.3
     assert all(n.minimum_potential == -0.3 for n in grid.neurons.values())
-    assert all(n.minimum_potential == -1.0 for n in GridOfNeurons(columns=4, rows=3).neurons.values())
+    assert all(n.minimum_potential == -1.0 for n in GridOfNeurons(across=4, rows=3).neurons.values())

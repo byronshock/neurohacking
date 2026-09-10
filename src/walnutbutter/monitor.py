@@ -47,7 +47,7 @@ def run_epoch(
 
 
 def main(
-    columns: int = 8,
+    across: int = 8,
     rows: int = 10,
     weight: float | None = None,
     threshold: float = 0.25,
@@ -58,19 +58,19 @@ def main(
     weight_range: tuple[float, float] = (-1.0, 1.0),
     minimum_potential: float = -1.0,
 ) -> GridOfNeurons:
-    """Build a columns x rows grid, run one epoch on its bottom row, and return it.
+    """Build a across x rows grid, run one epoch on its bottom row, and return it.
 
     `weight` is given to every connection, or None (the default) for random
     weights uniform between -1 and 1. `threshold` is given to every neuron and
     `omega` is the proportion of small-world shortcuts. `input_bits` are the raw
-    input bits (columns / 2 of them); if None they are drawn at random. They
+    input bits (across / 2 of them); if None they are drawn at random. They
     are complement-coded and, with `permute`, scrambled by a permutation fixed
     for the run. `seed` makes the shortcuts, the weights, the permutation and
     the random inputs all reproducible. Returning the grid lets callers (and
     tests) inspect which neurons fired.
     """
     grid = GridOfNeurons(
-        columns=columns,
+        across=across,
         rows=rows,
         weight=weight,
         threshold=threshold,

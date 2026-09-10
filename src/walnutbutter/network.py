@@ -1,6 +1,6 @@
 """What every container of neurons shares: an input row, an output row, epochs and propagation.
 
-A network has `columns` x `rows` addressable positions (`get_neuron_at(column,
+A network has `across` x `rows` addressable positions (`get_neuron_at(place,
 row)`, row 0 at the top), a bottom row that receives the complement-coded and
 permuted input pattern, a top row that is read as the output, and the epoch
 machinery: reset, present an input, propagate wave by wave. The hex mesh and
@@ -18,22 +18,22 @@ from .propagation import Wave, propagate
 
 
 class Network:
-    """Mixin with the input/epoch machinery. Subclasses provide columns, rows, get_neuron_at, neurons and _rng."""
+    """Mixin with the input/epoch machinery. Subclasses provide across (the count per row), rows, get_neuron_at, neurons and _rng."""
 
-    columns: int
+    across: int
     rows: int
     weight_range: tuple[float, float]
 
-    def _init_network(self, columns: int, weight_range: tuple[float, float]) -> None:
+    def _init_network(self, across: int, weight_range: tuple[float, float]) -> None:
         low, high = weight_range
         if not low < high:
             raise ValueError(f"weight range must run from low to high, got {weight_range}")
         self.weight_range = (float(low), float(high))
         self.waves: list[Wave] = []  # Waves of the most recent propagation
-        self.input_pattern: list[bool] | None = None  # one bit per column, applied to the bottom row
+        self.input_pattern: list[bool] | None = None  # one bit per place along the bottom row
         self.input_bits: list[bool] | None = None  # the raw bits before complement coding
         self.input_coded: list[bool] | None = None  # the complement-coded bits before permutation
-        self.permutation: list[int] = list(range(columns))  # bottom-row column i shows coded bit permutation[i]
+        self.permutation: list[int] = list(range(across))  # place i along the bottom row shows coded bit permutation[i]
         self.epoch = 0  # how many inputs have been presented
         self.ecc: str | None = None  # name of the error-correcting code applied before complement coding, if any
         self.input_data: list[bool] | None = None  # the raw data bits when ecc is on
@@ -42,7 +42,7 @@ class Network:
         """Every neuron, in a stable order. Subclasses override if `neurons` is not a list."""
         return self.neurons
 
-    def get_neuron_at(self, column: int, row: int) -> Neuron | None:  # pragma: no cover - overridden
+    def get_neuron_at(self, place: int, row: int) -> Neuron | None:  # pragma: no cover - overridden
         raise NotImplementedError
 
     def clip_weight(self, weight: float) -> float:
@@ -54,13 +54,21 @@ class Network:
 
     def input_row(self) -> list[Neuron]:
         """The bottom row of neurons, left to right: the network's input."""
-        return [self.get_neuron_at(column, self.rows - 1) for column in range(self.columns)]
+        return [self.get_neuron_at(place, self.rows - 1) for place in range(self.across)]
+
+    def output_row(self) -> list[Neuron]:
+        """The top row of neurons, left to right: the network's output."""
+        return [self.get_neuron_at(place, 0) for place in range(self.across)]
+
+    def input_width(self) -> int:
+        """How many neurons the input covers: one bit of the (coded, permuted) pattern each."""
+        return self.across
 
     def set_input(self, pattern) -> None:
-        """Store the input pattern: one boolean per column of the bottom row."""
+        """Store the input pattern: one boolean per place along the bottom row."""
         pattern = [bool(b) for b in pattern]
-        if len(pattern) != self.columns:
-            raise ValueError(f"input pattern has {len(pattern)} bits but the network has {self.columns} columns")
+        if len(pattern) != self.input_width():
+            raise ValueError(f"input pattern has {len(pattern)} bits but the input covers {self.input_width()} neurons")
         self.input_pattern = pattern
 
     @property
@@ -68,14 +76,15 @@ class Network:
         return CODES[self.ecc] if self.ecc else None
 
     def raw_bit_count(self) -> int:
-        """How many raw bits an input takes: half the columns, or the code's data bits when a code is on."""
-        if self.columns % 2:
-            raise ValueError(f"complement coding needs an even number of columns, got {self.columns}")
+        """How many raw bits an input takes: half the count across, or the code's data bits when a code is on."""
+        width = self.input_width()
+        if width % 2:
+            raise ValueError(f"complement coding needs an even number of input neurons, got {width}")
         if self.code:
-            if self.columns // 2 != self.code.code_bits:
-                raise ValueError(f"{self.code.name} needs {2 * self.code.code_bits} columns, got {self.columns}")
+            if width // 2 != self.code.code_bits:
+                raise ValueError(f"{self.code.name} needs {2 * self.code.code_bits} input neurons, got {width}")
             return self.code.data_bits
-        return self.columns // 2
+        return width // 2
 
     def use_ecc(self, code: str | bool | None = DEFAULT_CODE) -> None:
         """Encode raw data bits with a named code before complement coding (True means the default, Hamming (7, 4))."""
@@ -86,19 +95,19 @@ class Network:
         if code is not None and code not in CODES:
             raise ValueError(f"unknown code {code!r}; choose from {', '.join(CODES)}")
         self.ecc = code
-        self.raw_bit_count()  # validates the column count
+        self.raw_bit_count()  # validates the count across
 
     def set_input_bits(self, bits) -> None:
         """Set the input from raw bits: (ecc-encode them,) complement-code them, then permute.
 
-        Without ecc the raw bits number half the columns. With ecc they are the 4
-        data bits, encoded to 6 before complement coding fills 12 columns.
-        Bottom-row column i receives coded bit permutation[i].
+        Without ecc the raw bits number half the count across. With ecc they are
+        the 4 data bits, encoded to 7 before complement coding fills 14 places.
+        Place i along the bottom row receives coded bit permutation[i].
         """
         bits = [bool(b) for b in bits]
         wanted = self.raw_bit_count()
         if len(bits) != wanted:
-            raise ValueError(f"expected {wanted} input bits for {self.columns} columns, got {len(bits)}")
+            raise ValueError(f"expected {wanted} input bits for {self.input_width()} input neurons, got {len(bits)}")
         word = self.code.encode(bits) if self.code else bits
         coded = complement_code(word)
         self.set_input([coded[i] for i in self.permutation])

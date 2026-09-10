@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 from .cartesian import CartesianNodes
+from .columns import HexColumns
 from .grid import GridOfNeurons
 
 FORMAT = 1
@@ -25,10 +26,12 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         grid.sync_to_mesh()  # the checkpoint is written from the mesh, whichever engine ran it
         grid = grid.mesh
     lattice = isinstance(grid, CartesianNodes)
+    columns = isinstance(grid, HexColumns)
     data = {
         "format": FORMAT,
-        "container": "lattice" if lattice else "grid",
-        "columns": grid.columns,
+        "container": "lattice" if lattice else "columns" if columns else "grid",
+        "layers": getattr(grid, "layers", 1),
+        "across": grid.across,
         "rows": grid.rows,
         "omega": getattr(grid, "omega", 0.0),
         "threshold": grid.threshold,
@@ -83,6 +86,11 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
     return data
 
 
+def across_of(data: dict) -> int:
+    """The count across a checkpoint's mesh: "across", or "columns" in files written before the rename."""
+    return data["across"] if "across" in data else data["columns"]
+
+
 def read_checkpoint(path: str | Path) -> dict:
     data = json.loads(Path(path).read_text())
     if data.get("format") != FORMAT:
@@ -98,10 +106,12 @@ def restore(path: str | Path) -> tuple[GridOfNeurons, dict]:
     data = read_checkpoint(path)
     if data.get("container") == "lattice":
         return _restore_lattice(data), data
+    if data.get("container") == "columns":
+        return _restore_columns(data), data
     if data["seed"] is None:
         raise ValueError(f"{path}: the mesh was built without a seed, so its shortcuts cannot be rebuilt")
     grid = GridOfNeurons(
-        columns=data["columns"],
+        across=across_of(data),
         rows=data["rows"],
         weight=None if data["random_weights"] else data["weight"],
         threshold=data["threshold"],
@@ -118,11 +128,39 @@ def restore(path: str | Path) -> tuple[GridOfNeurons, dict]:
     return grid, data
 
 
+def _restore_columns(data: dict) -> HexColumns:
+    """Rebuild a HexColumns stack from its seed and settings, then load its weights."""
+    if data["seed"] is None:
+        raise ValueError(f"{path_of(data)}: the columns were built without a seed, so their shortcuts cannot be rebuilt")
+    columns = HexColumns(
+        across=across_of(data),
+        rows=data["rows"],
+        layers=data.get("layers", 1),
+        weight=None if data["random_weights"] else data["weight"],
+        threshold=data["threshold"],
+        seed=data["seed"],
+        omega=data["omega"],
+        permute=False,
+        weight_range=tuple(data.get("weight_range", (-1.0, 1.0))),
+        minimum_potential=data.get("minimum_potential", -1.0),
+    )
+    columns.permutation = list(data["permutation"])
+    columns.ecc = _ecc_name(data)
+    load_weights(columns, data)
+    columns.epoch = data["epoch"]
+    return columns
+
+
+def path_of(data: dict) -> str:
+    return data.get("path", "checkpoint")
+
+
 def load_weights(grid: GridOfNeurons, data: dict) -> None:
     """Copy a checkpoint's weights into `grid`, which must have the same mesh."""
-    for key in ("columns", "rows", "omega", "seed"):
-        if getattr(grid, key) != data[key]:
-            raise ValueError(f"checkpoint {key} is {data[key]!r} but the mesh has {getattr(grid, key)!r}")
+    wanted = {"across": across_of(data), "rows": data["rows"], "omega": data["omega"], "seed": data["seed"]}
+    for key, value in wanted.items():
+        if getattr(grid, key) != value:
+            raise ValueError(f"checkpoint {key} is {value!r} but the mesh has {getattr(grid, key)!r}")
     if len(grid.connections) != data["connections"] or len(data["weights"]) != data["connections"]:
         raise ValueError(
             f"checkpoint has {data['connections']} connections but the mesh has {len(grid.connections)}"
@@ -154,7 +192,7 @@ def resume_teacher(teacher, data: dict) -> None:
 def _restore_lattice(data: dict) -> CartesianNodes:
     """Rebuild a CartesianNodes network from its checkpoint: positions, wiring, weights, thresholds."""
     nodes = CartesianNodes(
-        columns=data["columns"],
+        across=across_of(data),
         rows=data["rows"],
         layout=data.get("layout", "hex"),
         count=0 if data.get("layout") == "random" else None,

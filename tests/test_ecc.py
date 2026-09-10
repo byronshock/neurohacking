@@ -66,7 +66,7 @@ def test_two_flips_defeat_hamming_gracefully():
 
 
 def test_network_code_stage_hamming_fills_fourteen_columns():
-    grid = GridOfNeurons(columns=14, rows=4, omega=0, permute=False)
+    grid = GridOfNeurons(across=14, rows=4, omega=0, permute=False)
     grid.use_ecc()
     assert grid.ecc == "hamming74" and grid.code is HAMMING74 and grid.raw_bit_count() == 4
     grid.set_input_bits([True, False, True, True])
@@ -76,10 +76,10 @@ def test_network_code_stage_hamming_fills_fourteen_columns():
     with pytest.raises(ValueError):
         grid.set_input_bits([True] * 7)
     with pytest.raises(ValueError):
-        GridOfNeurons(columns=12, rows=4).use_ecc("hamming74")  # needs 14 columns
+        GridOfNeurons(across=12, rows=4).use_ecc("hamming74")  # needs 14 across
     with pytest.raises(ValueError):
-        GridOfNeurons(columns=14, rows=4).use_ecc("nonsense")
-    six = GridOfNeurons(columns=12, rows=4)
+        GridOfNeurons(across=14, rows=4).use_ecc("nonsense")
+    six = GridOfNeurons(across=12, rows=4)
     six.use_ecc("parity64")
     assert six.code is PARITY64 and six.raw_bit_count() == 4
     six.use_ecc(False)
@@ -87,7 +87,7 @@ def test_network_code_stage_hamming_fills_fourteen_columns():
 
 
 def test_random_inputs_with_a_code_are_always_valid_codewords(capsys):
-    grid = GridOfNeurons(columns=14, rows=4, weight=None, seed=1)
+    grid = GridOfNeurons(across=14, rows=4, weight=None, seed=1)
     grid.use_ecc()
     for _ in range(50):
         run_epoch(grid, verbose=False)
@@ -100,7 +100,7 @@ def test_random_inputs_with_a_code_are_always_valid_codewords(capsys):
 
 
 def test_lattice_takes_the_code_stage_too(capsys):
-    nodes = CartesianNodes(columns=14, rows=10, seed=1)
+    nodes = CartesianNodes(across=14, rows=10, seed=1)
     nodes.connect_within()
     nodes.use_ecc()
     run_epoch(nodes, verbose=False)
@@ -113,15 +113,15 @@ def test_cli_ecc_defaults_to_hamming_on_fourteen_columns_and_checkpoints_the_cod
     from walnutbutter.persistence import restore
     assert cli_main(["--headless", "-v", "--ecc", "--seed", "1", "--epochs", "3"]) == 0
     err = capsys.readouterr().err
-    assert "hamming74 (7, 4) code, corrects single errors -> complement code -> 14 columns" in err
+    assert "hamming74 (7, 4) code, corrects single errors -> complement code -> 14 across" in err
     f = next(Path("runs").glob("*-seed1.json"))
     restored, data = restore(f)
-    assert data["ecc"] == "hamming74" and restored.ecc == "hamming74" and restored.columns == 14 and restored.rows == 10
+    assert data["ecc"] == "hamming74" and restored.ecc == "hamming74" and restored.across == 14 and restored.rows == 10
     assert cli_main(["--headless", "-v", "--epochs", "2", "--load-weights", str(f), "--no-save"]) == 0
     assert "hamming74" in capsys.readouterr().err
     assert cli_main(["--headless", "-v", "--ecc", "parity64", "--seed", "1", "--epochs", "2", "--no-save"]) == 0
-    assert "parity64 (6, 4) code, detects single errors -> complement code -> 12 columns" in capsys.readouterr().err
-    assert cli_main(["--headless", "-v", "--ecc", "--columns", "8", "--rows", "4", "--no-save"]) == 2
+    assert "parity64 (6, 4) code, detects single errors -> complement code -> 12 across" in capsys.readouterr().err
+    assert cli_main(["--headless", "-v", "--ecc", "--across", "8", "--rows", "4", "--no-save"]) == 2
     assert cli_main(["--headless", "-v", "--ecc", "--input", "1011", "--seed", "1", "--no-save"]) == 0
     assert "data 1011 -> hamming74 1011010" in capsys.readouterr().out
     with pytest.raises(SystemExit):
@@ -130,7 +130,7 @@ def test_cli_ecc_defaults_to_hamming_on_fourteen_columns_and_checkpoints_the_cod
 
 def test_old_checkpoints_with_ecc_true_mean_the_parity_code(tmp_path):
     from walnutbutter.persistence import checkpoint, restore
-    grid = GridOfNeurons(columns=12, rows=4, seed=1)
+    grid = GridOfNeurons(across=12, rows=4, seed=1)
     grid.use_ecc("parity64")
     path = tmp_path / "old.json"
     data = checkpoint(grid, path)

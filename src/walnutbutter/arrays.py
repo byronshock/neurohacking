@@ -56,8 +56,8 @@ class ArrayNetwork(Network):
 
     def __init__(self, mesh):
         self.mesh = mesh
-        self.columns, self.rows = mesh.columns, mesh.rows
-        self._init_network(mesh.columns, mesh.weight_range)
+        self.across, self.rows = mesh.across, mesh.rows
+        self._init_network(mesh.across, mesh.weight_range)
         self.permutation = list(mesh.permutation)
         self.ecc = mesh.ecc
         self.epoch = mesh.epoch
@@ -93,7 +93,7 @@ class ArrayNetwork(Network):
         self._build_matrix()
 
         self.input_index = np.array([self.index[x] for x in mesh.input_row()], dtype=np.int64)
-        self.output_index = np.array([self.index[mesh.get_neuron_at(c, 0)] for c in range(mesh.columns)], dtype=np.int64)
+        self.output_index = np.array([self.index[x] for x in mesh.output_row()], dtype=np.int64)
         self.waves: list[ArrayWave] = []
 
     # --- the matrix -------------------------------------------------------
@@ -139,8 +139,17 @@ class ArrayNetwork(Network):
     def all_neurons(self):
         return self.neurons_list
 
-    def get_neuron_at(self, column: int, row: int):
-        return self.mesh.get_neuron_at(column, row)
+    def get_neuron_at(self, place: int, row: int, *args):
+        return self.mesh.get_neuron_at(place, row, *args)
+
+    def input_row(self):
+        return self.mesh.input_row()
+
+    def output_row(self):
+        return self.mesh.output_row()
+
+    def input_width(self) -> int:
+        return self.mesh.input_width()
 
     def has_fired(self) -> np.ndarray:
         return self.fired_wave >= 0

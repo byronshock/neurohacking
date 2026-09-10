@@ -92,7 +92,7 @@ class Smear:
         """Hex-lattice points inside the shape at this smear's spacing, packed from the bottom-left corner.
 
         Odd rows are shifted half a spacing right, pointy-top like the lattice.
-        A rectangle sized for a columns x rows lattice at unit density gives
+        A rectangle sized for a across x rows lattice at unit density gives
         exactly that lattice.
         """
         s = spacing_for(self.density)
@@ -139,9 +139,9 @@ class WalnutButter:
         return points
 
     @staticmethod
-    def rectangle(columns: int = 8, rows: int = 10) -> "WalnutButter":
-        """The default recipe: one rectangle at unit density holding a columns x rows lattice."""
-        width = (columns - 1) + 0.5  # odd rows are shifted half a unit
+    def rectangle(across: int = 8, rows: int = 10) -> "WalnutButter":
+        """The default recipe: one rectangle at unit density holding a across x rows lattice."""
+        width = (across - 1) + 0.5  # odd rows are shifted half a unit
         height = (rows - 1) * ROW_SPACING
         return WalnutButter().spread(Rect(-width / 2, -height / 2, width / 2, height / 2), UNIT_DENSITY)
 

@@ -16,6 +16,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame  # noqa: E402  (import after the env var so pygame stays quiet)
 
 from .cartesian import CartesianNodes
+from .columns import HexColumns
 from .grid import GridOfNeurons
 from .learning import Teacher
 from .monitor import run_epoch
@@ -199,6 +200,34 @@ def show_nodes(nodes: CartesianNodes, width: int = 800, height: int = 600, fps: 
 # --- the hex grid -----------------------------------------------------------------
 
 
+def draw_columns(surface: pygame.Surface, columns: HexColumns, margin: int = 24) -> None:
+    """Paint a stack of hexagonal columns layer by layer, side by side, bottom layer (the input) on the left."""
+    width, height = surface.get_size()
+    layers = columns.layers
+    xs = [n.position[0] for n in columns.all_neurons()]
+    ys = [n.position[1] for n in columns.all_neurons()]
+    lw, lh = (max(xs) - min(xs)) + 1.0, (max(ys) - min(ys)) + 1.0  # one layer's footprint plus half a unit all round
+    gap = 0.5
+    span_w, span_h = layers * lw + (layers - 1) * gap, lh
+    scale = min((width - 2 * margin) / span_w, (height - 2 * margin) / span_h)
+    left, top = (width - scale * span_w) / 2, (height - scale * span_h) / 2
+    radius = max(2.0, scale * 0.2)
+    waves = [n.fired_in_wave for n in columns.all_neurons() if n.fired_in_wave is not None]
+    last_wave = max(waves) if waves else 0
+    surface.fill(BACKGROUND)
+    for layer in range(layers):
+        x_off = left + layer * (lw + gap) * scale
+        pygame.draw.rect(surface, UNFIRED, pygame.Rect(round(x_off), round(top), round(lw * scale), round(lh * scale)), width=1)
+        for neuron in columns.layer(layer):
+            x, y, _ = neuron.position
+            px = x_off + (x - min(xs) + 0.5) * scale
+            py = top + (max(ys) - y + 0.5) * scale
+            pygame.draw.circle(surface, neuron_colour(neuron.fired_in_wave, last_wave), (px, py), radius)
+            pygame.draw.circle(surface, OUTLINE, (px, py), radius, width=1)
+            if neuron.fired_in_wave == 0:
+                pygame.draw.circle(surface, ORIGIN_RING, (px, py), radius * 0.55, width=max(1, round(radius / 6)))
+
+
 def as_mesh(network):
     """The object mesh to draw: an array network is synced back into its mesh first."""
     if getattr(network, "engine", "objects") == "arrays":
@@ -210,7 +239,9 @@ def as_mesh(network):
 def draw(surface: pygame.Surface, network, margin: int = 24) -> None:
     """Paint whichever container this is: discs on hex cells for the grid, discs at positions for nodes."""
     network = as_mesh(network)
-    if isinstance(network, CartesianNodes):
+    if isinstance(network, HexColumns):
+        draw_columns(surface, network, margin)
+    elif isinstance(network, CartesianNodes):
         draw_nodes(surface, network, margin)
     else:
         draw_grid(surface, network, margin)
@@ -236,9 +267,11 @@ def caption(grid: GridOfNeurons, teacher: Teacher | None = None) -> str:
     omega = f" omega {grid.omega:g}" if getattr(grid, "omega", 0) else ""
     if isinstance(grid, CartesianNodes) and getattr(grid, "reach", None) is not None:
         omega = f" lattice, reach {grid.reach:g}"
+    if isinstance(grid, HexColumns) and grid.layers > 1:
+        omega = f"x{grid.layers} layers" + omega
     epoch = f" epoch {grid.epoch}:" if grid.epoch else ":"
     learning = f"   {teacher.status()}" if teacher else ""
-    return f"walnutbutter {grid.columns}x{grid.rows}{omega}{epoch} {state}{learning}   [Space] new input  [Esc] quit"
+    return f"walnutbutter {grid.across}x{grid.rows}{omega}{epoch} {state}{learning}   [Space] new input  [Esc] quit"
 
 
 def caption_fast(grid: GridOfNeurons, epochs_per_second: float, fps: int, teacher: Teacher | None = None) -> str:

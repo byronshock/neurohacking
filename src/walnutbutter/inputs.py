@@ -1,7 +1,7 @@
 """Input patterns for the network.
 
 The network's input is its bottom row of neurons. A pattern is one boolean
-per column; the neurons whose bit is 1 are forced to fire in wave 0.
+per place along the row; the neurons whose bit is 1 are forced to fire in wave 0.
 
 Patterns are complement-coded: the raw bits are followed by their negations,
 so 12 raw bits become 24 bits and exactly half of the input row fires no

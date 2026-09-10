@@ -43,9 +43,9 @@ walnutbutter                 # open the window, free-run, learn, report accuracy
 walnutbutter --headless --epochs 20000 -q   # the same without a window, for a fixed number of epochs
 walnutbutter --step          # window where each Space press runs one epoch
 walnutbutter --no-learn      # just watch the untrained network
-walnutbutter --columns 24 --rows 20       # a bigger mesh than the default 8 x 10: 12 input bits, coded to 24
-walnutbutter --ecc                        # 4 data bits -> Hamming (7, 4) -> 14 columns, on a 14 x 10 field
-walnutbutter --ecc parity64               # the (6, 4) detect-only code on 12 columns instead
+walnutbutter --across 24 --rows 20       # a bigger mesh than the default 8 x 10: 12 input bits, coded to 24
+walnutbutter --ecc                        # 4 data bits -> Hamming (7, 4) -> 14 across, on a 14 x 10 field
+walnutbutter --ecc parity64               # the (6, 4) detect-only code on 12 across instead
 walnutbutter --input 1011                 # choose the 4 input bits
 walnutbutter --no-permute                 # coded bits in order on the bottom row
 walnutbutter --seed 42       # repeat a particular random mesh
@@ -58,8 +58,8 @@ python -m walnutbutter       # same thing without the installed command
 ```
 
 **Input.** The network's input is its bottom row. Each epoch draws 4 random
-bits (half the columns), complement-codes them by appending their negations,
-and scrambles the 8 coded bits with a random permutation of the columns that
+bits (half the count across), complement-codes them by appending their negations,
+and scrambles the 8 coded bits with a random permutation of the places along the row that
 is drawn once per run and never changes. The bottom-row neurons whose bit is
 1 are forced to fire in wave 0, so exactly half of the row fires every time.
 The raw bits, the coded bits and the permuted row are printed, and the
@@ -94,7 +94,7 @@ walnutbutter --report 30                  # a progress line every 30 s instead o
 walnutbutter --save-weights run1.json     # choose the checkpoint file (default: runs/<date>-<time>-seed<seed>.json)
 walnutbutter --load-weights run1.json     # continue from a checkpoint (same mesh, seed and permutation)
 walnutbutter --step                       # one epoch per Space press
-walnutbutter --columns 24 --rows 20 --headless --save grid.png
+walnutbutter --across 24 --rows 20 --headless --save grid.png
 ```
 
 By default the window is a monitor on a free-running system. The network
@@ -122,7 +122,7 @@ writes whatever state the mesh is in when the window closes.
 ```python
 from walnutbutter import main, visualizer
 
-grid = main(columns=8, rows=10)
+grid = main(across=8, rows=10)
 visualizer.save(grid, "grid.png")   # write a picture, no window needed
 visualizer.show(grid, 1200, 800)    # or open a window; Space runs a new epoch, Esc quits
 ```
@@ -133,7 +133,7 @@ visualizer.show(grid, 1200, 800)    # or open a window; Space runs a new epoch, 
 from walnutbutter import main
 from walnutbutter.monitor import run_epoch
 
-grid = main(columns=8, rows=10)  # builds the grid and runs the first epoch on its bottom row
+grid = main(across=8, rows=10)  # builds the grid and runs the first epoch on its bottom row
 run_epoch(grid)                 # reset every neuron and present a new random input
 print(len(grid.fired_neurons()))
 grid.reset()                   # allow every neuron to fire again
@@ -141,7 +141,7 @@ grid.reset()                   # allow every neuron to fire again
 
 ## How the grid works
 
-Neurons sit on a `columns x rows` rectangle of pointy-top hexagons. Every
+Neurons sit on a `across x rows` rectangle of pointy-top hexagons. Every
 odd row is shifted half a cell to the right ("odd-r" layout), which is what
 lets whole hexagons fill a rectangle; the left and right edges are therefore
 slightly jagged rather than cut. Internally each cell is addressed by axial
@@ -149,7 +149,7 @@ coordinates `(q, r)`, centred so the middle cell is `(0, 0)`. Each neuron is
 connected to its six neighbours and to the twelve neighbours of those
 neighbours, so an interior neuron has 18 outgoing and 18 incoming local
 connections (fewer on the edges), and a signal covers two cells per wave.
-`grid.get_neuron_at(column, row)`
+`grid.get_neuron_at(place, row)`
 looks a cell up by its position from the top-left corner; `grid.get_neuron(q, r)`
 by axial coordinates.
 
@@ -175,10 +175,10 @@ input is 4 data bits, encoded before complement coding. The default code is
 Hamming's (7, 4): three parity bits, each covering three of the four data
 bits, giving every bit position a distinct syndrome, so any single flipped
 bit is located and corrected (`Code.correct`, `Code.decode`); complement
-coding then fills a 14-column bottom row, so the usual field is 14 columns
+coding then fills a 14-place bottom row, so the usual field is 14 across
 by 10 rows. `--ecc parity64` is the (6, 4) code instead: two parity bits,
-minimum distance 2, single errors detected but not corrected, 12 columns.
-`--ecc` sets the columns to fit unless told otherwise. The epoch line reads
+minimum distance 2, single errors detected but not corrected, 12 across.
+`--ecc` sets the count across to fit unless told otherwise. The epoch line reads
 `data 1011 -> hamming74 1011010 -> coded ... -> bottom row ...`, and
 checkpoints remember which code is on.
 
@@ -239,7 +239,7 @@ dependencies and prints per neuron with `-v`, which the array engine does not.
 ```python
 from walnutbutter.propagation import propagate
 
-grid = GridOfNeurons(columns=8, rows=10)
+grid = GridOfNeurons(across=8, rows=10)
 origin, corner = grid.get_origin_neuron(), grid.get_neuron_at(0, 0)
 waves = grid.propagate(fire=[origin, corner])          # two stimuli in one epoch
 waves = grid.propagate(inputs={origin: 0.6, corner: 0.6})  # external input amounts instead
@@ -265,7 +265,7 @@ than one fired neighbour. From Python, `GridOfNeurons(weight=None, seed=...)`
 or `grid.randomize_weights(low, high, seed)` do the same.
 
 ```python
-grid = main(columns=8, rows=10)
+grid = main(across=8, rows=10)
 conn = grid.get_connection(1)   # the first registered connection
 conn.weight = 0.5
 conn.is_active = False          # cut that direction only
@@ -300,8 +300,50 @@ The default network is one rectangular smear at unit density, which is the
 directly, and with a reach of 2 each interior neuron has eighteen neighbours,
 six at distance 1, six at √3 and six at 2, the same as the hex grid's two
 rings. Its bottom row is the input and its top row the output, addressed
-like the grid with `get_neuron_at(column, row)`. A free spread has no rows,
+like the grid with `get_neuron_at(place, row)`. A free spread has no rows,
 so input and output zones for it are still to be defined.
+
+## Hexagonal columns
+
+The prespread butter. The plane is tiled with hexagonal cells, one neuron
+per cell, and every cell is extruded into a **column** of `--layers`
+neurons, so the network lives in R3. A cell is one unit across: neurons sit
+half a unit apart in the plane, and the layers of a column an eighth of a
+unit apart, a quarter of the cell spacing, so a column reads as a compact
+stack of neurons much closer to each other than to their neighbours. The
+connection rule is
+
+    same position:                       never
+    horizontal distance <= 1 + epsilon:  always
+    otherwise:                           small-world shortcuts only (--omega)
+
+measured in the plane only, so the guarantee holds at any height: a neuron
+is wired to every neuron of its own column and of the eighteen columns
+around it, in every layer, and everything further away is reached only by
+shortcuts drawn as on the grid. The bottom layer is the **input butter**
+and the top layer the **output butter**: a word is `across x rows` bits per
+layer, complement-coded and permuted as before, and the targets and critics
+read the top layer the same way they read the top row.
+
+With one layer the two surfaces coincide and the stack keeps the grid's
+convention (bottom row in, top row out). It is then the hex grid itself:
+the same neurons in the same order, the same eighteen guaranteed
+connections per neuron with the same ids, and with the same seed the same
+shortcuts, weights and permutation, so `--layers 1` reproduces a plain run
+epoch for epoch. That was the test that the rule changed nothing but the
+ruler.
+
+```bash
+walnutbutter --layers 3                    # 8 x 10 cells, three deep: 80 input neurons, 80 outputs
+walnutbutter --layers 3 --engine arrays    # the array engine wraps a stack like any mesh
+walnutbutter --layers 2 -a 7 -r 2 --ecc    # a code needs 14 input neurons, however they are arranged
+```
+
+Fan-out grows with depth: an interior neuron of an L-layer stack has 19L - 1
+guaranteed connections, so the array engine earns its keep quickly.
+
+The free spread of variable density below is kept in the library but no
+longer sets any default; the columns are where input and output live now.
 
 ```python
 from walnutbutter.butter import Disc, Rect, WalnutButter, UNIT_DENSITY
@@ -420,7 +462,7 @@ perturbed.
 
 ```python
 from walnutbutter.learning import Teacher
-grid = main(columns=24, rows=20, seed=1)
+grid = main(across=24, rows=20, seed=1)
 teacher = Teacher(grid, target="reversed", lr=0.03, sigma=0.1, seed=1)
 for _ in range(10000):
     teacher.epoch(verbose=False)   # exploration noise, new input, propagate, reinforce
@@ -444,6 +486,7 @@ src/walnutbutter/
   exploration.py the Box-Muller noise draws both engines share
   learning_rules.py constants shared by the learning code of both engines
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
+  columns.py   HexColumns: the cells extruded into layers in R3 (--layers); bottom layer in, top layer out
   butter.py    WalnutButter: smears of neuron density (per unit cell) on the plane; shapes Rect and Disc
   cartesian.py CartesianNodes: the lattice, a scatter, or a placed recipe; reach wiring
   inputs.py    random bits, complement coding, parsing and formatting

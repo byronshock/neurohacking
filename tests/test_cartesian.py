@@ -15,7 +15,7 @@ def quiet(monkeypatch):
 def test_default_is_an_8x10_hexagonal_lattice_at_unit_spacing():
     from walnutbutter.cartesian import ROW_SPACING
     nodes = CartesianNodes()
-    assert nodes.layout == "hex" and (nodes.columns, nodes.rows) == (8, 10) and len(nodes) == 80
+    assert nodes.layout == "hex" and (nodes.across, nodes.rows) == (8, 10) and len(nodes) == 80
     a, b = nodes.node_at(0, 0), nodes.node_at(1, 0)
     assert CartesianNodes.distance(a, b) == pytest.approx(1.0)  # horizontal neighbours one unit apart
     up = nodes.node_at(0, 1)
@@ -29,7 +29,7 @@ def test_default_is_an_8x10_hexagonal_lattice_at_unit_spacing():
 
 
 def test_lattice_interior_neurons_have_exactly_six_neighbours_within_a_unit():
-    nodes = CartesianNodes(columns=6, rows=6)
+    nodes = CartesianNodes(across=6, rows=6)
     counts = {}
     for r in range(6):
         for c in range(6):
@@ -44,11 +44,11 @@ def test_lattice_interior_neurons_have_exactly_six_neighbours_within_a_unit():
 
 
 def test_lattice_region_covers_the_footprint_and_names_follow_column_row():
-    nodes = CartesianNodes(columns=4, rows=3)
+    nodes = CartesianNodes(across=4, rows=3)
     assert all(nodes.in_region(x, y) for x, y in nodes.positions())
     assert nodes.node_at(3, 2).name == "Node_3_2" and nodes[0] is nodes.node_at(0, 0)
     with pytest.raises(ValueError):
-        CartesianNodes(columns=0, rows=3)
+        CartesianNodes(across=0, rows=3)
     with pytest.raises(ValueError):
         CartesianNodes(count=5)  # count belongs to the random layout
     with pytest.raises(ValueError):
@@ -158,7 +158,7 @@ def test_cli_nodes_headless_lists_positions(capsys):
 
 def test_cli_bare_nodes_builds_a_learning_lattice(capsys):
     from walnutbutter.cli import cli_main
-    assert cli_main(["--headless", "--nodes", "--columns", "6", "--rows", "4", "--seed", "1", "-q", "--epochs", "5", "--no-save"]) == 0
+    assert cli_main(["--headless", "--nodes", "--across", "6", "--rows", "4", "--seed", "1", "-q", "--epochs", "5", "--no-save"]) == 0
     err = capsys.readouterr().err
     assert "6x4 hexagonal lattice, 24 neurons at unit spacing" in err and "every pair within 2 units" in err
     assert "learning reversed" in err and "after 5 epochs" in err
@@ -213,7 +213,7 @@ def test_show_nodes_returns_on_quit(monkeypatch):
     pygame = pytest.importorskip('pygame')
     from walnutbutter import visualizer as viz
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    nodes = CartesianNodes(columns=4, rows=3)
+    nodes = CartesianNodes(across=4, rows=3)
     monkeypatch.setattr(pygame.event, "get", lambda: [pygame.event.Event(pygame.QUIT)])
     viz.show_nodes(nodes, 200, 150)
 
@@ -287,7 +287,7 @@ def test_connect_by_distance_makes_independent_one_way_connections():
 
 
 def test_connect_by_distance_degree_matches_the_gaussian_on_the_lattice():
-    nodes = CartesianNodes(columns=20, rows=20, seed=2)  # a big lattice so the interior dominates
+    nodes = CartesianNodes(across=20, rows=20, seed=2)  # a big lattice so the interior dominates
     nodes.connect_by_distance(sigma=1.0, neighbour_radius=1.0)
     interior = [nodes.node_at(c, r) for r in range(5, 15) for c in range(5, 15)]
     degree = sum(len(n.outgoing) for n in interior) / len(interior)
@@ -336,7 +336,7 @@ def test_connect_by_distance_random_weights_and_propagation():
 
 def test_cli_nodes_reports_the_reach_wiring(capsys):
     from walnutbutter.cli import cli_main
-    base = ["--headless", "--nodes", "--seed", "1", "--columns", "6", "--rows", "4", "-q", "--epochs", "2", "--no-save"]
+    base = ["--headless", "--nodes", "--seed", "1", "--across", "6", "--rows", "4", "-q", "--epochs", "2", "--no-save"]
     assert cli_main(base) == 0
     assert "every pair within 2 units" in capsys.readouterr().err  # the default reach
     assert cli_main(base + ["--reach", "1"]) == 0
@@ -349,7 +349,7 @@ def test_cli_nodes_reports_the_reach_wiring(capsys):
 
 
 def test_lattice_rows_are_addressed_from_the_top_like_the_grid():
-    nodes = CartesianNodes(columns=4, rows=3)
+    nodes = CartesianNodes(across=4, rows=3)
     top = [nodes.get_neuron_at(c, 0) for c in range(4)]
     bottom = nodes.input_row()
     assert all(n.position[1] > 0 for n in top) and all(n.position[1] < 0 for n in bottom)  # top row is up, input row is down
@@ -381,7 +381,7 @@ def test_random_layout_has_no_rows_to_address():
 def test_teacher_learns_on_the_lattice():
     import statistics
     from walnutbutter.learning import Teacher, accuracy
-    nodes = CartesianNodes(columns=8, rows=4, seed=1)
+    nodes = CartesianNodes(across=8, rows=4, seed=1)
     nodes.connect_by_distance(sigma=1.0, weight=None)  # sparse enough that all-off is reachable quickly
     teacher = Teacher(nodes, target="all-off", lr=0.1, seed=1)
     rewards = [teacher.epoch(verbose=False) for _ in range(1500)]
@@ -491,7 +491,7 @@ def test_command_line_reproduces_the_sweep_sequence_exactly(tmp_path, capsys):
     from walnutbutter.learning import Teacher
     from walnutbutter.persistence import read_checkpoint
     epochs = 300
-    nodes = CartesianNodes(columns=8, rows=10, seed=3)
+    nodes = CartesianNodes(across=8, rows=10, seed=3)
     nodes.connect_within(reach=2.0, weight=None)
     teacher = Teacher(nodes, seed=3)
     for _ in range(epochs):

@@ -59,7 +59,7 @@ def test_wrapping_copies_the_mesh_exactly():
     mesh = GridOfNeurons(weight=None, seed=1)
     mesh.use_ecc(False)
     net = ArrayNetwork(mesh)
-    assert net.columns == 8 and net.rows == 10 and len(net) == 80 and len(net.weight) == len(mesh.connections)
+    assert net.across == 8 and net.rows == 10 and len(net) == 80 and len(net.weight) == len(mesh.connections)
     assert net.permutation == mesh.permutation and net.seed == 1
     assert np.array_equal(weights(net), weights(mesh))
     assert [net.neurons_list[i].name for i in net.input_index] == [n.name for n in mesh.input_row()]
@@ -101,9 +101,9 @@ def test_teaching_moves_both_engines_identically(late, eligibility):
 
 
 def test_the_decoded_critics_agree_on_a_hamming_mesh():
-    mesh = GridOfNeurons(columns=14, rows=6, weight=None, seed=2)
+    mesh = GridOfNeurons(across=14, rows=6, weight=None, seed=2)
     mesh.use_ecc()
-    twin = GridOfNeurons(columns=14, rows=6, weight=None, seed=2)
+    twin = GridOfNeurons(across=14, rows=6, weight=None, seed=2)
     twin.use_ecc()
     net = ArrayNetwork(twin)
     for critic in ("row", "decoded", "decoded-exact"):
@@ -113,7 +113,7 @@ def test_the_decoded_critics_agree_on_a_hamming_mesh():
 
 
 def test_carry_over_keeps_the_same_potentials_within_rounding():
-    mesh, net = pair(seed=9, columns=6, rows=4)
+    mesh, net = pair(seed=9, across=6, rows=4)
     for _ in range(30):
         run_epoch(mesh, verbose=False, discharge=False)
         run_epoch(net, verbose=False, discharge=False)
@@ -122,8 +122,8 @@ def test_carry_over_keeps_the_same_potentials_within_rounding():
 
 
 def test_an_inactive_connection_carries_nothing_in_either_engine():
-    a = GridOfNeurons(weight=1.0, seed=4, columns=6, rows=4, omega=0)
-    b = GridOfNeurons(weight=1.0, seed=4, columns=6, rows=4, omega=0)
+    a = GridOfNeurons(weight=1.0, seed=4, across=6, rows=4, omega=0)
+    b = GridOfNeurons(weight=1.0, seed=4, across=6, rows=4, omega=0)
     for g in (a, b):
         for c in g.get_neuron_at(0, 3).outgoing:
             c.is_active = False  # the bottom-left neuron is cut off from everyone
@@ -137,9 +137,9 @@ def test_an_inactive_connection_carries_nothing_in_either_engine():
 
 
 def test_the_lattice_runs_on_arrays_too():
-    a = CartesianNodes(columns=6, rows=5, seed=3)
+    a = CartesianNodes(across=6, rows=5, seed=3)
     a.connect_within(reach=2.0, weight=None)
-    b = CartesianNodes(columns=6, rows=5, seed=3)
+    b = CartesianNodes(across=6, rows=5, seed=3)
     b.connect_within(reach=2.0, weight=None)
     net = ArrayNetwork(b)
     ta, tb = Teacher(a, seed=1), Teacher(net, seed=1)
@@ -150,7 +150,7 @@ def test_the_lattice_runs_on_arrays_too():
 
 
 def test_checkpoints_cross_between_engines(tmp_path):
-    mesh, net = pair(seed=11, columns=6, rows=4)
+    mesh, net = pair(seed=11, across=6, rows=4)
     teacher = Teacher(net, seed=2)
     for _ in range(20):
         teacher.epoch(verbose=False)
@@ -174,7 +174,7 @@ def test_checkpoints_cross_between_engines(tmp_path):
 
 
 def test_fired_neurons_and_accuracy_read_through_the_mesh():
-    _, net = pair(seed=6, columns=6, rows=4)
+    _, net = pair(seed=6, across=6, rows=4)
     run_epoch(net, verbose=False)
     fired = net.fired_neurons()
     assert fired and all(n.has_fired for n in fired)
@@ -208,7 +208,7 @@ def test_cli_engine_arrays_seed_batch_and_lattice(tmp_path, capsys):
 
 def test_arrays_are_much_faster_on_a_big_mesh():
     import time
-    mesh, net = pair(seed=1, columns=24, rows=20)
+    mesh, net = pair(seed=1, across=24, rows=20)
     ta, tb = Teacher(mesh, seed=1), Teacher(net, seed=1)
     def rate(t, n):
         t0 = time.perf_counter()
@@ -224,7 +224,7 @@ def test_the_visualizer_draws_an_array_network_through_its_mesh(tmp_path, monkey
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     from walnutbutter import visualizer as viz
 
-    _, net = pair(seed=6, columns=6, rows=4)
+    _, net = pair(seed=6, across=6, rows=4)
     teacher = Teacher(net, seed=1)
     teacher.epoch(verbose=False)
     path = tmp_path / "arrays.png"

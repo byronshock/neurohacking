@@ -27,14 +27,14 @@ def hex_distance(a: tuple[int, int], b: tuple[int, int]) -> int:
     return max(abs(dq), abs(dr), abs(dq + dr))
 
 
-def offset_to_axial(column: int, row: int) -> tuple[int, int]:
-    """Convert a (column, row) position to axial (q, r).
+def offset_to_axial(place: int, row: int) -> tuple[int, int]:
+    """Convert a (place, row) position to axial (q, r).
 
     Rows are laid out "odd-r": every odd row is shifted half a cell to the
     right, which is what lets whole pointy-top hexagons fill a rectangle.
     Python's floor division makes this work for negative rows as well.
     """
-    return column - (row - (row & 1)) // 2, row
+    return place - (row - (row & 1)) // 2, row
 
 
 def axial_to_offset(q: int, r: int) -> tuple[int, int]:
@@ -43,7 +43,7 @@ def axial_to_offset(q: int, r: int) -> tuple[int, int]:
 
 
 class GridOfNeurons(Network):
-    """A rectangle of `columns` x `rows` hexagonal cells, each holding a Neuron.
+    """A rectangle of `across` x `rows` hexagonal cells, each holding a Neuron.
 
     Every neuron is connected to its six neighbours (kind "local") and to the
     twelve neighbours of those neighbours (kind "local2"), one way in each
@@ -54,7 +54,7 @@ class GridOfNeurons(Network):
 
     def __init__(
         self,
-        columns: int = 8,
+        across: int = 8,
         rows: int = 10,
         weight: float | None = 1.0,
         threshold: float = 0.25,
@@ -73,16 +73,16 @@ class GridOfNeurons(Network):
         connections that are small-world shortcuts (0 <= omega < 1): after the
         local mesh is built, shortcuts from random neurons to random
         non-neighbours are added until they make up that fraction of the total.
-        `permute` draws a random permutation of the columns, fixed for the life
+        `permute` draws a random permutation of the places across, fixed for the life
         of the grid, that scrambles every input pattern onto the bottom row.
         `seed` makes the shortcuts, the random weights, the permutation and the
         random inputs all reproducible.
         """
-        if columns < 1 or rows < 1:
-            raise ValueError(f"grid needs at least one column and one row, got {columns}x{rows}")
+        if across < 1 or rows < 1:
+            raise ValueError(f"grid needs at least one neuron across and one row, got {across}x{rows}")
         if not 0.0 <= omega < 1.0:
             raise ValueError(f"omega must be at least 0 and less than 1, got {omega}")
-        self.columns = columns
+        self.across = across
         self.rows = rows
         self.weight = weight  # fixed weight for every connection, or None for random
         self.threshold = threshold  # firing threshold given to every neuron
@@ -92,7 +92,7 @@ class GridOfNeurons(Network):
         self._rng = random.Random(seed)  # one stream for shortcuts, then weights
         self.neurons: dict[tuple[int, int], Neuron] = {}  # Maps axial (q, r) to Neuron
         self.connections: dict[int, Connection] = {}  # Maps connection ID (from 1) to Connection
-        self._init_network(columns, weight_range)
+        self._init_network(across, weight_range)
         self.directions = DIRECTIONS
         self.create_grid()  # Initialize the grid
         self._add_small_world_connections(omega)
@@ -105,10 +105,10 @@ class GridOfNeurons(Network):
 
     def create_grid(self):
         """Create one neuron per cell of the rectangle, then connect neighbours."""
-        centre_column, centre_row = self.columns // 2, self.rows // 2
+        centre_column, centre_row = self.across // 2, self.rows // 2
         for row in range(self.rows):
-            for column in range(self.columns):
-                q, r = offset_to_axial(column - centre_column, row - centre_row)
+            for place in range(self.across):
+                q, r = offset_to_axial(place - centre_column, row - centre_row)
                 neuron = Neuron(f"Neuron_{q}_{r}", threshold=self.threshold, minimum_potential=self.minimum_potential)
                 neuron.position = (q, r)
                 self.neurons[(q, r)] = neuron
@@ -217,9 +217,9 @@ class GridOfNeurons(Network):
         """Retrieve a neuron by axial coordinates."""
         return self.neurons.get((q, r))
 
-    def get_neuron_at(self, column: int, row: int) -> Neuron | None:
-        """Retrieve a neuron by (column, row), counted from the top-left cell."""
-        q, r = offset_to_axial(column - self.columns // 2, row - self.rows // 2)
+    def get_neuron_at(self, place: int, row: int) -> Neuron | None:
+        """Retrieve a neuron by (place, row), counted from the top-left cell."""
+        q, r = offset_to_axial(place - self.across // 2, row - self.rows // 2)
         return self.neurons.get((q, r))
 
     def get_origin_neuron(self) -> Neuron | None:

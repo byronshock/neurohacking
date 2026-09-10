@@ -34,7 +34,7 @@ def test_shapes_contain_their_edges_and_validate():
 
 def test_the_default_rectangle_reproduces_the_lattice_exactly():
     butter = WalnutButter.rectangle(8, 10)
-    lattice = CartesianNodes(columns=8, rows=10)
+    lattice = CartesianNodes(across=8, rows=10)
     got = sorted((round(x, 9), round(y, 9)) for x, y in butter.positions())
     want = sorted((round(x, 9), round(y, 9)) for x, y in lattice.positions())
     assert got == want and len(got) == 80

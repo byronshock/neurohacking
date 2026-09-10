@@ -85,8 +85,8 @@ def arrays(grid) -> bool:
 
 
 def output_row(grid: GridOfNeurons) -> list[Neuron]:
-    """The top row of neurons, left to right: the network's output."""
-    return [grid.get_neuron_at(column, 0) for column in range(grid.columns)]
+    """The network's output neurons, in word order: the top row, or a container's own output surface."""
+    return grid.output_row()
 
 
 def expected_outputs(grid: GridOfNeurons, target: str = "reversed") -> list[bool]:
@@ -125,23 +125,23 @@ def read_output_word(grid: GridOfNeurons, target: str = "reversed") -> list[bool
     """Undo the target's arrangement and the permutation, then resolve each complement pair.
 
     The output row is what the network produced; the target says where each
-    coded bit was meant to land (reversed: column j shows coded bit
-    permutation[columns-1-j]). Coded bit k and its complement k + half form a
+    coded bit was meant to land (reversed: place j shows coded bit
+    permutation[across-1-j]). Coded bit k and its complement k + half form a
     pair: if exactly one of them fired, the bit is read; if both or neither
     did, the bit is unreadable (None) and counts as an error for the code.
     """
     fired = output_fired(grid)
-    columns = grid.columns
+    width = len(fired)
     if target == "reversed":
-        placed = fired[::-1]  # placed[i] is what column i of the input arrangement would show
+        placed = fired[::-1]  # placed[i] is what place i of the input arrangement would show
     elif target == "copy":
         placed = fired
     else:
         raise ValueError(f"the output word can only be read for the reversed or copy target, not {target!r}")
-    coded = [False] * columns
+    coded = [False] * width
     for i, k in enumerate(grid.permutation):
         coded[k] = placed[i]
-    half = columns // 2
+    half = width // 2
     word: list[bool | None] = []
     for k in range(half):
         bit, complement = coded[k], coded[k + half]

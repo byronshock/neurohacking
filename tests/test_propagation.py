@@ -96,7 +96,7 @@ def test_empty_stimulus_gives_one_empty_wave():
 
 
 def test_grid_waves_match_hex_distance_from_origin(capsys):
-    grid = GridOfNeurons(columns=9, rows=7, omega=0)  # shortcuts would let waves jump
+    grid = GridOfNeurons(across=9, rows=7, omega=0)  # shortcuts would let waves jump
     waves = grid.activate_origin()
     assert grid.waves is waves
     assert waves[0].fired == [grid.get_origin_neuron()]
@@ -107,7 +107,7 @@ def test_grid_waves_match_hex_distance_from_origin(capsys):
 
 
 def test_grid_accepts_multiple_stimuli_in_one_epoch(capsys):
-    grid = GridOfNeurons(columns=9, rows=7)
+    grid = GridOfNeurons(across=9, rows=7)
     origin, corner = grid.get_origin_neuron(), grid.get_neuron_at(0, 3)  # centre and left edge
     waves = grid.propagate(fire=[origin, corner])
     assert waves[0].fired == [origin, corner]
@@ -116,14 +116,14 @@ def test_grid_accepts_multiple_stimuli_in_one_epoch(capsys):
 
 
 def test_grid_reset_clears_waves(capsys):
-    grid = GridOfNeurons(columns=3, rows=3)
+    grid = GridOfNeurons(across=3, rows=3)
     grid.activate_origin()
     grid.reset()
     assert grid.waves == [] and grid.fired_neurons() == []
 
 
 def test_large_grid_has_no_recursion_limit(capsys):
-    grid = GridOfNeurons(columns=80, rows=60, omega=0)  # 4800 neurons; recursion died near 1000
+    grid = GridOfNeurons(across=80, rows=60, omega=0)  # 4800 neurons; recursion died near 1000
     grid.activate_origin()
     assert len(grid.fired_neurons()) == len(grid.neurons)
     assert len(grid.waves) > 20  # two cells per wave now; recursion would still have died

@@ -15,7 +15,7 @@ def quiet(monkeypatch):
 
 
 def hamming_grid(seed=1):
-    grid = GridOfNeurons(columns=14, rows=4, omega=0, seed=seed)
+    grid = GridOfNeurons(across=14, rows=4, omega=0, seed=seed)
     grid.use_ecc()
     grid.set_input_bits([True, False, True, True])
     return grid
@@ -68,7 +68,7 @@ def test_two_wrong_outputs_can_defeat_the_code_and_the_critics_disagree():
 
 
 def test_decoding_critic_without_a_code_compares_raw_bits():
-    grid = GridOfNeurons(columns=8, rows=4, omega=0, seed=1)
+    grid = GridOfNeurons(across=8, rows=4, omega=0, seed=1)
     grid.set_input_bits([True, True, False, False])
     show_on_output(grid, grid.input_pattern[::-1])
     assert decoded_output(grid) == [True, True, False, False] and decoded_exact(grid) == 1.0
@@ -91,7 +91,7 @@ def test_critics_registry_and_teacher_validation():
 
 def test_teacher_with_decoding_critic_learns_something(capsys):
     import statistics
-    grid = GridOfNeurons(columns=14, rows=4, weight=None, seed=2)
+    grid = GridOfNeurons(across=14, rows=4, weight=None, seed=2)
     grid.use_ecc()
     teacher = Teacher(grid, critic="decoded", lr=0.1, seed=2)
     rewards = [teacher.epoch(verbose=False) for _ in range(1500)]
