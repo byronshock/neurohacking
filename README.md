@@ -499,6 +499,7 @@ pytest
 ## Layout
 
 ```
+AUTHORITY.md   the specification: constants, substance, connectivity, signalling, activation, learning; the code follows it
 src/walnutbutter/
   connection.py Connection: ID, source and target neurons, weight, is_active, kind
   neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
