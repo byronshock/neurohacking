@@ -26,6 +26,7 @@ THRESHOLD = 0.25  # total weighted input a neuron needs before it fires
 MINIMUM_POTENTIAL = -1.0  # floor on a potential: inhibition and carried-over charge can go no lower
 TAU = 2.0  # leak time constant (swept September 10, 2026: see docs/tau-sweep.md); math.inf switches the leak off
 REFRACTORY = 5.0  # absolute refractory period: a neuron that fired this recently ignores every signal
+REFRACTORY_HOPS = 3.0  # the refractory period divided by the time a signal takes to travel one hop; not an integer (Byron, September 11, 2026)
 INTERVAL = 10.0  # spacing of inputs when no time is given; the clock only advances between inputs
 
 # --- learning: the global-reinforcement rule and its housekeeping ---------------

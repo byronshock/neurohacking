@@ -67,6 +67,7 @@ literal of its own.
 | MINIMUM_POTENTIAL | −1 | floor on $p$: inhibition and carried-over charge go no lower |
 | TAU | 2 ms | leak time constant; $\infty$ switches the leak off |
 | REFRACTORY | 5 ms | absolute refractory period |
+| REFRACTORY_HOPS | 3 | the refractory period divided by the time a signal takes to travel one hop; not an integer, started at 3 |
 | INTERVAL | 10 ms | spacing of inputs when no time is given |
 
 ### 1.3 Learning
@@ -158,6 +159,25 @@ at 0 and by default each is INTERVAL after the last. Propagation is
 instantaneous: every wave of a cascade happens at $t_e$, and the clock
 advances only between inputs. The time component of signalling is carried
 by the refractory period and the leak, not by delays.
+
+*Changing:* REFRACTORY_HOPS (§1.2) defines the time a signal takes to travel
+one hop, REFRACTORY / REFRACTORY_HOPS. The code does not yet use it; when
+it does, a wave will advance the clock by one hop instead of happening at
+$t_e$. Each wave needs to know its time so it can accept additional
+signals that also have the same time.
+
+*Decided (September 11, 2026):* a wave is "everything that happens at time
+$t$", not "everything one hop after the last wave". With a non-integer
+ratio, refractory recovery and hop arrivals fall at different times, and a
+second input can land mid-cascade. The queue is therefore a time-ordered
+schedule of signals, and a wave is the batch at the front with the same
+timestamp, including any external signals stamped for that moment.
+Same-time signals sum within a wave before anyone fires, which keeps the
+floor and the firing decision order-independent; signals one hop apart are
+separate waves. Epochs stop being the unit: a cascade from one input can
+still be running when the next input's signals join the schedule, so "the
+queue empties, then the clock advances" no longer holds. Learning has its
+own cadence (§6).
 
 ### 4.2 An epoch
 
@@ -253,8 +273,13 @@ connection, combined with each neuron's own exploration noise. Nothing is
 traced back through the network. Everything below is what the code does
 today. §0 overrides the source of the reward: it is dopamine, produced
 locally by neurons that fire again after their refractory period and
-consumed globally (§6.2's critic is not the reward). How the consumed
-dopamine moves a weight is not yet specified.
+consumed globally (§6.2's critic is not the reward).
+
+*Decided (Byron, September 11, 2026):* Learning happens when a neuron that
+previously fired fires again and is proportional to the global dopamine
+value. We can take care of this when the neuron fires. The strategy of
+REINFORCE remains the same as much as we can keep it with the global
+dopamine reinforcer.
 
 ### 6.1 Exploration
 
