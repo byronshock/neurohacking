@@ -179,6 +179,16 @@ still be running when the next input's signals join the schedule, so "the
 queue empties, then the clock advances" no longer holds. Learning has its
 own cadence (§6).
 
+*Decided (Byron, September 11, 2026):* **no race conditions, for now.** All
+spikes assigned the same time participate in one wave, whatever their
+source: a cascade's own hop arrivals, a second input's forced neurons, or
+input bits given individual times (the stochastic presentation that
+`stochastic_input` was opened for). Within the wave, deliver everything,
+settle, then fire; the order in which same-time signals were queued never
+matters. The only ordering in the system is the timestamp, so a seed still
+reproduces a run exactly. A wave is never split by arrival order, and a
+neuron never fires mid-wave.
+
 ### 4.2 An epoch
 
 An epoch is one input and the cascade it causes. In order:
