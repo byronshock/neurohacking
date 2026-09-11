@@ -62,7 +62,10 @@ import random
 from typing import Callable, Sequence
 
 from .grid import GridOfNeurons
-from .learning_rules import RATE_MEMORY, STUCK_ABOVE, STUCK_BELOW, THRESHOLD_RANGE
+from .constants import (
+    BASELINE_RATE, CRITIC, ELIGIBILITY, HOMEOSTASIS, LATE, LR, RATE_MEMORY, SIGMA, STUCK_ABOVE, STUCK_BELOW, TARGET,
+    TARGET_RATE, THRESHOLD_RANGE, UNSTICK, UNSTICK_TARGET, WINDOW,
+)
 from .monitor import run_epoch
 from .neuron import Neuron
 
@@ -76,7 +79,7 @@ TARGETS: dict[str, Target] = {
 }
 
 ELIGIBILITIES = ("perturb", "hebb")
-LATE = ("count", "ignore", "depress")  # what a signal that arrived after its target fired earns
+LATE_RULES = ("count", "ignore", "depress")  # what a signal that arrived after its target fired earns
 
 
 def arrays(grid) -> bool:
@@ -219,7 +222,7 @@ def stuck_neurons(grid: GridOfNeurons) -> tuple[list[Neuron], list[Neuron]]:
 
 
 def homeostasis(
-    grid: GridOfNeurons, rate: float, target: float = 0.5, threshold_range: tuple[float, float] = THRESHOLD_RANGE
+    grid: GridOfNeurons, rate: float, target: float = TARGET_RATE, threshold_range: tuple[float, float] = THRESHOLD_RANGE
 ) -> int:
     """Nudge each neuron's threshold toward its target firing rate, except those forced this epoch.
 
@@ -297,10 +300,10 @@ def delivered_connections(grid: GridOfNeurons) -> list:
 def reinforce(
     grid: GridOfNeurons,
     advantage: float,
-    lr: float = 0.03,
-    sigma: float = 0.1,
-    eligibility: str = "perturb",
-    late: str = "count",
+    lr: float = LR,
+    sigma: float = SIGMA,
+    eligibility: str = ELIGIBILITY,
+    late: str = LATE,
 ) -> int:
     """Apply the global-reward update for the epoch that has just run. Returns connections changed.
 
@@ -310,8 +313,8 @@ def reinforce(
     """
     if eligibility not in ELIGIBILITIES:
         raise ValueError(f"unknown eligibility {eligibility!r}; choose from {', '.join(ELIGIBILITIES)}")
-    if late not in LATE:
-        raise ValueError(f"unknown late-signal rule {late!r}; choose from {', '.join(LATE)}")
+    if late not in LATE_RULES:
+        raise ValueError(f"unknown late-signal rule {late!r}; choose from {', '.join(LATE_RULES)}")
     if arrays(grid):
         return grid.reinforce(advantage, lr, sigma, eligibility, late)
     if not advantage:
@@ -357,21 +360,21 @@ class Teacher:
     def __init__(
         self,
         grid: GridOfNeurons,
-        target: str = "reversed",
-        lr: float = 0.03,
-        sigma: float = 0.1,
-        eligibility: str = "perturb",
-        baseline_rate: float = 0.05,
-        window: int = 200,
+        target: str = TARGET,
+        lr: float = LR,
+        sigma: float = SIGMA,
+        eligibility: str = ELIGIBILITY,
+        baseline_rate: float = BASELINE_RATE,
+        window: int = WINDOW,
         seed: int | None = None,
-        homeostasis: float = 1e-6,
-        target_rate: float = 0.5,
+        homeostasis: float = HOMEOSTASIS,
+        target_rate: float = TARGET_RATE,
         threshold_range: tuple[float, float] = THRESHOLD_RANGE,
         discharge: bool = False,
-        unstick: float = 1e-3,
-        unstick_target: float = 0.5,
-        critic: str = "row",
-        late: str = "count",
+        unstick: float = UNSTICK,
+        unstick_target: float = UNSTICK_TARGET,
+        critic: str = CRITIC,
+        late: str = LATE,
     ):
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")
@@ -380,8 +383,8 @@ class Teacher:
         if critic != "row" and target not in ("reversed", "copy"):
             raise ValueError(f"the {critic} critic reads the output as a word, which needs the reversed or copy target")
         self.critic = critic
-        if late not in LATE:
-            raise ValueError(f"unknown late-signal rule {late!r}; choose from {', '.join(LATE)}")
+        if late not in LATE_RULES:
+            raise ValueError(f"unknown late-signal rule {late!r}; choose from {', '.join(LATE_RULES)}")
         self.late = late  # what a signal arriving after its target fired earns
         if eligibility not in ELIGIBILITIES:
             raise ValueError(f"unknown eligibility {eligibility!r}; choose from {', '.join(ELIGIBILITIES)}")

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from .constants import INTERVAL
 from .exploration import gaussians
 from .inputs import CODES, DEFAULT_CODE, Code, complement_code
 from .neuron import Neuron
@@ -36,7 +37,7 @@ class Network:
         self.permutation: list[int] = list(range(across))  # place i along the bottom row shows coded bit permutation[i]
         self.epoch = 0  # how many inputs have been presented
         self.time = 0.0  # the clock, nominal milliseconds: the time of the last input
-        self.interval = 10.0  # default spacing of inputs when no time is given
+        self.interval = INTERVAL  # default spacing of inputs when no time is given
         self.input_time: float | None = None  # when the pending input arrives
         self.ecc: str | None = None  # name of the error-correcting code applied before complement coding, if any
         self.input_data: list[bool] | None = None  # the raw data bits when ecc is on

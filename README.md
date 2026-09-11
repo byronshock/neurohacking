@@ -505,7 +505,7 @@ src/walnutbutter/
   propagation.py wave-by-wave propagate(): one list of connections in flight per wave
   arrays.py    ArrayNetwork: the same network as numpy vectors and a scipy sparse matrix (--engine arrays)
   exploration.py the Box-Muller noise draws both engines share
-  learning_rules.py constants shared by the learning code of both engines
+  constants.py every global constant: the default network, the neuron's clock, the learning rule's knobs
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
   columns.py   HexColumns: the cells extruded into layers in R3 (--layers); bottom layer in, top layer out
   butter.py    WalnutButter: smears of neuron density (per unit cell) on the plane; shapes Rect and Disc

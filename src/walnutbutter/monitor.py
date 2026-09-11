@@ -9,6 +9,7 @@ from __future__ import annotations
 import random
 from typing import Sequence
 
+from .constants import ACROSS, MINIMUM_POTENTIAL, OMEGA, ROWS, THRESHOLD, WEIGHT_RANGE
 from .grid import GridOfNeurons
 from .inputs import format_bits
 
@@ -50,16 +51,16 @@ def run_epoch(
 
 
 def main(
-    across: int = 8,
-    rows: int = 10,
+    across: int = ACROSS,
+    rows: int = ROWS,
     weight: float | None = None,
-    threshold: float = 0.25,
+    threshold: float = THRESHOLD,
     seed: int | None = None,
-    omega: float = 0.2,
+    omega: float = OMEGA,
     input_bits: Sequence[bool] | None = None,
     permute: bool = True,
-    weight_range: tuple[float, float] = (-1.0, 1.0),
-    minimum_potential: float = -1.0,
+    weight_range: tuple[float, float] = WEIGHT_RANGE,
+    minimum_potential: float = MINIMUM_POTENTIAL,
 ) -> GridOfNeurons:
     """Build a across x rows grid, run one epoch on its bottom row, and return it.
 

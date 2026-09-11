@@ -17,7 +17,12 @@ from .cartesian import CartesianNodes
 from .columns import HexColumns
 from .grid import GridOfNeurons
 from .inputs import CODES, DEFAULT_CODE, parse_bits
-from .learning import CRITICS, ELIGIBILITIES, LATE, TARGETS, Teacher
+from .constants import (
+    ACROSS, CRITIC, ELIGIBILITY, HOMEOSTASIS, INTERVAL, LATE, LR, MINIMUM_POTENTIAL, OMEGA, REACH, REFRACTORY, ROWS,
+    SIGMA, TARGET, TARGET_RATE, TAU, THRESHOLD, THRESHOLD_RANGE, UNSTICK, UNSTICK_TARGET, WEIGHT_EPSILON,
+    WEIGHT_RANGE,
+)
+from .learning import CRITICS, ELIGIBILITIES, LATE_RULES, TARGETS, Teacher
 from .monitor import main, run_epoch
 from .neuron import Neuron
 from .persistence import across_of, checkpoint, restore, resume_teacher
@@ -36,14 +41,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--across",
         type=int,
         default=None,
-        help="number of hexagons across (default: 8, or twice the code length with --ecc)",
+        help=f"number of hexagons across (default: {ACROSS}, or twice the code length with --ecc)",
     )
     parser.add_argument(
         "-r",
         "--rows",
         type=int,
-        default=10,
-        help="number of hexagon rows (default: 10)",
+        default=ROWS,
+        help=f"number of hexagon rows (default: {ROWS})",
     )
     parser.add_argument(
         "--nodes",
@@ -78,10 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reach",
         type=float,
-        default=2.0,
+        default=REACH,
         metavar="UNITS",
-        help="with --nodes: a neuron connects to every neuron within this many unit distances "
-        "(default: 2, the two hex rings at unit density)",
+        help=f"with --nodes: a neuron connects to every neuron within this many unit distances "
+        f"(default: {REACH:g}, the two hex rings at unit density)",
     )
     parser.add_argument(
         "--window",
@@ -96,14 +101,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--weight",
         type=float,
         default=None,
-        help="fixed weight for every connection (default: random, uniform between -1 and 1)",
+        help=f"fixed weight for every connection (default: random, uniform between {WEIGHT_RANGE[0]:g} and {WEIGHT_RANGE[1]:g})",
     )
     parser.add_argument(
         "-o",
         "--omega",
         type=float,
-        default=0.2,
-        help="proportion of connections that are small-world shortcuts, 0 to <1 (default: 0.2)",
+        default=OMEGA,
+        help=f"proportion of connections that are small-world shortcuts, 0 to <1 (default: {OMEGA:g})",
     )
     parser.add_argument(
         "-i",
@@ -137,8 +142,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--epsilon",
         type=float,
-        default=0.001,
-        help="the smallest weight allowed under --positive-weights (default: 0.001)",
+        default=WEIGHT_EPSILON,
+        help=f"the smallest weight allowed under --positive-weights (default: {WEIGHT_EPSILON:g})",
     )
     parser.add_argument(
         "--seeds",
@@ -158,8 +163,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-t",
         "--threshold",
         type=float,
-        default=0.25,
-        help="input a neuron needs before it fires (default: 0.25)",
+        default=THRESHOLD,
+        help=f"input a neuron needs before it fires (default: {THRESHOLD:g})",
     )
     parser.add_argument(
         "--step",
@@ -186,84 +191,84 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target",
         choices=sorted(TARGETS),
-        default="reversed",
-        help="what the top row should show, derived from the input row (default: reversed)",
+        default=TARGET,
+        help=f"what the top row should show, derived from the input row (default: {TARGET})",
     )
     parser.add_argument(
         "--late",
-        choices=LATE,
-        default="count",
-        help="what a signal arriving after its target has already fired earns: count (default: the same update "
+        choices=LATE_RULES,
+        default=LATE,
+        help=f"what a signal arriving after its target has already fired earns: count (the same update "
         "as one that landed, a local Hebbian term under the global reward), ignore (nothing: the "
         "node-perturbation estimator proper) or depress (the opposite update, the shape of spike-timing-dependent "
-        "plasticity)",
+        f"plasticity). Default: {LATE}",
     )
     parser.add_argument(
         "--critic",
         choices=sorted(CRITICS),
-        default="row",
-        help="how the reward is judged: row (fraction of output neurons matching the target), decoded "
-        "(read the row as a word, error-correct it, fraction of data bits right), or decoded-exact "
-        "(all data bits right or nothing). Default: row",
+        default=CRITIC,
+        help=f"how the reward is judged: row (fraction of output neurons matching the target), decoded "
+        f"(read the row as a word, error-correct it, fraction of data bits right), or decoded-exact "
+        f"(all data bits right or nothing). Default: {CRITIC}",
     )
     parser.add_argument(
         "--lr",
         type=float,
-        default=0.03,
-        help="learning rate for --learn (default: 0.03)",
+        default=LR,
+        help=f"learning rate for --learn (default: {LR:g})",
     )
     parser.add_argument(
         "--sigma",
         type=float,
-        default=0.1,
-        help="exploration noise: std dev of each neuron's starting potential under --learn (default: 0.1)",
+        default=SIGMA,
+        help=f"exploration noise: std dev of each neuron's starting potential under --learn (default: {SIGMA:g})",
     )
     parser.add_argument(
         "--eligibility",
         choices=ELIGIBILITIES,
-        default="perturb",
-        help="what the global reward acts on: the neuron's exploration noise (perturb) or plain Hebbian (default: perturb)",
+        default=ELIGIBILITY,
+        help=f"what the global reward acts on: the neuron's exploration noise (perturb) or plain Hebbian (default: {ELIGIBILITY})",
     )
     parser.add_argument(
         "--homeostasis",
         type=float,
-        default=1e-6,
+        default=HOMEOSTASIS,
         metavar="RATE",
-        help="per-epoch rate at which each neuron's threshold moves toward its target firing rate (default: 1e-6; 0 = off)",
+        help=f"per-epoch rate at which each neuron's threshold moves toward its target firing rate (default: {HOMEOSTASIS:g}; 0 = off)",
     )
     parser.add_argument(
         "--target-rate",
         type=float,
-        default=0.5,
-        help="firing rate homeostasis aims for, 0 to 1 (default: 0.5)",
+        default=TARGET_RATE,
+        help=f"firing rate homeostasis aims for, 0 to 1 (default: {TARGET_RATE:g})",
     )
     parser.add_argument(
         "--unstick",
         type=float,
-        default=1e-3,
+        default=UNSTICK,
         metavar="RATE",
-        help="per-epoch rate at which a stuck output neuron's threshold moves toward --unstick-target; only "
-        "output neurons firing >99%% or <1%% of the time are touched, only while stuck (default: 0.001; 0 = off)",
+        help=f"per-epoch rate at which a stuck output neuron's threshold moves toward --unstick-target; only "
+        f"output neurons firing >99%% or <1%% of the time are touched, only while stuck (default: {UNSTICK:g}; 0 = off)",
     )
     parser.add_argument(
         "--unstick-target",
         type=float,
-        default=0.5,
-        help="firing rate the output un-sticking aims for (default: 0.5)",
+        default=UNSTICK_TARGET,
+        help=f"firing rate the output un-sticking aims for (default: {UNSTICK_TARGET:g})",
     )
     parser.add_argument(
         "--threshold-range",
         type=float,
         nargs=2,
         metavar=("LOW", "HIGH"),
-        default=(-5.0, 5.0),
-        help="limits homeostasis may move a threshold to (default: -5 5)",
+        default=THRESHOLD_RANGE,
+        help=f"limits homeostasis may move a threshold to (default: {THRESHOLD_RANGE[0]:g} {THRESHOLD_RANGE[1]:g})",
     )
     parser.add_argument(
         "--minimum-potential",
         type=float,
-        default=-1.0,
-        help="floor on a neuron's potential: inhibition and carried-over charge can go no lower (default: -1)",
+        default=MINIMUM_POTENTIAL,
+        help=f"floor on a neuron's potential: inhibition and carried-over charge can go no lower (default: {MINIMUM_POTENTIAL:g})",
     )
     parser.add_argument(
         "--discharge",
@@ -273,25 +278,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--interval",
         type=float,
-        default=10.0,
+        default=INTERVAL,
         metavar="MS",
-        help="nominal milliseconds between inputs (default: 10). Propagation is instantaneous; the clock only "
+        help=f"nominal milliseconds between inputs (default: {INTERVAL:g}). Propagation is instantaneous; the clock only "
         "advances between inputs, and a neuron that fired within --refractory of an input ignores it",
     )
     parser.add_argument(
         "--tau",
         type=float,
-        default=2.0,
+        default=TAU,
         metavar="MS",
-        help="leak time constant of every neuron, nominal milliseconds (default: 2; inf switches the leak off). "
+        help=f"leak time constant of every neuron, nominal milliseconds (default: {TAU:g}; inf switches the leak off). "
         "The leak is computed only when a neuron receives a signal",
     )
     parser.add_argument(
         "--refractory",
         type=float,
-        default=5.0,
+        default=REFRACTORY,
         metavar="MS",
-        help="absolute refractory period of every neuron, nominal milliseconds (default: 5)",
+        help=f"absolute refractory period of every neuron, nominal milliseconds (default: {REFRACTORY:g})",
     )
     parser.add_argument(
         "--epochs",
@@ -339,7 +344,7 @@ def cli_main(argv: list[str] | None = None) -> int:
     """Run the CLI. Returns a process exit code (0 = success)."""
     args = build_parser().parse_args(argv)
     if args.across is None:
-        args.across = 2 * CODES[args.ecc].code_bits if args.ecc else 8
+        args.across = 2 * CODES[args.ecc].code_bits if args.ecc else ACROSS
     args.show = not args.headless and args.seeds is None  # a seed batch is headless by definition
     args.fast = args.show and not args.step
     args.learn = not args.no_learn
@@ -412,7 +417,7 @@ def _run(args: argparse.Namespace) -> int:
             seed=seed,
             omega=args.omega,
             permute=not args.no_permute,
-            weight_range=(args.epsilon, 1.0) if args.positive_weights else (-1.0, 1.0),
+            weight_range=(args.epsilon, 1.0) if args.positive_weights else WEIGHT_RANGE,
             minimum_potential=args.minimum_potential,
         )
         if args.minimum_potential >= args.threshold:
@@ -660,7 +665,7 @@ def _run_seeds(args: argparse.Namespace) -> int:
         threshold=args.threshold,
         omega=args.omega,
         permute=not args.no_permute,
-        weight_range=(args.epsilon, 1.0) if args.positive_weights else (-1.0, 1.0),
+        weight_range=(args.epsilon, 1.0) if args.positive_weights else WEIGHT_RANGE,
         minimum_potential=args.minimum_potential,
     )
     teacher_kwargs = dict(

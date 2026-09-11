@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+from .constants import MINIMUM_POTENTIAL, REFRACTORY, TAU, THRESHOLD
 from .connection import Connection
 
 
@@ -19,10 +20,10 @@ class Neuron:
     """
 
     verbose = False  # class-wide: print a line each time any neuron fires (off unless asked: walnutbutter -v)
-    tau = 2.0  # leak time constant, nominal milliseconds (swept September 10, 2026: see docs/tau-sweep.md); math.inf switches the leak off
-    refractory = 5.0  # absolute refractory period, nominal milliseconds
+    tau = TAU  # leak time constant, nominal milliseconds; math.inf switches the leak off (see constants.py)
+    refractory = REFRACTORY  # absolute refractory period, nominal milliseconds (see constants.py)
 
-    def __init__(self, name: str = "Neuron", threshold: float = 0.25, minimum_potential: float = -1.0):
+    def __init__(self, name: str = "Neuron", threshold: float = THRESHOLD, minimum_potential: float = MINIMUM_POTENTIAL):
         self.name = name
         self.position = None  # (q, r) axial coordinates, set by the grid
         self.outgoing: list[Connection] = []  # connections this neuron sends signals along

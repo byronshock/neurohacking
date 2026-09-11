@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 
+from .constants import ACROSS, MINIMUM_POTENTIAL, OMEGA, ROWS, THRESHOLD, WEIGHT_RANGE
 from .connection import Connection
 from .network import Network
 from .neuron import Neuron
@@ -54,15 +55,15 @@ class GridOfNeurons(Network):
 
     def __init__(
         self,
-        across: int = 8,
-        rows: int = 10,
+        across: int = ACROSS,
+        rows: int = ROWS,
         weight: float | None = 1.0,
-        threshold: float = 0.25,
+        threshold: float = THRESHOLD,
         seed: int | None = None,
-        omega: float = 0.2,
+        omega: float = OMEGA,
         permute: bool = True,
-        weight_range: tuple[float, float] = (-1.0, 1.0),
-        minimum_potential: float = -1.0,
+        weight_range: tuple[float, float] = WEIGHT_RANGE,
+        minimum_potential: float = MINIMUM_POTENTIAL,
     ):
         """Build the mesh.
 

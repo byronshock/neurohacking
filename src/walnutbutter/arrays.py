@@ -31,7 +31,7 @@ import numpy as np
 from scipy.sparse import csr_array
 
 from .exploration import TWO_PI, uniforms
-from .learning_rules import RATE_MEMORY, STUCK_ABOVE, STUCK_BELOW
+from .constants import RATE_MEMORY, STUCK_ABOVE, STUCK_BELOW
 from .network import Network
 from .neuron import Neuron
 from .propagation import Wave
