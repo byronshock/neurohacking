@@ -291,6 +291,16 @@ value. We can take care of this when the neuron fires. The strategy of
 REINFORCE remains the same as much as we can keep it with the global
 dopamine reinforcer.
 
+*Decided (Byron, September 12, 2026):* the dopamine eligibility is
+calculated both locally and lazily. It is a property of a neuron. Signals
+are NOT traced back to their ancestors. The only trace available to the
+neuron is the activity across its synapses.
+
+*Decided FOR NOW (Byron, September 12, 2026):* the eligibility is the same
+for all of a neuron's weights. For now, dopamine is released and then all
+weights move together. *Open question:* whether the dopamine release or the
+weight update should happen first.
+
 ### 6.1 Exploration
 
 Before the cascade, every neuron $j$ (inputs included) draws
