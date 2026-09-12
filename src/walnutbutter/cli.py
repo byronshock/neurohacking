@@ -19,13 +19,14 @@ from .grid import GridOfNeurons
 from .inputs import CODES, DEFAULT_CODE, parse_bits
 from .constants import (
     ACROSS, CRITIC, ELIGIBILITY, HOMEOSTASIS, INTERVAL, LATE, LR, MINIMUM_POTENTIAL, OMEGA, REACH, REFRACTORY, ROWS,
-    SIGMA, TARGET, TARGET_RATE, TAU, THRESHOLD, THRESHOLD_RANGE, UNSTICK, UNSTICK_TARGET, WEIGHT_EPSILON,
+    PROBLEM, SIGMA, TARGET, TARGET_RATE, TAU, THRESHOLD, THRESHOLD_RANGE, UNSTICK, UNSTICK_TARGET, WEIGHT_EPSILON,
     WEIGHT_RANGE,
 )
 from .learning import CRITICS, ELIGIBILITIES, LATE_RULES, TARGETS, Teacher
 from .monitor import main, run_epoch
 from .neuron import Neuron
 from .persistence import across_of, checkpoint, restore, resume_teacher
+from .problems import PROBLEMS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,11 +38,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--problem",
+        choices=sorted(PROBLEMS),
+        default=PROBLEM,
+        help="what the network is asked to do: "
+        + "; ".join(f"{p.name} ({p.description})" for p in PROBLEMS.values())
+        + f". Default: {PROBLEM}",
+    )
+    parser.add_argument(
         "-a",
         "--across",
         type=int,
         default=None,
-        help=f"number of hexagons across (default: {ACROSS}, or twice the code length with --ecc)",
+        help=f"number of hexagons across (default: the problem's, {ACROSS} for {PROBLEM}; or twice the code length with --ecc)",
     )
     parser.add_argument(
         "-r",
@@ -343,11 +352,12 @@ def build_parser() -> argparse.ArgumentParser:
 def cli_main(argv: list[str] | None = None) -> int:
     """Run the CLI. Returns a process exit code (0 = success)."""
     args = build_parser().parse_args(argv)
+    problem = PROBLEMS[args.problem]
     if args.across is None:
-        args.across = 2 * CODES[args.ecc].code_bits if args.ecc else ACROSS
+        args.across = 2 * CODES[args.ecc].code_bits if args.ecc else problem.across
     args.show = not args.headless and args.seeds is None  # a seed batch is headless by definition
     args.fast = args.show and not args.step
-    args.learn = not args.no_learn
+    args.learn = problem.trained and not args.no_learn
     was_verbose, was_tau, was_refractory = Neuron.verbose, Neuron.tau, Neuron.refractory
     Neuron.verbose = bool(args.verbose) and not args.fast and not args.quiet
     if args.tau <= 0 or args.refractory < 0 or args.interval <= 0:
@@ -389,6 +399,10 @@ def _run(args: argparse.Namespace) -> int:
             grid_from_file, data = loaded
             args.seed = data["seed"]
             args.across, args.rows, args.omega = across_of(data), data["rows"], data["omega"]
+            if data.get("problem") and data["problem"] != args.problem:
+                args.problem = data["problem"]
+                args.learn = PROBLEMS[args.problem].trained and not args.no_learn
+                print(f"problem: {args.problem} (from the checkpoint)", file=sys.stderr)
             if data.get("container") == "lattice":
                 args.nodes = 0
             args.ecc = _ecc_from_checkpoint(data)
@@ -454,6 +468,13 @@ def _run(args: argparse.Namespace) -> int:
             else:
                 grid = GridOfNeurons(**settings)
             grid.interval = args.interval
+            grid.problem = args.problem
+            if not PROBLEMS[args.problem].trained:
+                print(
+                    f"problem {args.problem}: {PROBLEMS[args.problem].description}. No Teacher; the neurons' own rule "
+                    "is not built yet, so the network runs untrained",
+                    file=sys.stderr,
+                )
             if args.ecc:
                 try:
                     grid.use_ecc(args.ecc)
@@ -684,6 +705,9 @@ def _run_seeds(args: argparse.Namespace) -> int:
     )
     if args.no_learn:
         print("error: --seeds is for comparing learning runs; drop --no-learn", file=sys.stderr)
+        return 2
+    if not PROBLEMS[args.problem].trained:
+        print(f"error: --seeds compares learning runs; {args.problem} has no external training yet", file=sys.stderr)
         return 2
     jobs = []
     for seed in seeds:

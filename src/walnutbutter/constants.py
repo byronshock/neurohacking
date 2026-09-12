@@ -29,6 +29,9 @@ REFRACTORY = 5.0  # absolute refractory period: a neuron that fired this recentl
 REFRACTORY_HOPS = 3.0  # the refractory period divided by the time a signal takes to travel one hop; not an integer (Byron, September 11, 2026)
 INTERVAL = 10.0  # spacing of inputs when no time is given; the clock only advances between inputs
 
+# --- the problem ------------------------------------------------------------------
+PROBLEM = "reversal"  # what the network is asked to do and how it is watched (problems.PROBLEMS)
+
 # --- learning: the global-reinforcement rule and its housekeeping ---------------
 TARGET = "reversed"  # what the top row should show, derived from the input row (learning.TARGETS)
 CRITIC = "row"  # how the reward is judged (learning.CRITICS)

@@ -43,6 +43,7 @@ walnutbutter                 # open the window, free-run, learn, report accuracy
 walnutbutter --headless --epochs 20000 -q   # the same without a window, for a fixed number of epochs
 walnutbutter --step          # window where each Space press runs one epoch
 walnutbutter --no-learn      # just watch the untrained network
+walnutbutter --problem sustain_inputs   # the 16 inputs on 8 neurons, no Teacher: the neurons' own rule (AUTHORITY.md §8)
 walnutbutter --across 24 --rows 20       # a bigger mesh than the default 8 x 10: 12 input bits, coded to 24
 walnutbutter --ecc                        # 4 data bits -> Hamming (7, 4) -> 14 across, on a 14 x 10 field
 walnutbutter --ecc parity64               # the (6, 4) detect-only code on 12 across instead
@@ -514,6 +515,7 @@ src/walnutbutter/
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input
   learning.py  output targets, reward, the global-reinforcement rule, and Teacher
+  problems.py  the problems (--problem): layout, inputs, and whether a Teacher trains the network
   persistence.py checkpoint() and restore() for learned weights
   visualizer.py hex geometry and pygame drawing: show() and save()
   cli.py       argument parsing and the `walnutbutter` command

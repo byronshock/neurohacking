@@ -42,6 +42,7 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         "weight_range": list(grid.weight_range),
         "permutation": grid.permutation,
         "ecc": grid.ecc,
+        "problem": getattr(grid, "problem", None),  # what the run was asked to do (problems.PROBLEMS)
         "engine": engine,
         "random_weights": grid.weight is None if not lattice else True,
         "epoch": grid.epoch,

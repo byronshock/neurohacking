@@ -386,3 +386,18 @@ as health, not convergence, and drift is normal.
   either engine.
 - **The network keeps living.** There is no training run and no evaluation
   run, only one run that keeps going; a rule may not assume an end.
+
+## 8. Problems — open
+
+A problem is what a network is asked to do and how it is watched doing it:
+the layout, the inputs, and whether anything outside the network trains it.
+`--problem` picks one; PROBLEM (§1) is the default.
+
+- **reversal** (default today). The 8 × 10 hex grid; 4 random bits,
+  complement-coded and permuted onto the bottom row; the top row is taught
+  to show the bottom row reversed by a Teacher with a target and a critic
+  (§6.2). The task of the pre-alpha, kept as the baseline.
+- **sustain_inputs** (Byron, September 12, 2026). The same 16 inputs will
+  be used across 8 neurons. However, this network is not trained
+  externally: the neurons will utilize the new eligibility rule (§6).
+  Until that rule is built the network runs untrained.
