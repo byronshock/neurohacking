@@ -26,8 +26,10 @@ SQRT3 = math.sqrt(3)
 BACKGROUND = (24, 24, 28)
 OUTLINE = (12, 12, 14)
 UNFIRED = (70, 74, 84)
-FIRED_CENTRE = (255, 224, 96)  # fired neurons shade from this in wave 0...
-FIRED_EDGE = (214, 84, 28)  # ...to this in the last wave
+HOT = (255, 48, 32)  # a neuron that fired at the end of the epoch...
+COOL = (40, 96, 255)  # ...through to one that last fired an epoch or more ago
+TRACE_BACKGROUND = (16, 16, 20)
+TRACE_TICK = (255, 200, 80)
 ORIGIN_RING = (255, 255, 255)
 
 # --- geometry (no pygame needed) -------------------------------------------
@@ -78,12 +80,17 @@ def _lerp_colour(a, b, t: float):
     return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-def neuron_colour(fired_in_wave: int | None, last_wave: int):
-    """Grey if the neuron has not fired; otherwise a shade based on the wave it fired in."""
-    if fired_in_wave is None:
+def neuron_colour(fired_at: float | None, now: float, span: float):
+    """Grey if the neuron has never fired; otherwise hot (red) for a spike at `now` cooling to blue over `span` ms."""
+    if fired_at is None:
         return UNFIRED
-    t = fired_in_wave / last_wave if last_wave else 0.0
-    return _lerp_colour(FIRED_CENTRE, FIRED_EDGE, t)
+    age = max(0.0, now - fired_at)
+    return _lerp_colour(HOT, COOL, min(1.0, age / span) if span > 0 else 1.0)
+
+
+def heat(network) -> tuple[float, float]:
+    """`now` and `span` for colouring: the end of the epoch, cooling over one epoch's length."""
+    return network.horizon, network.interval or 1.0
 
 
 # --- drawing ------------------------------------------------------------------
@@ -102,8 +109,7 @@ def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) ->
     width, height = surface.get_size()
     hex_radius, offset_x, offset_y = layout(grid, width, height, margin)
 
-    waves = [n.fired_in_wave for n in grid.neurons.values() if n.fired_in_wave is not None]
-    last_wave = max(waves) if waves else 0
+    now, span = heat(grid)
 
     disc = hex_radius * SQRT3 / 2 * DISC_FILL
     outline = max(1, round(hex_radius / 12))
@@ -111,12 +117,12 @@ def draw_grid(surface: pygame.Surface, grid: GridOfNeurons, margin: int = 24) ->
     for (q, r), neuron in grid.neurons.items():
         dx, dy = axial_to_pixel(q, r, hex_radius)
         centre = (offset_x + dx, offset_y + dy)
-        pygame.draw.circle(surface, neuron_colour(neuron.fired_in_wave, last_wave), centre, disc)
+        pygame.draw.circle(surface, neuron_colour(neuron.fired_at, now, span), centre, disc)
         pygame.draw.circle(surface, OUTLINE, centre, disc, width=outline)
 
     # Ring the stimulus: the neurons that fired in wave 0, or the input neurons
     # that will be forced when the mesh is fired, or failing both the origin.
-    stimulus = [n for n in grid.neurons.values() if n.fired_in_wave == 0] or grid.input_neurons()
+    stimulus = [n for n in grid.neurons.values() if n.forced] or grid.input_neurons()
     if not stimulus and grid.get_origin_neuron() is not None:
         stimulus = [grid.get_origin_neuron()]
     for neuron in stimulus:
@@ -156,15 +162,14 @@ def draw_nodes(surface: pygame.Surface, nodes: CartesianNodes, margin: int = 24)
     """Paint every neuron as a disc at its (x, y) position, coloured by wave like the grid."""
     width, height = surface.get_size()
     to_pixel, radius, box = node_layout(nodes, width, height, margin)
-    waves = [n.fired_in_wave for n in nodes if n.fired_in_wave is not None]
-    last_wave = max(waves) if waves else 0
+    now, span = heat(nodes)
     surface.fill(BACKGROUND)
     pygame.draw.rect(surface, UNFIRED, box, width=1)  # the random placement region, in unit distances
     for neuron in nodes:
         px, py = to_pixel(*neuron.position)
-        pygame.draw.circle(surface, neuron_colour(neuron.fired_in_wave, last_wave), (px, py), radius)
+        pygame.draw.circle(surface, neuron_colour(neuron.fired_at, now, span), (px, py), radius)
         pygame.draw.circle(surface, OUTLINE, (px, py), radius, width=1)
-        if neuron.fired_in_wave == 0:
+        if neuron.forced:
             pygame.draw.circle(surface, ORIGIN_RING, (px, py), radius * 0.55, width=max(1, round(radius / 6)))
 
 
@@ -212,8 +217,7 @@ def draw_columns(surface: pygame.Surface, columns: HexColumns, margin: int = 24)
     scale = min((width - 2 * margin) / span_w, (height - 2 * margin) / span_h)
     left, top = (width - scale * span_w) / 2, (height - scale * span_h) / 2
     radius = max(2.0, scale * 0.2)
-    waves = [n.fired_in_wave for n in columns.all_neurons() if n.fired_in_wave is not None]
-    last_wave = max(waves) if waves else 0
+    now, span = heat(columns)
     surface.fill(BACKGROUND)
     for layer in range(layers):
         x_off = left + layer * (lw + gap) * scale
@@ -222,9 +226,9 @@ def draw_columns(surface: pygame.Surface, columns: HexColumns, margin: int = 24)
             x, y, _ = neuron.position
             px = x_off + (x - min(xs) + 0.5) * scale
             py = top + (max(ys) - y + 0.5) * scale
-            pygame.draw.circle(surface, neuron_colour(neuron.fired_in_wave, last_wave), (px, py), radius)
+            pygame.draw.circle(surface, neuron_colour(neuron.fired_at, now, span), (px, py), radius)
             pygame.draw.circle(surface, OUTLINE, (px, py), radius, width=1)
-            if neuron.fired_in_wave == 0:
+            if neuron.forced:
                 pygame.draw.circle(surface, ORIGIN_RING, (px, py), radius * 0.55, width=max(1, round(radius / 6)))
 
 
@@ -236,15 +240,48 @@ def as_mesh(network):
     return network
 
 
-def draw(surface: pygame.Surface, network, margin: int = 24) -> None:
-    """Paint whichever container this is: discs on hex cells for the grid, discs at positions for nodes."""
+def draw(surface: pygame.Surface, network, margin: int = 24, trace: bool = False) -> None:
+    """Paint whichever container this is: discs on hex cells for the grid, discs at positions for nodes.
+
+    With `trace`, the bottom quarter of the surface shows the current epoch's
+    trace: a raster of every spike, time across, neuron down.
+    """
     network = as_mesh(network)
+    target = surface
+    if trace:
+        width, height = surface.get_size()
+        split = round(height * 0.72)
+        target = surface.subsurface(pygame.Rect(0, 0, width, split))
+        draw_trace(surface.subsurface(pygame.Rect(0, split, width, height - split)), network)
     if isinstance(network, HexColumns):
-        draw_columns(surface, network, margin)
+        draw_columns(target, network, margin)
     elif isinstance(network, CartesianNodes):
-        draw_nodes(surface, network, margin)
+        draw_nodes(target, network, margin)
     else:
-        draw_grid(surface, network, margin)
+        draw_grid(target, network, margin)
+
+
+def draw_trace(surface: pygame.Surface, network, margin: int = 12) -> None:
+    """The current epoch as a raster: each wave a column at its time, a tick per neuron that fired, forced ones ringed white."""
+    width, height = surface.get_size()
+    surface.fill(TRACE_BACKGROUND)
+    neurons = list(network.all_neurons())
+    index = {neuron: i for i, neuron in enumerate(neurons)}
+    start, end = network.time, network.horizon
+    span = end - start if end > start else 1.0
+    left, right = margin, width - margin
+    top, bottom = margin, height - margin
+    pygame.draw.line(surface, UNFIRED, (left, bottom), (right, bottom), 1)
+    for tick in range(int(span) + 1):  # a mark per millisecond
+        x = left + (right - left) * tick / span
+        pygame.draw.line(surface, UNFIRED, (x, bottom), (x, bottom + 3), 1)
+    row_height = (bottom - top) / max(1, len(neurons))
+    for wave in network.waves:
+        x = left + (right - left) * (wave.time - start) / span
+        for neuron in wave.fired:
+            y = top + row_height * index[neuron]
+            colour = ORIGIN_RING if neuron.forced and wave.time == start else TRACE_TICK
+            pygame.draw.line(surface, colour, (x, y), (x, y + max(1.0, row_height - 1)), 2)
 
 
 def save(grid, path: str, width: int = 800, height: int = 600) -> None:
@@ -270,20 +307,30 @@ def caption(grid: GridOfNeurons, teacher: Teacher | None = None) -> str:
     if isinstance(grid, HexColumns) and grid.layers > 1:
         omega = f"x{grid.layers} layers" + omega
     epoch = f" epoch {grid.epoch} at {grid.time:g} ms:" if grid.epoch else ":"
-    learning = f"   {teacher.status()}" if teacher else ""
+    dopamine = getattr(grid, "dopamine", None)
+    learning = f"   {teacher.status()}" if teacher else f"   {dopamine.status()}" if dopamine else ""
     return f"walnutbutter {grid.across}x{grid.rows}{omega}{epoch} {state}{learning}   [Space] new input  [Esc] quit"
 
 
-def caption_fast(grid: GridOfNeurons, epochs_per_second: float, fps: int, teacher: Teacher | None = None) -> str:
+def caption_fast(
+    grid: GridOfNeurons, epochs_per_second: float, fps: int, teacher: Teacher | None = None, paused: bool = False
+) -> str:
+    if paused:
+        return caption(grid, teacher).replace("[Space] new input", "paused at the end of this epoch, its trace below  [Space] resume")
     return caption(grid, teacher).replace(
-        "[Space] new input", f"free-running at {epochs_per_second:,.0f} epochs/s, monitored at {fps} Hz"
+        "[Space] new input", f"free-running at {epochs_per_second:,.0f} epochs/s, monitored at {fps} Hz  [Space] pause"
     )
 
 
 def handle_event(
-    event: pygame.event.Event, grid: GridOfNeurons, teacher: Teacher | None = None
+    event: pygame.event.Event, grid: GridOfNeurons, teacher: Teacher | None = None, state: dict | None = None
 ) -> tuple[bool, bool]:
-    """Apply one event to the grid. Returns (keep_running, needs_redraw)."""
+    """Apply one event to the grid. Returns (keep_running, needs_redraw).
+
+    Stepping (no `state`): Space runs one epoch. Free-running (`state` with
+    a "paused" key): Space pauses at the end of the current epoch, showing
+    its trace, and resumes.
+    """
     if event.type == pygame.QUIT:
         return False, False
     if event.type != pygame.KEYDOWN:
@@ -291,6 +338,9 @@ def handle_event(
     if event.key in (pygame.K_ESCAPE, pygame.K_q):
         return False, False
     if event.key == pygame.K_SPACE:
+        if state is not None:
+            state["paused"] = not state["paused"]
+            return True, True
         if teacher:
             teacher.epoch()  # new input with exploration noise, then reinforce
         else:
@@ -309,6 +359,8 @@ def show(
     report_seconds: float | None = 30.0,
     log=None,
     on_report=None,
+    noise: float | None = None,
+    rng=None,
 ) -> None:
     """Open a window on the grid and let the keyboard drive it.
 
@@ -339,23 +391,28 @@ def show(
         started = time.perf_counter()
         last_report = started
         log = log or (lambda line: print(line, file=sys.stderr, flush=True))
+        state = {"paused": False} if fast else None
         if fast:
             Neuron.verbose = False
         while running:
             if needs_redraw:
-                draw(screen, grid)
+                paused = bool(state and state["paused"])
+                draw(screen, grid, trace=paused)
                 pygame.display.set_caption(
-                    caption_fast(grid, epochs_per_second, fps, teacher) if fast else caption(grid, teacher)
+                    caption_fast(grid, epochs_per_second, fps, teacher, paused) if fast else caption(grid, teacher)
                 )
                 pygame.display.flip()
                 needs_redraw = False
             for event in pygame.event.get():
-                running, changed = handle_event(event, grid, teacher)
+                running, changed = handle_event(event, grid, teacher, state)
                 needs_redraw = needs_redraw or changed
                 if not running:
                     break
             if not running:
                 break
+            if fast and state["paused"]:
+                clock.tick(fps)  # hold at the end of the epoch, its trace on show
+                continue
             if fast:
                 # Let the system run until the monitor's next sample is due.
                 count = 0
@@ -363,14 +420,19 @@ def show(
                     if teacher:
                         teacher.epoch(verbose=False)
                     else:
-                        run_epoch(grid, verbose=False)
+                        run_epoch(grid, verbose=False, noise=noise or 0.0, rng=rng)
                     count += 1
                 epochs_per_second = 0.8 * epochs_per_second + 0.2 * count * fps if epochs_per_second else count * fps
                 now = time.perf_counter()
-                if teacher and report_seconds is not None and now - last_report >= report_seconds:
+                if report_seconds is not None and now - last_report >= report_seconds:
                     last_report = now
-                    teacher.record(now - started, epochs_per_second)
-                    log(f"[{format_elapsed(now - started)}] epoch {grid.epoch:,}: {teacher.status()}, {epochs_per_second:,.0f} epochs/s")
+                    if teacher:
+                        teacher.record(now - started, epochs_per_second)
+                        status = teacher.status()
+                    else:
+                        dopamine = getattr(grid, "dopamine", None)
+                        status = f"{grid.total_spikes():,} spikes" + (f", {dopamine.status()}" if dopamine else "")
+                    log(f"[{format_elapsed(now - started)}] epoch {grid.epoch:,}: {status}, {epochs_per_second:,.0f} epochs/s")
                     if on_report:
                         on_report()
                 next_frame += frame_time

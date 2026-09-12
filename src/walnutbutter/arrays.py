@@ -1,21 +1,27 @@
 """The array engine: the same network as vectors and a sparse matrix.
 
-`ArrayNetwork` wraps a mesh built the usual way (a `GridOfNeurons` or a
-`CartesianNodes`) and runs it with numpy and scipy instead of neuron
-objects. Neurons become vectors of length N (potential, threshold, noise,
-firing rate, the wave each fired in); connections become vectors of length
-E in connection-id order (source, target, weight, active) and a sparse
-N x N matrix for delivery. A wave is one sparse matrix-vector product: the
-neurons that fired this wave, as a 0/1 vector, times the weights, gives
-every neuron the sum of its incoming signals; those not yet fired take it,
-the floor is applied, and whoever has reached threshold fires next wave.
+`ArrayNetwork` wraps a mesh built the usual way (a `GridOfNeurons`, a
+`HexColumns` or a `CartesianNodes`) and runs it with numpy and scipy instead
+of neuron objects. Neurons become vectors of length N (potential, threshold,
+noise, firing rate, spike times, the wave each fired in this epoch);
+connections become vectors of length E in connection-id order (source,
+target, weight, active, the stamp of the last signal integrated) and a
+sparse N x N matrix for delivery. A wave is one sparse matrix-vector
+product: the neurons whose signals arrive now, as a 0/1 vector, times the
+weights, gives every neuron the sum of its incoming signals; those not
+refractory take it, the floor is applied, and whoever has reached threshold
+fires, its signals scheduled one hop later.
 
-The object engine (`propagation.py`) and this one are meant to be the same
-network: same topology, same ids, same rules, interchangeable checkpoints,
-and `tests/test_arrays.py` runs them side by side. They differ only in the
-order floating-point additions happen, so on the rare epoch where a
-potential sits within rounding of a threshold the two can decide
-differently and their runs diverge from there, like two seeds.
+The schedule (AUTHORITY.md §4) is a heap of distinct times, each with the
+0/1 vector of sources whose signals arrive then and, when an input lands
+then, the vector of neurons forced. The object engine (`propagation.py`)
+and this one are meant to be the same network: same topology, same ids,
+same rules, interchangeable checkpoints, and `tests/test_arrays.py` runs
+them side by side. They differ only in the order floating-point additions
+happen, so on the rare wave where a potential sits within rounding of a
+threshold the two can decide differently and their runs diverge from
+there, like two seeds. Exponentials are taken with `math.exp` on both
+sides so that the dopamine arithmetic agrees to the last bit.
 
 The mesh stays attached as `mesh`: `sync_to_mesh()` copies the arrays back
 into its neuron and connection objects, which is how checkpoints are
@@ -25,29 +31,38 @@ neuron in this engine.
 
 from __future__ import annotations
 
+import heapq
+import math
 import random
 
 import numpy as np
 from scipy.sparse import csr_array
 
-from .exploration import TWO_PI, uniforms
 from .constants import RATE_MEMORY, STUCK_ABOVE, STUCK_BELOW
+from .exploration import TWO_PI, uniforms
 from .network import Network
 from .neuron import Neuron
+from .clock import TOLERANCE, before, slack
 from .propagation import Wave
 
 
+def slack_v(times: np.ndarray) -> np.ndarray:
+    """clock.slack, as a vector."""
+    return TOLERANCE * np.maximum(1.0, np.abs(times))
+
+
 class ArrayWave:
-    """What happened in one wave of the array engine: the indices of the neurons that fired."""
+    """What happened in one wave of the array engine: its time and the indices of the neurons that fired."""
 
-    __slots__ = ("number", "fired")
+    __slots__ = ("number", "time", "fired")
 
-    def __init__(self, number: int, fired: np.ndarray):
+    def __init__(self, number: int, time: float, fired: np.ndarray):
         self.number = number
+        self.time = time
         self.fired = fired
 
     def __repr__(self) -> str:
-        return f"ArrayWave(number={self.number}, fired={self.fired.tolist()})"
+        return f"ArrayWave(number={self.number}, time={self.time:g}, fired={self.fired.tolist()})"
 
 
 class ArrayNetwork(Network):
@@ -63,6 +78,9 @@ class ArrayNetwork(Network):
         self.ecc = mesh.ecc
         self.epoch = mesh.epoch
         self.time, self.interval, self.input_time = mesh.time, mesh.interval, mesh.input_time
+        self.horizon = mesh.horizon
+        self.dopamine = mesh.dopamine  # shared: one pool, whichever engine runs
+        self.readout, self.read_window = mesh.readout, mesh.read_window
         self.seed = mesh.seed
         self.threshold = mesh.threshold
         self.minimum_potential = mesh.minimum_potential
@@ -78,15 +96,17 @@ class ArrayNetwork(Network):
         self.potential = np.array([x.potential for x in neurons], dtype=float)
         self.threshold_v = np.array([x.threshold for x in neurons], dtype=float)
         self.floor = np.array([x.minimum_potential for x in neurons], dtype=float)
-        self.noise = np.zeros(n)
+        self.noise = np.array([x.noise for x in neurons], dtype=float)
         self.rate = np.array([x.rate for x in neurons], dtype=float)
         self.fired_wave = np.full(n, -1, dtype=np.int64)  # -1: has not fired this epoch
         for x in neurons:
             if x.has_fired:
                 self.fired_wave[self.index[x]] = x.fired_in_wave
-        # the clock: when each neuron last spiked (-inf: never) and when its potential was last brought up to date
+        self.forced = np.array([x.forced for x in neurons], dtype=bool)
+        # the clock: when each neuron last spiked (-inf: never), the spike before that, and how many spikes ever
         self.fired_at = np.array([-np.inf if x.fired_at is None else x.fired_at for x in neurons], dtype=float)
-        self.last_update = np.array([x.last_update for x in neurons], dtype=float)
+        self.previous_fired_at = np.array([-np.inf if x.previous_fired_at is None else x.previous_fired_at for x in neurons], dtype=float)
+        self.spikes = np.array([x.spikes for x in neurons], dtype=np.int64)
 
         e = len(mesh.connections)
         connections = [mesh.connections[i] for i in range(1, e + 1)]
@@ -94,12 +114,20 @@ class ArrayNetwork(Network):
         self.target = np.array([self.index[c.target] for c in connections], dtype=np.int64)
         self.weight = np.array([c.weight for c in connections], dtype=float)
         self.active = np.array([c.is_active for c in connections], dtype=bool)
+        self.last_signal = np.array([-np.inf if c.last_signal is None else c.last_signal for c in connections], dtype=float)
+        self.delivered_wave = np.full(e, -1, dtype=np.int64)  # the wave of this epoch each connection delivered in
         self._active_edges = np.flatnonzero(self.active)
         self._build_matrix()
 
         self.input_index = np.array([self.index[x] for x in mesh.input_row()], dtype=np.int64)
         self.output_index = np.array([self.index[x] for x in mesh.output_row()], dtype=np.int64)
         self.waves: list[ArrayWave] = []
+        # the schedule: distinct times, each with the sources whose signals arrive then and the neurons forced then
+        self._times: list[float] = []
+        self._arrivals: dict[float, np.ndarray] = {}
+        self._stimuli: dict[float, np.ndarray] = {}
+        for time, connection in mesh.schedule.pending():
+            self._arrive(self.index[connection.source], time)
 
     # --- the matrix -------------------------------------------------------
 
@@ -126,6 +154,86 @@ class ArrayNetwork(Network):
         if self._matrix_dirty:
             self._matrix.data[: self._edge_count] = self.weight[self._order]
             self._matrix_dirty = False
+
+    # --- the schedule ----------------------------------------------------------
+
+    def _key(self, time: float) -> float:
+        time = float(time)
+        if time not in self._arrivals and time not in self._stimuli:
+            heapq.heappush(self._times, time)
+        return time
+
+    def _arrive(self, source: int, time: float) -> None:
+        time = self._key(time)
+        if time not in self._arrivals:
+            self._arrivals[time] = np.zeros(len(self.neurons_list))
+        self._arrivals[time][source] = 1.0
+
+    def _arrive_all(self, firing: np.ndarray, time: float) -> None:
+        time = self._key(time)
+        if time not in self._arrivals:
+            self._arrivals[time] = np.zeros(len(self.neurons_list))
+        self._arrivals[time] += firing
+
+    def _stimulate(self, forced: np.ndarray, time: float) -> None:
+        time = self._key(time)
+        if time not in self._stimuli:
+            self._stimuli[time] = np.zeros(len(self.neurons_list), dtype=bool)
+        self._stimuli[time] |= forced
+
+    def pending(self) -> list[tuple[float, int]]:
+        """Signals in flight as (time, source index), by time: what sync_to_mesh puts back on the mesh's schedule."""
+        return [(time, int(i)) for time in sorted(self._arrivals) for i in np.flatnonzero(self._arrivals[time] > 0)]
+
+    def _run(self, until: float = math.inf) -> list[ArrayWave]:
+        """Process every wave due before `until` (see propagation.Schedule.run), appending to this epoch's waves."""
+        potential, threshold, floor, fired_wave = self.potential, self.threshold_v, self.floor, self.fired_wave
+        n = len(potential)
+        hop = Neuron.hop()
+        out_degree = self._out_degree
+        while self._times and before(self._times[0], until):
+            self._refresh_matrix()
+            first = heapq.heappop(self._times)
+            limit = first + slack(first)
+            firing = self._arrivals.pop(first, None)
+            stimulus = self._stimuli.pop(first, None)
+            time = first if stimulus is None else first
+            while self._times and self._times[0] <= limit:  # the same moment, within the clock's slack
+                other = heapq.heappop(self._times)
+                more = self._arrivals.pop(other, None)
+                if more is not None:
+                    firing = more if firing is None else firing + more
+                forced_too = self._stimuli.pop(other, None)
+                if forced_too is not None:
+                    stimulus = forced_too if stimulus is None else stimulus | forced_too
+                    time = other  # an input's exact time anchors the wave
+            number = len(self.waves)
+            refractory = self.fired_at + Neuron.refractory > time + slack(time)  # fired within the refractory period before now
+            take = np.zeros(n, dtype=bool)
+            if firing is not None:
+                both = self._matrix @ firing
+                incoming, touched = both[:n], both[n:] > 0
+                take = touched & ~refractory
+                potential[take] = np.maximum(potential[take] + incoming[take], floor[take])
+                delivering = self.active & (firing[self.source] > 0)
+                self.delivered_wave[delivering] = number
+                self.last_signal[delivering & take[self.target]] = time
+            fire_forced = (stimulus & ~refractory) if stimulus is not None else np.zeros(n, dtype=bool)
+            fired = fire_forced | (take & (potential >= threshold))
+            idx = np.flatnonzero(fired)
+            if len(idx):
+                self.previous_fired_at[idx] = self.fired_at[idx]
+                self.fired_at[idx] = time
+                potential[idx] = 0.0  # the spike resets the potential
+                fired_wave[idx] = number
+                self.spikes[idx] += 1
+                self.forced |= fire_forced
+                if out_degree @ fired > 0:  # someone has active connections out: signals in flight
+                    self._arrive_all(fired.astype(float), time + hop)
+            self.waves.append(ArrayWave(number, time, idx))
+            if self.dopamine is not None:
+                self._learn(time, idx)  # every wave, fired or not: the pool decays in the same steps as the object engine
+        return self.waves
 
     # --- the epoch ----------------------------------------------------------
 
@@ -159,28 +267,20 @@ class ArrayNetwork(Network):
     def has_fired(self) -> np.ndarray:
         return self.fired_wave >= 0
 
+    def total_spikes(self) -> int:
+        return int(self.spikes.sum())
+
     def reset(self, discharge: bool = False) -> None:
         if discharge:
             self.potential[:] = 0.0
         self.fired_wave[:] = -1
+        self.forced[:] = False
         self.noise[:] = 0.0
+        self.delivered_wave[:] = -1
         self.waves = []
-
-    def leak(self, now: float) -> None:
-        """Bring every potential up to `now`. The object engine does this lazily per neuron on arrival;
-        here it is one vector operation, which is the same arithmetic (decays compose)."""
-        elapsed = now - self.last_update
-        moving = elapsed > 0.0
-        if moving.any():
-            if Neuron.tau != np.inf:
-                self.potential[moving] *= np.exp(-elapsed[moving] / Neuron.tau)
-            self.last_update[moving] = now
 
     def perturb(self, sigma: float, rng, now: float | None = None) -> None:
         """Exploration: the same Box-Muller draws as the object engine (see exploration.py), done as a vector."""
-        now = self.input_time if now is None else now
-        if now is not None:
-            self.leak(now)
         n = len(self.neurons_list)
         draws = np.array(uniforms(rng, n))
         angle = TWO_PI * draws[0::2]
@@ -191,75 +291,81 @@ class ArrayNetwork(Network):
         self.noise = noise[:n]
         np.maximum(self.potential + self.noise, self.floor, out=self.potential)
 
-    def fire_input(self) -> list[ArrayWave]:
+    def fire_input(self, until: float | None = None) -> list[ArrayWave]:
         if self.input_pattern is None:
             raise ValueError("no input pattern set; call set_input() first")
         self.time = self.input_time if self.input_time is not None else self.next_time()
         self.epoch += 1
-        forced = self.input_index[np.asarray(self.input_pattern, dtype=bool)]
-        self.waves = self.propagate_forced(forced, self.time)
-        return self.waves
+        forced = np.zeros(len(self.neurons_list), dtype=bool)
+        forced[self.input_index[np.asarray(self.input_pattern, dtype=bool)]] = True
+        self._stimulate(forced, self.time)
+        self.horizon = self.time + self.interval if until is None else float(until)
+        return self._run(self.horizon)
+
+    def propagate(self, fire=(), inputs=None, now: float | None = None, until: float | None = None) -> list[ArrayWave]:
+        """Run a cascade from the mesh neurons `fire`, forced at `now` (default: the clock), up to `until` (default: one interval)."""
+        if inputs:
+            raise NotImplementedError("external input amounts are not vectorised; use the object engine")
+        now = self.time if now is None else now
+        forced = np.zeros(len(self.neurons_list), dtype=bool)
+        forced[[self.index[neuron] for neuron in fire]] = True
+        self._stimulate(forced, now)
+        self.horizon = now + self.interval if until is None else float(until)
+        return self._run(self.horizon)
 
     def output_times(self) -> list[float | None]:
         return [float(self.fired_at[i]) if self.fired_wave[i] >= 0 else None for i in self.output_index]
-
-    def propagate_forced(self, forced: np.ndarray, now: float | None = None) -> list[ArrayWave]:
-        """Run one cascade at clock time `now` from the neurons `forced` to fire in wave 0. Returns the waves."""
-        self._refresh_matrix()
-        matrix = self._matrix
-        potential, threshold, floor, fired_wave = self.potential, self.threshold_v, self.floor, self.fired_wave
-        n = len(potential)
-        if now is None:
-            now = self.time
-        self.leak(now)
-        refractory = self.fired_at + Neuron.refractory > now  # fired within the refractory period before now
-        forced = forced[~refractory[forced]]  # a refractory neuron ignores the stimulus too
-        firing = np.zeros(n, dtype=float)
-        firing[forced] = 1.0
-        fired_wave[forced] = 0
-        self.fired_at[forced] = now
-        potential[forced] = 0.0  # the spike resets the potential
-        waves = [ArrayWave(0, np.sort(forced))]
-        out_degree = self._out_degree
-        while out_degree @ firing > 0:  # signals in flight: the firing neurons have active connections out
-            number = len(waves)
-            both = matrix @ firing
-            incoming, touched = both[:n], both[n:] > 0
-            unfired = fired_wave < 0
-            take = touched & unfired & ~refractory
-            potential[take] = np.maximum(potential[take] + incoming[take], floor[take])
-            ready = take & (potential >= threshold)
-            fired_wave[ready] = number
-            self.fired_at[ready] = now
-            potential[ready] = 0.0
-            waves.append(ArrayWave(number, np.flatnonzero(ready)))  # recorded even if nobody fired, like the object engine
-            if not ready.any():
-                break
-            firing = ready.astype(float)
-        return waves
 
     def fired_neurons(self):
         self.sync_to_mesh()
         return self.mesh.fired_neurons()
 
     def output_fired(self) -> list[bool]:
-        return (self.fired_wave[self.output_index] >= 0).tolist()
+        if self.read_window is None:
+            return (self.fired_wave[self.output_index] >= 0).tolist()
+        fired_at = self.fired_at[self.output_index]
+        return (fired_at + slack_v(fired_at) >= self.horizon - self.read_window).tolist()
 
-    # --- learning -----------------------------------------------------------
+    # --- learning: dopamine ---------------------------------------------------------
+
+    def _learn(self, time: float, idx: np.ndarray) -> float:
+        """The refires among the neurons `idx` firing at `time` release, then move their gated incoming weights (dopamine.learn)."""
+        dopamine = self.dopamine
+        previous = self.previous_fired_at[idx]
+        refired = previous > -np.inf
+        ridx = idx[refired]
+        delays = time - previous[refired] - Neuron.refractory
+        releases = [dopamine.release_amount(d) for d in delays.tolist()]  # math.exp, like the object engine
+        n = len(self.potential)
+        refired_v = np.zeros(n, dtype=bool)
+        refired_v[ridx] = True
+
+        def update(advantage: float) -> None:
+            if not advantage:
+                return
+            step = np.zeros(n)
+            step[ridx] = dopamine.lr * advantage * np.array(releases)
+            mask = self.active & refired_v[self.target] & (self.last_signal > self.previous_fired_at[self.target])
+            low, high = self.weight_range
+            self.weight[mask] = np.clip(self.weight[mask] + step[self.target[mask]], low, high)
+            self._matrix_dirty = True
+
+        return dopamine.step(time, releases, update)
+
+    # --- learning: the reinforce rule, factored out ---------------------------------
 
     def reinforce(self, advantage: float, lr: float, sigma: float, eligibility: str, late: str) -> int:
         """The global-reward update, edge by edge, all at once. Returns connections changed."""
         if not advantage:
             return 0
-        fw = self.fired_wave
-        fired_source, fired_target = fw[self.source], fw[self.target]
-        mask = self.active & (fired_source >= 0) & (fired_target != 0)  # delivered, and not into a forced input
+        fired_target = self.fired_wave[self.target]
+        mask = (self.delivered_wave >= 0) & ~self.forced[self.target]  # delivered this epoch, and not into a forced neuron
         if eligibility == "perturb":
             e = self.noise[self.target] / sigma if sigma else np.zeros(len(self.target))
         else:
             e = np.where(fired_target >= 0, 1.0, -1.0)
         if late != "count":
-            arrived_late = (fired_target >= 0) & (fired_source + 1 > fired_target)
+            arrived_late = (fired_target >= 0) & (self.delivered_wave > fired_target)
             if late == "ignore":
                 mask &= ~arrived_late
             else:
@@ -271,14 +377,14 @@ class ArrayNetwork(Network):
         return int(mask.sum())
 
     def update_rates(self) -> None:
-        unforced = self.fired_wave != 0
+        unforced = ~self.forced
         fired = (self.fired_wave[unforced] >= 0).astype(float)
         self.rate[unforced] += RATE_MEMORY * (fired - self.rate[unforced])
 
     def homeostasis(self, rate: float, target: float, threshold_range: tuple[float, float]) -> int:
         if rate <= 0:
             return 0
-        unforced = self.fired_wave != 0
+        unforced = ~self.forced
         low, high = threshold_range
         self.threshold_v[unforced] = np.clip(self.threshold_v[unforced] + rate * (self.rate[unforced] - target), low, high)
         return int(unforced.sum())
@@ -298,7 +404,7 @@ class ArrayNetwork(Network):
     # --- back to objects ------------------------------------------------------
 
     def sync_to_mesh(self) -> None:
-        """Copy the arrays into the mesh's neurons and connections (for checkpoints and drawing)."""
+        """Copy the arrays into the mesh's neurons, connections and schedule (for checkpoints and drawing)."""
         for i, neuron in enumerate(self.neurons_list):
             wave = int(self.fired_wave[i])
             neuron.potential = float(self.potential[i])
@@ -307,15 +413,24 @@ class ArrayNetwork(Network):
             neuron.rate = float(self.rate[i])
             neuron.has_fired = wave >= 0
             neuron.fired_in_wave = wave if wave >= 0 else None
+            neuron.forced = bool(self.forced[i])
             neuron.fired_at = None if self.fired_at[i] == -np.inf else float(self.fired_at[i])
-            neuron.last_update = float(self.last_update[i])
+            neuron.previous_fired_at = None if self.previous_fired_at[i] == -np.inf else float(self.previous_fired_at[i])
+            neuron.spikes = int(self.spikes[i])
         connections = self.mesh.connections
-        for i, weight in enumerate(self.weight.tolist(), start=1):
+        for i, (weight, last) in enumerate(zip(self.weight.tolist(), self.last_signal.tolist()), start=1):
             connections[i].weight = weight
+            connections[i].last_signal = None if last == -np.inf else last
         mesh = self.mesh
         mesh.epoch = self.epoch
-        mesh.time, mesh.interval, mesh.input_time = self.time, self.interval, self.input_time
-        mesh.waves = [Wave(w.number, [], [self.neurons_list[i] for i in w.fired.tolist()]) for w in self.waves]
+        mesh.time, mesh.interval, mesh.input_time, mesh.horizon = self.time, self.interval, self.input_time, self.horizon
+        mesh.dopamine = self.dopamine
+        mesh.waves = [Wave(w.number, w.time, [], [self.neurons_list[i] for i in w.fired.tolist()]) for w in self.waves]
+        mesh.schedule.clear()
+        for time, i in self.pending():
+            for connection in self.neurons_list[i].outgoing:
+                if connection.is_active:
+                    mesh.schedule.signal(connection, time)
         for name in ("input_pattern", "input_bits", "input_coded", "input_data"):
             setattr(mesh, name, getattr(self, name))
         mesh._rng.setstate(self._rng.getstate())

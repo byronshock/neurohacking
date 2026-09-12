@@ -84,15 +84,16 @@ def test_forced_neuron_ignores_threshold_and_is_not_fired_twice(capsys, monkeypa
     assert capsys.readouterr().out.count("fired") == 1
 
 
-def test_already_fired_neuron_is_skipped(capsys):
+def test_a_refractory_neuron_is_not_forced(capsys):
     a = Neuron("a")
-    a.fire()
-    waves = propagate(fire=[a])
-    assert waves[0].fired == []
+    a.fire(now=0.0)
+    waves = propagate(fire=[a], now=0.0)
+    assert waves[0].fired == [] and waves[0].time == 0.0
+    assert propagate(fire=[a], now=5.0)[0].fired == [a]
 
 
-def test_empty_stimulus_gives_one_empty_wave():
-    assert propagate() == [Wave(number=0)]
+def test_empty_stimulus_gives_no_waves():
+    assert propagate() == []
 
 
 def test_grid_waves_match_hex_distance_from_origin(capsys):
@@ -103,7 +104,7 @@ def test_grid_waves_match_hex_distance_from_origin(capsys):
     assert len(waves[1].fired) == 18  # both rings around the origin fire in wave 1
     for (q, r), neuron in grid.neurons.items():
         distance = max(abs(q), abs(r), abs(q + r))
-        assert neuron.fired_in_wave == (distance + 1) // 2  # two steps per wave
+        assert first_wave(grid, neuron) == (distance + 1) // 2  # two steps per wave
 
 
 def test_grid_accepts_multiple_stimuli_in_one_epoch(capsys):
@@ -112,7 +113,12 @@ def test_grid_accepts_multiple_stimuli_in_one_epoch(capsys):
     waves = grid.propagate(fire=[origin, corner])
     assert waves[0].fired == [origin, corner]
     assert len(grid.fired_neurons()) == len(grid.neurons)
-    assert grid.get_neuron_at(1, 3).fired_in_wave == 1  # reached from the edge, not the origin
+    assert first_wave(grid, grid.get_neuron_at(1, 3)) == 1  # reached from the edge, not the origin
+
+
+def first_wave(grid, neuron) -> int:
+    """The first wave of the epoch a neuron fired in (it may refire later)."""
+    return next(w.number for w in grid.waves if neuron in w.fired)
 
 
 def test_grid_reset_clears_waves(capsys):
@@ -124,6 +130,6 @@ def test_grid_reset_clears_waves(capsys):
 
 def test_large_grid_has_no_recursion_limit(capsys):
     grid = GridOfNeurons(across=80, rows=60, omega=0)  # 4800 neurons; recursion died near 1000
-    grid.activate_origin()
+    grid.activate_origin(until=60.0)  # the corners are twenty-odd hops out: several intervals
     assert len(grid.fired_neurons()) == len(grid.neurons)
-    assert len(grid.waves) > 20  # two cells per wave now; recursion would still have died
+    assert len(grid.waves) > 20  # two cells per wave; recursion would still have died

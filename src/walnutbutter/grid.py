@@ -240,10 +240,10 @@ class GridOfNeurons(Network):
 
     # --- running ----------------------------------------------------------
 
-    def activate_origin(self) -> list[Wave]:
-        """Fire the origin neuron and propagate the signal wave by wave."""
+    def activate_origin(self, until: float | None = None) -> list[Wave]:
+        """Fire the origin neuron and run the schedule wave by wave, up to `until` (default: one interval)."""
         origin = self.get_origin_neuron()
         if origin:
             print(f"\nOrigin neuron {origin.name} has {len(origin.outgoing)} connections")
-            return self.propagate(fire=[origin])
+            return self.propagate(fire=[origin], until=until)
         return []

@@ -9,8 +9,9 @@ column) is not tunable and stays with the lattice that owns it; the format
 fallbacks for old checkpoints stay in persistence.py, because they record
 what those files meant when they were written, not what the default is now.
 
-The clock values live here but run from `Neuron.tau` and `Neuron.refractory`,
-the class attributes the command line sets (and restores) per run.
+The clock values live here but run from `Neuron.refractory` and
+`Neuron.refractory_hops`, the class attributes the command line sets (and
+restores) per run.
 """
 
 # --- the default network: footprint and wiring ----------------------------------
@@ -24,21 +25,28 @@ WEIGHT_EPSILON = 0.001  # --epsilon: the smallest weight allowed under --positiv
 # --- the neuron: activation and the clock (nominal milliseconds) ----------------
 THRESHOLD = 0.25  # total weighted input a neuron needs before it fires
 MINIMUM_POTENTIAL = -1.0  # floor on a potential: inhibition and carried-over charge can go no lower
-TAU = 2.0  # leak time constant (swept September 10, 2026: see docs/tau-sweep.md); math.inf switches the leak off
 REFRACTORY = 5.0  # absolute refractory period: a neuron that fired this recently ignores every signal
 REFRACTORY_HOPS = 3.0  # the refractory period divided by the time a signal takes to travel one hop; not an integer (Byron, September 11, 2026)
-INTERVAL = 10.0  # spacing of inputs when no time is given; the clock only advances between inputs
+INTERVAL = 10.0  # spacing of inputs when no time is given
 
 # --- the problem ------------------------------------------------------------------
 PROBLEM = "reversal"  # what the network is asked to do and how it is watched (problems.PROBLEMS)
 
-# --- learning: the global-reinforcement rule and its housekeeping ---------------
+# --- learning: dopamine (AUTHORITY.md §6) --------------------------------------------
+RULE = "dopamine"  # which learning rule runs: dopamine, or the reinforce rule factored out below (learning.RULES)
+LR = 0.03  # learning rate, both rules
+SIGMA = 0.1  # exploration noise: std dev added to each neuron's potential at every input; 0 switches it off
+DOPAMINE_RELEASE_ALPHA = 2.0  # shape of the gamma density of the amount a refire releases against its delay past the refractory period (Byron, September 12, 2026)
+DOPAMINE_RELEASE_THETA = 1.0  # ms: its scale; the release peaks at (alpha - 1) * theta past the end of the refractory period
+DOPAMINE_TAU = 20.0  # ms: decay of the global dopamine value
+DOPAMINE_EXPECTATION_TAU = 600_000.0  # ms (10 minutes): the exponential window of the expected dopamine trace, from 0 (Byron, September 12, 2026)
+DOPAMINE_ORDER = "release-first"  # at a refire, release before the weight update, or update-first (dopamine.ORDERS)
+
+# --- the reinforce rule of the pre-alpha, factored out behind RULE = "reinforce" ---
 TARGET = "reversed"  # what the top row should show, derived from the input row (learning.TARGETS)
 CRITIC = "row"  # how the reward is judged (learning.CRITICS)
 ELIGIBILITY = "perturb"  # what the global reward acts on (learning.ELIGIBILITIES)
 LATE = "count"  # what a signal arriving after its target fired earns (learning.LATE_RULES)
-LR = 0.03  # learning rate
-SIGMA = 0.1  # exploration noise: std dev of each neuron's starting potential
 BASELINE_RATE = 0.05  # per-epoch update of the running reward baseline the advantage is measured against
 WINDOW = 200  # epochs the Teacher's moving-average accuracy spans
 HOMEOSTASIS = 1e-6  # per-epoch rate at which a threshold moves toward the target firing rate; 0 = off

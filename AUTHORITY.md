@@ -65,7 +65,6 @@ literal of its own.
 |---|---|---|
 | THRESHOLD | 0.25 | $\theta$ every neuron starts with |
 | MINIMUM_POTENTIAL | −1 | floor on $p$: inhibition and carried-over charge go no lower |
-| TAU | 2 ms | leak time constant; $\infty$ switches the leak off |
 | REFRACTORY | 5 ms | absolute refractory period |
 | REFRACTORY_HOPS | 3 | the refractory period divided by the time a signal takes to travel one hop; not an integer, started at 3 |
 | INTERVAL | 10 ms | spacing of inputs when no time is given |
@@ -74,12 +73,22 @@ literal of its own.
 
 | constant | value | meaning |
 |---|---|---|
-| TARGET | reversed | what the output should show, derived from the input (§4.3) |
-| CRITIC | row | how the reward is judged (§6.2) |
-| ELIGIBILITY | perturb | what the reward acts on: the exploration noise, or a Hebbian ±1 |
-| LATE | count | what a signal arriving after its target fired earns (§6.4) |
+| RULE | dopamine | which learning rule runs: dopamine (§6) or reinforce (§6.7, factored out) |
 | LR | 0.03 | learning rate |
-| SIGMA | 0.1 | exploration noise: standard deviation of each neuron's starting potential |
+| SIGMA | 0.1 | exploration noise: standard deviation added to each neuron's potential at every input |
+| DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA | 2, 1 ms | shape and scale of the gamma density that gives the amount released against the refire delay past the refractory period |
+| DOPAMINE_TAU | 20 ms | decay of the global dopamine value |
+| DOPAMINE_EXPECTATION_TAU | 10 min | exponential window of the expected dopamine trace, which starts at 0 |
+| DOPAMINE_ORDER | release-first | at a refire, release before the weight update (or update-first) |
+
+The reinforce rule, factored out behind RULE = reinforce, keeps its own:
+
+| constant | value | meaning |
+|---|---|---|
+| TARGET | reversed | what the output should show, derived from the input (§4.3) |
+| CRITIC | row | how the reward is judged (§6.7) |
+| ELIGIBILITY | perturb | what the reward acts on: the exploration noise, or a Hebbian ±1 |
+| LATE | count | what a signal arriving after its target fired earns (§6.7) |
 | BASELINE_RATE | 0.05 | per-epoch update of the running reward baseline |
 | HOMEOSTASIS | 10⁻⁶ | per-epoch rate a threshold drifts toward its target firing rate; 0 = off |
 | TARGET_RATE | 0.5 | firing rate homeostasis aims for |
@@ -150,140 +159,128 @@ Every weight is drawn independently and uniformly from WEIGHT_RANGE, in
 connection-id order from the seeded stream, unless a fixed weight is given
 to all. Learning (§6) keeps every weight inside WEIGHT_RANGE.
 
-## 4. Signalling — kept
+## 4. Signalling — kept, on a schedule
 
 ### 4.1 The clock
 
-Time is in nominal milliseconds. Each input has a time $t_e$; the first is
-at 0 and by default each is INTERVAL after the last. Propagation is
-instantaneous: every wave of a cascade happens at $t_e$, and the clock
-advances only between inputs. The time component of signalling is carried
-by the refractory period and the leak, not by delays.
-
-*Changing:* REFRACTORY_HOPS (§1.2) defines the time a signal takes to travel
-one hop, REFRACTORY / REFRACTORY_HOPS. The code does not yet use it; when
-it does, a wave will advance the clock by one hop instead of happening at
-$t_e$. Each wave needs to know its time so it can accept additional
-signals that also have the same time.
+Time is in nominal milliseconds. A signal takes one **hop** to travel a
+connection, $h = \text{REFRACTORY} / \text{REFRACTORY\_HOPS}$ (Byron,
+September 11, 2026; not an integer, started at 3). Each input has a time
+$t_e$; the first is at 0 and by default each is INTERVAL after the last.
+There is no other delay: the time component of signalling is carried by
+the hop and the refractory period.
 
 *Decided (September 11, 2026):* a wave is "everything that happens at time
 $t$", not "everything one hop after the last wave". With a non-integer
 ratio, refractory recovery and hop arrivals fall at different times, and a
 second input can land mid-cascade. The queue is therefore a time-ordered
-schedule of signals, and a wave is the batch at the front with the same
+**schedule** of signals, and a wave is the batch at the front with the same
 timestamp, including any external signals stamped for that moment.
 Same-time signals sum within a wave before anyone fires, which keeps the
 floor and the firing decision order-independent; signals one hop apart are
 separate waves. Epochs stop being the unit: a cascade from one input can
 still be running when the next input's signals join the schedule, so "the
 queue empties, then the clock advances" no longer holds. Learning has its
-own cadence (§6).
-
-*Decided (Byron, September 11, 2026):* **no race conditions, for now.** All
-spikes assigned the same time participate in one wave, whatever their
-source: a cascade's own hop arrivals, a second input's forced neurons, or
-input bits given individual times (the stochastic presentation that
-`stochastic_input` was opened for). Within the wave, deliver everything,
-settle, then fire; the order in which same-time signals were queued never
-matters. The only ordering in the system is the timestamp, so a seed still
-reproduces a run exactly. A wave is never split by arrival order, and a
-neuron never fires mid-wave.
+own cadence (§6). Times are rounded to a nanosecond so that two signals
+computed to arrive at the same moment are the same moment in both engines.
 
 ### 4.2 An epoch
 
-An epoch is one input and the cascade it causes. In order:
+An epoch is one input and the schedule run up to the next input's time, the
+**horizon**, $t_e + \text{INTERVAL}$ by default. Signals due at or after the
+horizon wait for the next epoch. An input may not be given a time before
+the horizon the schedule has already run to. In order:
 
-1. **Reset.** Every neuron's fired state is cleared. A neuron that did not
-   fire keeps its sub-threshold potential; one that fired had its potential
-   reset by the spike. (`--discharge` zeroes every potential instead.) The
-   time of the last spike is kept: the refractory period outlives the
-   cascade.
-2. **Input.** The pattern is placed on the input neurons (§4.3).
-3. **Explore.** Each potential is leaked to $t_e$ (§5.1) and then nudged by
-   the exploration noise (§6.1), floored at MINIMUM_POTENTIAL.
-4. **Cascade.** The clock is set to $t_e$ and the waves run (§4.4) until the
-   queue is empty. The epoch ends there.
-5. **Learn.** The output is read, scored, and every connection updated (§6).
+1. **Reset.** Every neuron's fired-this-epoch state is cleared. Potentials
+   are kept (`--discharge` zeroes them instead). Spike times are kept: the
+   refractory period outlives the epoch. Signals in flight stay scheduled.
+2. **Input.** The pattern is placed on the input neurons (§4.3), stamped
+   $t_e$.
+3. **Explore.** Each potential is nudged by the exploration noise (§6.1),
+   floored at MINIMUM_POTENTIAL.
+4. **Run.** The schedule runs wave by wave (§4.4) until the horizon; a
+   neuron that refires learns as it fires (§6).
+5. **Report.** The output is read (and, under the reinforce rule, scored
+   and reinforced, §6.7).
 
 ### 4.3 Input and output
 
 The network's input is its bottom row (the bottom layer, for columns); its
-output is its top row (top layer). An input is $k$ = ACROSS / 2 raw bits,
-drawn as fair coin flips from the seeded stream (or given). They are
-**complement-coded**, the bits followed by their negations, so $2k$ bits
-reach the row and exactly half of it fires whatever the raw bits. The coded
-bits are then **permuted** by a random permutation drawn once per network
-and fixed for its life: place $i$ along the row shows coded bit $\pi(i)$.
-With an error-correcting code (`--ecc`), 4 data bits are first encoded to 7
-(Hamming) or 6 (parity) before complement coding.
+output is its top row (top layer). Per §0 the neurons are the same
+everywhere; only the external connections differ. An input is $k$ =
+ACROSS / 2 raw bits, drawn as fair coin flips from the seeded stream (or
+given). They are **complement-coded**, the bits followed by their
+negations, so $2k$ bits reach the row and exactly half of it fires whatever
+the raw bits. The coded bits are then **permuted** by a random permutation
+drawn once per network and fixed for its life: place $i$ along the row
+shows coded bit $\pi(i)$. With an error-correcting code (`--ecc`), 4 data
+bits are first encoded to 7 (Hamming) or 6 (parity) before complement
+coding.
 
-The neurons whose bit is 1 are **forced** to fire in wave 0. The target is
-derived from the input row: by default its reverse (TARGET = reversed);
-also copy, all-off, all-on.
+The neurons whose bit is 1 are **forced** to fire at $t_e$, refractory
+period permitting. A neuron forced this epoch is marked as such, which only
+the reinforce rule (§6.7) consults.
 
 ### 4.4 Waves
 
-Firing is queued, never recursive. Wave 0 is the stimulus: each forced
-neuron fires unless it is refractory (§5.3). The signals the neurons firing
-in wave $n$ send are delivered in wave $n+1$, and a wave has two phases:
+Firing is queued, never recursive. A wave is every event scheduled for one
+time $t$: the signals arriving, and the stimulus if an input lands then. It
+has two phases:
 
-1. **Deliver.** Every queued connection $i \to j$ delivers $w_{ij}$ to $j$
+1. **Deliver.** Every arriving signal $i \to j$ delivers $w_{ij}$ to $j$
    (§5.1). Then every neuron touched this wave settles: its potential is
    floored at MINIMUM_POTENTIAL, so the floor acts on the wave's summed input
    and the result does not depend on the order the signals arrived in.
-2. **Fire.** Every touched neuron whose potential now meets its threshold,
-   and is not refractory, fires (§5.2), and its active outgoing connections
-   are queued for the next wave.
+2. **Fire.** Every forced neuron fires unless refractory; then every touched
+   neuron whose potential now meets its threshold, and is not refractory,
+   fires (§5.2). Each firing neuron's active outgoing connections are
+   scheduled for $t + h$. The refires in the wave then learn (§6).
 
-A neuron fires at most once per cascade. Once it has fired, or while it is
-refractory, it ignores every signal, forced stimulus included; the delivery
-is still recorded (it matters to §6.4). A cascade ends when a wave queues
-nothing.
+A neuron may fire any number of times, the refractory period permitting; a
+tight loop of about REFRACTORY_HOPS hops can bring a neuron's own spike
+back to refire it. A refractory neuron ignores every signal, forced
+stimulus included; the delivery is still recorded as such. Each connection
+stamps the time of the last signal its target actually integrated: that is
+the only trace of activity the target has (§6.4).
 
 ## 5. Activation rule — open
 
-Everything below is what the code does today. §0 overrides it: the neuron
-is integrate-and-fire with **no leak** (§5.1 and TAU go), the refractory
-period stays and is a feature, and a neuron becomes eligible for dopamine
-release when it fires.
+Per §0, the neuron is integrate-and-fire with an absolute refractory
+period. There is no leak, not even a lazy leak.
 
-### 5.1 Integration, with a lazy leak
+### 5.1 Integration
 
-Nothing happens to a quiet neuron. When a signal of weight $w$ arrives at
-time $t$, the potential is first decayed for the time since it was last
-brought up to date, then the signal is added:
+A neuron integrates delta functions: a signal of weight $w$ arriving at
+time $t$ adds to the potential, and nothing else ever changes it:
 
-$$p \leftarrow p \, e^{-(t - t_{\text{last}}) / \tau}, \qquad t_{\text{last}} \leftarrow t, \qquad p \leftarrow p + w .$$
+$$p \leftarrow p + w .$$
 
-Within a cascade every arrival is at the same $t$, so the leak acts only
-across the gap between inputs. TAU = $\infty$ switches it off. Inhibition
-($w < 0$) pushes the potential down, and once per wave the floor applies:
-$p \leftarrow \max(p, \text{MINIMUM\_POTENTIAL})$.
+Inhibition ($w < 0$) pushes the potential down, and once per wave the floor
+applies: $p \leftarrow \max(p, \text{MINIMUM\_POTENTIAL})$. Sub-threshold
+charge is kept for as long as it takes; it does not decay.
 
 ### 5.2 Firing
 
-A neuron fires in a wave iff $p \ge \theta$, it has not fired in this
-cascade, and it is not refractory. The spike resets it:
+A neuron fires in a wave iff $p \ge \theta$ and it is not refractory. The
+spike resets it and is remembered, along with the spike before it:
 
-$$p \leftarrow 0, \qquad t_{\text{fired}} \leftarrow t, \qquad t_{\text{last}} \leftarrow t .$$
+$$p \leftarrow 0, \qquad t_{\text{prev}} \leftarrow t_{\text{fired}}, \qquad t_{\text{fired}} \leftarrow t .$$
 
-A forced input neuron fires in wave 0 regardless of $p$ and $\theta$.
+A forced input neuron fires at its input's time regardless of $p$ and
+$\theta$, refractory period permitting.
 
 ### 5.3 Refractory period
 
 A neuron that fired at $t_{\text{fired}}$ is refractory while
 $t < t_{\text{fired}} + \text{REFRACTORY}$. While refractory it ignores every
-signal and cannot be forced. With inputs INTERVAL = 10 ms apart and
-REFRACTORY = 5 ms, a neuron that fired last epoch is free again by the next.
+signal, does not integrate it, and cannot be forced. This is a feedback
+control mechanism and computational feature of the system (§0).
 
 ## 6. Learning rule — open
 
-Global reinforcement: one scalar reward per epoch, broadcast to every
-connection, combined with each neuron's own exploration noise. Nothing is
-traced back through the network. Everything below is what the code does
-today. §0 overrides the source of the reward: it is dopamine, produced
-locally by neurons that fire again after their refractory period and
-consumed globally (§6.2's critic is not the reward).
+Per §0: a neuron becomes eligible for dopamine release when it fires.
+Dopamine is the global reward used for reinforcement learning. It is
+produced locally and consumed globally.
 
 *Decided (Byron, September 11, 2026):* Learning happens when a neuron that
 previously fired fires again and is proportional to the global dopamine
@@ -303,74 +300,116 @@ weight update should happen first.
 
 ### 6.1 Exploration
 
-Before the cascade, every neuron $j$ (inputs included) draws
+At every input, every neuron $j$ (inputs included) draws
 $\xi_j \sim \mathcal{N}(0, \sigma^2)$ with $\sigma$ = SIGMA and adds it to
-its (leaked) potential, floored. It remembers $\xi_j$ for the epoch. Both
-engines draw from the same Box-Muller stream, so a seed gives the same noise
-whichever engine runs.
+its potential, floored. Tunable; 0 switches it off. Both engines draw from
+the same Box-Muller stream, so a seed gives the same noise whichever engine
+runs.
 
-### 6.2 Reward and advantage
+### 6.2 Release
 
-The **row** critic scores the epoch as the fraction of output neurons whose
-fired/not-fired state matches the target pattern: $R \in [0, 1]$, and firing
-nothing scores 0.5. (The decoded critics read the row as a code word and
-error-correct it first.) A running baseline $b$ tracks what usual looks
-like: on the first epoch $b = R$, and after each update
+A neuron whose previous spike was at $t_{\text{prev}}$ and which fires
+again at $t$ (necessarily $t \ge t_{\text{prev}} + \text{REFRACTORY}$), a
+delay $\delta = t - t_{\text{prev}} - \text{REFRACTORY}$ past the end of its
+refractory period, releases the gamma density of that delay (Byron,
+September 12, 2026, replacing the exponential
+$e^{-\delta / \text{DOPAMINE\_RELEASE\_TAU}}$):
 
-$$b \leftarrow b + \text{BASELINE\_RATE}\,(R - b) .$$
+$$d_j = \frac{\delta^{\alpha - 1} e^{-\delta / \theta}}{\Gamma(\alpha)\,\theta^{\alpha}},
+\qquad \alpha = \text{DOPAMINE\_RELEASE\_ALPHA} = 2,\ \theta = \text{DOPAMINE\_RELEASE\_THETA} = 1\text{ ms}.$$
 
-The **advantage** is $A = R - b$, taken before that update.
+With $\alpha = 2$ an instant refire releases nothing, the release peaks at
+$1/e$ one millisecond past the end of the refractory period, and it decays
+from there. *Tension with §0*, which says maximum dopamine is released when
+the neuron fires immediately after the refractory period: with this
+$\alpha$ the maximum comes $(\alpha - 1)\theta$ later, and $\alpha = 1$
+recovers §0's exponential. For Byron and Cedric to settle in §0. A neuron's
+first ever spike releases nothing.
+Forced neurons are neurons (§0): a forced refire releases and learns like
+any other.
 
-### 6.3 The weight update
+### 6.3 The global value and the expectation
 
-For every connection $i \to j$ that carried a signal this epoch ($i$ fired)
-into a neuron $j$ that was not a forced input:
+The global dopamine value $D(t)$ is a pool every release adds to, decaying
+lazily with DOPAMINE_TAU: $D(t) = D(t_0)\, e^{-(t - t_0)/\tau_D}$ between
+events. Reading it does not deplete it.
 
-$$w_{ij} \leftarrow \mathrm{clip}\big(w_{ij} + \text{LR} \cdot A \cdot e_j,\ \text{WEIGHT\_RANGE}\big),
-\qquad e_j = \xi_j / \sigma .$$
+*Decided (Byron, September 12, 2026):* instead of a baseline, actual
+reinforcement learning with an internal expectation, `dopamine_expected`,
+calculated globally under the assumption that dopamine is global. For now,
+the actual counts (not biologically realistic) of dopamine to date divided
+by the current time. The reinforcement is proportional to
+(dopamine − dopamine_expected), not to dopamine.
 
-This is node-perturbation REINFORCE, a three-factor rule: presynaptic
-activity × postsynaptic perturbation × global reward. A neuron nudged toward
-firing in an epoch better than usual gets stronger inputs from the neurons
-that fed it; in a worse epoch, weaker. With ELIGIBILITY = hebb, $e_j = +1$
-if $j$ fired and $-1$ if not, and no noise is injected. Weights into forced
-inputs are never touched: their firing was not the network's doing.
+*Decided (Byron, September 12, 2026), replacing the counts-over-time
+estimator, which could only creep:* start with dopamine_expected = 0 and use
+an exponential decay window of 10 minutes for the expected dopamine trace.
+At every wave, after the wave's releases and updates, the expectation moves
+toward the value by the fraction of the window that has elapsed since the
+last wave:
 
-### 6.4 Late signals
+$$E \leftarrow E + \big(1 - e^{-\Delta t / \tau_E}\big)\,(D(t) - E),
+\qquad A(t) = D(t) - E ,$$
 
-A signal that arrives after its target has already fired changed nothing
-in the cascade, but its connection was active with pre and post both fired
-this epoch. LATE says what it earns: **count** (default) the same update as
-a signal that landed, a local Hebbian term riding on the estimator, which
-learned faster on every seed tried; **ignore** nothing, the estimator
-proper; **depress** the opposite update, the shape of spike-timing-dependent
-plasticity.
+with $\tau_E$ = DOPAMINE_EXPECTATION_TAU and $A$ read before the move. This
+may start off slow but may eventually get us where we are trying to get.
 
-### 6.5 Firing rates, homeostasis, un-sticking
+### 6.4 Eligibility — for now
 
-Every neuron tracks its own firing rate, starting at 0.5, skipping epochs it
-was forced:
+One value per neuron, computed when it refires, from nothing but its own
+spikes and the stamps on its synapses (§4.4): $e_j = d_j$, its own release
+amount. A tight refire is both the biggest release and the biggest
+eligibility.
 
-$$r_j \leftarrow r_j + \text{RATE\_MEMORY}\,(f_j - r_j), \qquad f_j \in \{0, 1\}.$$
+### 6.5 The update — gated, for now
 
-Each epoch every unforced neuron's threshold drifts toward its target rate,
-and every **stuck** output neuron ($r_j$ outside [STUCK_BELOW, STUCK_ABOVE])
-is nudged faster, both clipped to THRESHOLD_RANGE:
+When neuron $j$ refires at $t$, every incoming connection $i \to j$ that
+carried a signal $j$ integrated since its previous spike (the gate,
+$x_i = 1$; otherwise $x_i = 0$) moves together:
 
-$$\theta_j \leftarrow \theta_j + \text{HOMEOSTASIS}\,(r_j - \text{TARGET\_RATE}),
-\qquad
-\theta_j \leftarrow \theta_j + \text{UNSTICK}\,(r_j - \text{UNSTICK\_TARGET}) .$$
+$$w_{ij} \leftarrow \mathrm{clip}\big(w_{ij} + \text{LR} \cdot A(t) \cdot e_j \cdot x_i,\ \text{WEIGHT\_RANGE}\big).$$
 
-Firing too often raises the threshold; too rarely lowers it. A saturated
-neuron gets no learning signal because the noise never changes whether it
-fires; moving its threshold back to where the noise matters restores a
-gradient there.
+This keeps REINFORCE's shape, presynaptic activity × postsynaptic
+eligibility × global signal, with the global signal now $A(t)$.
 
-### 6.6 What is reported
+### 6.6 Order within a wave
 
-The reward of every epoch, its mean to date, and an exponential moving
-average over about WINDOW epochs. The network runs forever: these are read
-as health, not convergence, and drift is normal.
+All the refires in one wave are handled together: their releases are
+computed, then (DOPAMINE_ORDER = release-first) added to the pool before
+$A(t)$ is read and the updates applied, or (update-first) after. Release
+first lets a neuron's own release count toward what it consumes; update
+first keeps the signal strictly what others released. A switch, to be
+swept.
+
+### 6.7 The reinforce rule — factored out
+
+RULE = reinforce is the rule of the pre-alpha, kept for comparison and run
+by the Teacher on a trained problem (§8). One scalar reward per epoch: the
+**row** critic scores the fraction of output neurons whose fired state this
+epoch matches the target pattern (decoded critics read the row as a code
+word first). A running baseline $b$ (BASELINE_RATE) gives the advantage
+$A = R - b$. For every connection $i \to j$ that carried a signal this
+epoch into a neuron $j$ not forced this epoch,
+$w_{ij} \leftarrow \mathrm{clip}(w_{ij} + \text{LR} \cdot A \cdot e_j)$ with
+$e_j = \xi_j/\sigma$ (ELIGIBILITY = perturb) or $\pm 1$ by whether $j$ fired
+(hebb). LATE says what a signal arriving after its target fired earns:
+count, ignore, or depress. The Teacher also keeps each unforced neuron's
+firing rate ($r_j$, RATE_MEMORY) and drifts thresholds toward TARGET_RATE
+(HOMEOSTASIS), nudging stuck outputs faster (UNSTICK), within
+THRESHOLD_RANGE. Under RULE = dopamine the Teacher only scores and reports;
+the network learns by §6.2–6.6.
+
+### 6.8 What is reported
+
+Spikes to date, the neurons fired this epoch, the dopamine value and its
+expectation, releases and updates to date; the score of every epoch, its
+mean to date, and an exponential moving average over about WINDOW epochs;
+and a per-epoch trace file of epoch, time, dopamine, expected and score.
+The window colours every neuron by the time of its last spike, hot (red)
+at the end of the epoch cooling to blue over an epoch's length, and Space
+pauses the free run at the end of an epoch to show its trace, a raster of
+every spike. The network runs forever: these are read as health, not
+convergence, and drift is normal.
 
 ## 7. Invariants the scaffolding guarantees — kept
 
@@ -382,8 +421,8 @@ as health, not convergence, and drift is normal.
 - **A seed is the whole run.** Shortcuts, weights, permutation, inputs and
   exploration noise all come from the seed's stream, in both engines.
 - **Checkpoints round-trip.** A checkpoint rebuilds the network from its
-  seed and settings and reloads its weights, thresholds and clock, in
-  either engine.
+  seed and settings and reloads its weights, thresholds, clock, spike
+  times, synapse stamps, signals in flight and dopamine, in either engine.
 - **The network keeps living.** There is no training run and no evaluation
   run, only one run that keeps going; a rule may not assume an end.
 
@@ -400,4 +439,21 @@ the layout, the inputs, and whether anything outside the network trains it.
 - **sustain_inputs** (Byron, September 12, 2026). The same 16 inputs will
   be used across 8 neurons. However, this network is not trained
   externally: the neurons will utilize the new eligibility rule (§6).
-  Until that rule is built the network runs untrained.
+
+  *The training epoch (Byron, September 12, 2026):* the sustain_inputs task
+  receives an input on the same forced neurons, reverberates for 20
+  milliseconds, and the same inputs (the inputs are the outputs) are read
+  so we have a trace of the "score"; the previous Teacher metric computes
+  the score even though it is not used for reinforcement. Time or epoch
+  number, expected dopamine value, and score are recorded for each
+  training epoch.
+
+  *Claude's reading of the read:* the outputs are the input row, the target
+  is the input pattern itself (copy), and a neuron is read as on if it
+  fired within the last refractory period before the read at the end of
+  the 20 ms, so the forced spike itself does not count and only a
+  sustained neuron scores. The score is the row critic: the fraction of
+  input neurons whose read state matches the pattern. Nothing outside the
+  network moves a threshold (homeostasis and un-sticking off). The record
+  goes to a CSV next to the checkpoint: epoch, time, dopamine, expected,
+  score.

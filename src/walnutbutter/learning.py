@@ -1,4 +1,9 @@
-"""Teaching the network by global reinforcement: a scalar reward broadcast to every connection.
+"""The Teacher: scores a trained problem's output every epoch, and runs the reinforce rule when asked.
+
+Two rules exist (AUTHORITY.md §6). The default, **dopamine**, lives in
+dopamine.py and runs inside the schedule as neurons refire; under it the
+Teacher only scores and reports. The **reinforce** rule of the pre-alpha,
+factored out behind `rule="reinforce"`, is the rest of this module.
 
 The top row is the network's output. For each epoch a target pattern is
 derived from the input pattern (by default its reverse) and the reward is
@@ -63,9 +68,10 @@ from typing import Callable, Sequence
 
 from .grid import GridOfNeurons
 from .constants import (
-    BASELINE_RATE, CRITIC, ELIGIBILITY, HOMEOSTASIS, LATE, LR, RATE_MEMORY, SIGMA, STUCK_ABOVE, STUCK_BELOW, TARGET,
-    TARGET_RATE, THRESHOLD_RANGE, UNSTICK, UNSTICK_TARGET, WINDOW,
+    BASELINE_RATE, CRITIC, ELIGIBILITY, HOMEOSTASIS, LATE, LR, RATE_MEMORY, RULE, SIGMA, STUCK_ABOVE, STUCK_BELOW,
+    TARGET, TARGET_RATE, THRESHOLD_RANGE, UNSTICK, UNSTICK_TARGET, WINDOW,
 )
+from .dopamine import Dopamine
 from .monitor import run_epoch
 from .neuron import Neuron
 
@@ -78,6 +84,7 @@ TARGETS: dict[str, Target] = {
     "all-on": lambda pattern: [True] * len(pattern),
 }
 
+RULES = ("dopamine", "reinforce")  # which learning rule runs (AUTHORITY.md §6)
 ELIGIBILITIES = ("perturb", "hebb")
 LATE_RULES = ("count", "ignore", "depress")  # what a signal that arrived after its target fired earns
 
@@ -100,10 +107,8 @@ def expected_outputs(grid: GridOfNeurons, target: str = "reversed") -> list[bool
 
 
 def output_fired(grid: GridOfNeurons) -> list[bool]:
-    """Whether each output neuron fired this epoch, left to right, whichever engine runs the grid."""
-    if arrays(grid):
-        return grid.output_fired()
-    return [neuron.has_fired for neuron in output_row(grid)]
+    """Whether each output neuron is on, left to right, whichever engine runs the grid (see Network.output_fired)."""
+    return grid.output_fired()
 
 
 def output_errors(grid: GridOfNeurons, target: str = "reversed") -> dict[Neuron, int]:
@@ -196,8 +201,8 @@ def reward(grid: GridOfNeurons, target: str = "reversed", critic: str = "row") -
 
 
 def forced(neuron: Neuron) -> bool:
-    """True if the neuron was forced to fire in wave 0 this epoch (an external stimulus)."""
-    return neuron.fired_in_wave == 0
+    """True if the neuron was forced to fire by the stimulus this epoch."""
+    return neuron.forced
 
 
 def update_rates(grid: GridOfNeurons) -> None:
@@ -323,13 +328,16 @@ def reinforce(
     step = lr * advantage
     perturb = eligibility == "perturb"
     changed = 0
+    last_delivery: dict = {}  # once per connection per epoch, by its last delivery (a source may fire more than once)
     for wave in grid.waves:
-        arrived = wave.number
         for connection in wave.delivered:
+            last_delivery[connection] = wave.number
+    for connection, arrived in last_delivery.items():
+        if True:
             target = connection.target
-            fired_in = target.fired_in_wave
-            if fired_in == 0:
+            if target.forced:
                 continue  # a forced input: its firing was not the network's doing
+            fired_in = target.fired_in_wave
             if perturb:
                 e = target.noise / sigma if sigma else 0.0
             else:
@@ -351,10 +359,14 @@ def reinforce(
 
 
 class Teacher:
-    """Runs epochs with exploration noise, scores them, and reinforces every connection.
+    """Runs epochs with exploration noise and scores them; under the reinforce rule, also reinforces every connection.
 
     Use `teacher.epoch()` in place of `run_epoch(grid)`: it injects the
-    exploration noise before the epoch and applies the update after it.
+    exploration noise before the epoch and, with `rule="reinforce"`, applies
+    the update after it. With the default `rule="dopamine"` the network
+    learns by itself as it runs (a Dopamine is attached to the grid if it
+    has none) and the Teacher scores, keeps the firing rates, homeostasis
+    and un-sticking, and reports.
     """
 
     def __init__(
@@ -375,7 +387,13 @@ class Teacher:
         unstick_target: float = UNSTICK_TARGET,
         critic: str = CRITIC,
         late: str = LATE,
+        rule: str = RULE,
     ):
+        if rule not in RULES:
+            raise ValueError(f"unknown learning rule {rule!r}; choose from {', '.join(RULES)}")
+        self.rule = rule
+        if rule == "dopamine" and getattr(grid, "dopamine", None) is None:
+            grid.dopamine = Dopamine(lr=lr)
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")
         if critic not in CRITICS:
@@ -418,6 +436,20 @@ class Teacher:
         self.baseline: float | None = None  # running average reward: what "usual" looks like
         self.last_reward: float | None = None
         self.average: float | None = None  # exponential moving average over about `window` epochs
+        self._trace = None  # a text file the per-epoch trace is written to (see trace_to)
+
+    def trace_to(self, path) -> None:
+        """Write one line per epoch to `path` (CSV, appended): epoch, time, dopamine, expected, score."""
+        import os
+        new = not os.path.exists(path) or os.path.getsize(path) == 0
+        self._trace = open(path, "a", buffering=1)
+        if new:
+            self._trace.write("epoch,time_ms,dopamine,expected,score\n")
+
+    def close_trace(self) -> None:
+        if self._trace is not None:
+            self._trace.close()
+            self._trace = None
 
     def epoch(self, bits: Sequence[bool] | None = None, verbose: bool = True) -> float:
         """Run one epoch with exploration noise, then learn from it. Returns its reward."""
@@ -430,12 +462,17 @@ class Teacher:
         if self.baseline is None:
             self.baseline = reward
         advantage = reward - self.baseline
-        reinforce(self.grid, advantage, self.lr, self.sigma, self.eligibility, self.late)
+        if self.rule == "reinforce":
+            reinforce(self.grid, advantage, self.lr, self.sigma, self.eligibility, self.late)
         update_rates(self.grid)
         homeostasis(self.grid, self.homeostasis, self.target_rate, self.threshold_range)
         self.unstuck_count += len(unstick_outputs(self.grid, self.unstick, self.unstick_target, self.threshold_range))
         self.baseline += self.baseline_rate * (reward - self.baseline)
         self.epochs += 1
+        if self._trace is not None:
+            pool = self.grid.dopamine
+            level, expected = ("", "") if pool is None else (f"{pool.peek(self.grid.horizon):.6g}", f"{pool.expected():.6g}")
+            self._trace.write(f"{self.grid.epoch},{self.grid.time:g},{level},{expected},{reward:.6g}\n")
         self.total_reward += reward
         self.last_reward = reward
         if self.average is None:
@@ -466,9 +503,13 @@ class Teacher:
         return entry
 
     def status(self) -> str:
+        verb = "learning" if self.rule == "reinforce" else "scoring"  # under the dopamine rule the Teacher only scores
         if self.average is None:
-            return f"learning {self.target}: no epochs yet"
-        settings = f"{self.eligibility}, lr {self.lr:g}, sigma {self.sigma:g}"
+            return f"{verb} {self.target}: no epochs yet"
+        if self.rule == "dopamine":
+            settings = f"{self.grid.dopamine.status()}, sigma {self.sigma:g}"
+        else:
+            settings = f"{self.eligibility}, lr {self.lr:g}, sigma {self.sigma:g}"
         if self.critic != "row":
             settings += f", critic {self.critic}"
         if self.late != "count":
@@ -481,7 +522,7 @@ class Teacher:
         if self.discharge:
             settings += ", discharge"
         return (
-            f"learning {self.target} ({settings}): "
+            f"{verb} {self.target} ({settings}): "
             f"accuracy {self.accuracy_to_date:.1%} to date over {self.epochs:,} epochs, "
             f"{self.average:.0%} recent"
         )

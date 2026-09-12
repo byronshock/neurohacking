@@ -15,6 +15,7 @@ from pathlib import Path
 from .cartesian import CartesianNodes
 from .columns import HexColumns
 from .grid import GridOfNeurons
+from .dopamine import Dopamine
 from .neuron import Neuron
 
 FORMAT = 1
@@ -48,8 +49,9 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         "epoch": grid.epoch,
         "time": grid.time,  # the clock, nominal milliseconds
         "interval": grid.interval,
-        "tau": Neuron.tau,
         "refractory": Neuron.refractory,
+        "refractory_hops": Neuron.refractory_hops,
+        "horizon": grid.horizon,  # the time the schedule has run to
         "connections": len(grid.connections),
         # the shortcuts are the only random part of a grid's topology: record them so a load can verify the mesh
         "shortcuts": [] if lattice else [[c.source.name, c.target.name] for c in grid.small_world_connections()],
@@ -59,7 +61,12 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         # the state the clock leaves behind, so a resumed run continues rather than restarts
         "potentials": [n.potential for n in grid.all_neurons()],
         "fired_at": [n.fired_at for n in grid.all_neurons()],
-        "last_update": [n.last_update for n in grid.all_neurons()],
+        "previous_fired_at": [n.previous_fired_at for n in grid.all_neurons()],
+        "spikes": [n.spikes for n in grid.all_neurons()],
+        # the synapses' stamps and the signals in flight, so a resumed run continues mid-cascade
+        "last_signal": [grid.connections[i].last_signal for i in range(1, len(grid.connections) + 1)],
+        "pending": [[time, connection.id] for time, connection in grid.schedule.pending()],
+        "dopamine": None if grid.dopamine is None else grid.dopamine.state(),
     }
     if lattice:
         index = {n: i for i, n in enumerate(grid.neurons)}
@@ -73,6 +80,7 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         ]
     if teacher is not None:
         data["learning"] = {
+            "rule": teacher.rule,
             "target": teacher.target,
             "lr": teacher.lr,
             "sigma": teacher.sigma,
@@ -233,16 +241,26 @@ def _restore_lattice(data: dict) -> CartesianNodes:
 
 
 def _restore_clock(grid, data: dict) -> None:
-    """Continue the clock: time, interval and each neuron's potential, last spike and last update."""
+    """Continue the clock: time, horizon, each neuron's potential and spikes, the synapse stamps, the signals in flight, the dopamine."""
     grid.time = data.get("time", 0.0)
     grid.interval = data.get("interval", grid.interval)
+    grid.horizon = data.get("horizon", grid.time)
     neurons = list(grid.all_neurons())
     for neuron, potential in zip(neurons, data.get("potentials", [])):
         neuron.potential = potential
     for neuron, fired_at in zip(neurons, data.get("fired_at", [])):
         neuron.fired_at = fired_at
-    for neuron, last in zip(neurons, data.get("last_update", [])):
-        neuron.last_update = last
+    for neuron, previous in zip(neurons, data.get("previous_fired_at", [])):
+        neuron.previous_fired_at = previous
+    for neuron, spikes in zip(neurons, data.get("spikes", [])):
+        neuron.spikes = spikes
+    for connection_id, last in enumerate(data.get("last_signal", []), start=1):
+        grid.connections[connection_id].last_signal = last
+    grid.schedule.clear()
+    for time, connection_id in data.get("pending", []):
+        grid.schedule.signal(grid.connections[connection_id], time)
+    if data.get("dopamine"):
+        grid.dopamine = Dopamine.from_state(data["dopamine"])
 
 
 def _ecc_name(data: dict) -> str | None:

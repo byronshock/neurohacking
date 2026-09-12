@@ -1,10 +1,11 @@
-"""What every container of neurons shares: an input row, an output row, epochs and propagation.
+"""What every container of neurons shares: an input row, an output row, epochs and the schedule.
 
 A network has `across` x `rows` addressable positions (`get_neuron_at(place,
 row)`, row 0 at the top), a bottom row that receives the complement-coded and
 permuted input pattern, a top row that is read as the output, and the epoch
-machinery: reset, present an input, propagate wave by wave. The hex mesh and
-the Cartesian lattice both build on this; the learning code works on either.
+machinery: reset, present an input at a time, run the schedule to the next
+input's time (AUTHORITY.md §4.2). The hex mesh and the Cartesian lattice both
+build on this; the learning code works on either.
 """
 
 from __future__ import annotations
@@ -12,10 +13,12 @@ from __future__ import annotations
 from typing import Iterable
 
 from .constants import INTERVAL
+from .dopamine import learn
 from .exploration import gaussians
 from .inputs import CODES, DEFAULT_CODE, Code, complement_code
 from .neuron import Neuron
-from .propagation import Wave, propagate
+from .clock import before, slack
+from .propagation import Schedule, Wave
 
 
 class Network:
@@ -39,6 +42,12 @@ class Network:
         self.time = 0.0  # the clock, nominal milliseconds: the time of the last input
         self.interval = INTERVAL  # default spacing of inputs when no time is given
         self.input_time: float | None = None  # when the pending input arrives
+        self.horizon = 0.0  # the time the schedule has run to: the next input may not come before it
+        self.schedule = Schedule()  # signals in flight, across epochs
+        self.dopamine = None  # a dopamine.Dopamine when the dopamine rule runs (set by whoever builds the run)
+        self.readout = "top"  # what is read as the output: the top row, or "input" (the inputs are the outputs)
+        self.read_window: float | None = None  # None: an output is on if it fired this epoch; else if it fired within
+        # this many ms before the horizon (the read at the end of the epoch)
         self.ecc: str | None = None  # name of the error-correcting code applied before complement coding, if any
         self.input_data: list[bool] | None = None  # the raw data bits when ecc is on
 
@@ -61,8 +70,17 @@ class Network:
         return [self.get_neuron_at(place, self.rows - 1) for place in range(self.across)]
 
     def output_row(self) -> list[Neuron]:
-        """The top row of neurons, left to right: the network's output."""
+        """The network's output, left to right: the top row, or the input row when the inputs are the outputs."""
+        if self.readout == "input":
+            return self.input_row()
         return [self.get_neuron_at(place, 0) for place in range(self.across)]
+
+    def output_fired(self) -> list[bool]:
+        """Whether each output neuron is on: fired this epoch, or, with a read window, within it before the horizon."""
+        if self.read_window is None:
+            return [neuron.has_fired for neuron in self.output_row()]
+        since = self.horizon - self.read_window
+        return [neuron.fired_at is not None and neuron.fired_at + slack(neuron.fired_at) >= since for neuron in self.output_row()]
 
     def input_width(self) -> int:
         """How many neurons the input covers: one bit of the (coded, permuted) pattern each."""
@@ -78,8 +96,8 @@ class Network:
         if len(pattern) != self.input_width():
             raise ValueError(f"input pattern has {len(pattern)} bits but the input covers {self.input_width()} neurons")
         time = self.next_time() if time is None else float(time)
-        if self.epoch and time < self.time:
-            raise ValueError(f"input time {time} is before the clock, which stands at {self.time}")
+        if self.epoch and before(time, self.horizon):
+            raise ValueError(f"input time {time} is before the schedule has already run to, {self.horizon}")
         self.input_pattern = pattern
         self.input_time = time
 
@@ -143,13 +161,29 @@ class Network:
             return []
         return [neuron for neuron, bit in zip(self.input_row(), self.input_pattern) if bit]
 
-    def fire_input(self) -> list[Wave]:
-        """Advance the clock to the input's time, force the input neurons to fire, and propagate wave by wave."""
+    def fire_input(self, until: float | None = None) -> list[Wave]:
+        """Present the input: schedule the stimulus at its time and run the schedule to the horizon.
+
+        The horizon is `until`, by default the interval after the input: the
+        next input's time. Signals due at or after it wait for the next epoch.
+        Returns this epoch's waves.
+        """
         if self.input_pattern is None:
             raise ValueError("no input pattern set; call set_input() first")
         self.time = self.input_time if self.input_time is not None else self.next_time()
         self.epoch += 1
-        return self.propagate(fire=self.input_neurons(), now=self.time)
+        for neuron in self.input_neurons():
+            self.schedule.stimulus(neuron, self.time)
+        self.horizon = self.time + self.interval if until is None else float(until)
+        return self.schedule.run(self.horizon, self.waves, self._on_wave)
+
+    def _on_wave(self, wave: Wave) -> None:
+        """After a wave has fired: the refires learn, when the dopamine rule runs."""
+        if self.dopamine is not None:
+            learn(self.dopamine, wave, self.weight_range)
+
+    def total_spikes(self) -> int:
+        return sum(neuron.spikes for neuron in self.all_neurons())
 
     def output_times(self) -> list[float | None]:
         """When each output neuron fired in the last cascade (the cascade's time), or None if it did not."""
@@ -157,17 +191,26 @@ class Network:
 
     # --- running ----------------------------------------------------------
 
-    def propagate(self, fire=(), inputs=None, now: float | None = None) -> list[Wave]:
-        """Run one cascade from the given stimulus (see propagation.propagate) and keep its waves."""
-        self.waves = propagate(fire=fire, inputs=inputs, now=now)
-        return self.waves
+    def propagate(self, fire=(), inputs=None, now: float | None = None, until: float | None = None) -> list[Wave]:
+        """Run a cascade from the given stimulus at `now` (default: the clock) on the network's schedule.
+
+        Anything already in flight runs with it, up to `until` (default: one
+        interval after `now`; activity can sustain itself, so a bound is
+        needed). The waves are appended to this epoch's and returned.
+        """
+        now = self.time if now is None else now
+        for neuron in fire:
+            self.schedule.stimulus(neuron, now)
+        for neuron, amount in (inputs or {}).items():
+            self.schedule.external(neuron, amount, now)
+        self.horizon = now + self.interval if until is None else float(until)
+        return self.schedule.run(self.horizon, self.waves, self._on_wave)
 
     def reset(self, discharge: bool = False) -> None:
-        """Start a new cascade: clear every neuron's fired state and the potential of those that fired.
+        """Start a new epoch: clear every neuron's fired-this-epoch state and this epoch's waves.
 
-        Unfired neurons keep their potential, which leaks lazily as the clock
-        moves on (see Neuron). With `discharge=True` every potential is zeroed,
-        the old epoch-by-epoch behaviour.
+        Potentials are kept (there is no leak); with `discharge=True` every
+        potential is zeroed instead. Signals in flight stay scheduled.
         """
         for neuron in self.all_neurons():
             neuron.reset(discharge)
@@ -176,17 +219,13 @@ class Network:
     def perturb(self, sigma: float, rng, now: float | None = None) -> None:
         """Exploration: add Gaussian noise of standard deviation `sigma` to every potential, floored.
 
-        The potential is first leaked to `now` (default: the pending input's
-        time), so the noise sits on top of what survived the gap and decays
-        like everything else from there. Each neuron remembers its draw as
-        `noise` (the learning rule's eligibility). The draws come from
-        `exploration.gaussians`, shared with the array engine.
+        Each neuron remembers its draw as `noise` (the reinforce rule's
+        eligibility). The draws come from `exploration.gaussians`, shared
+        with the array engine. `now` is accepted for symmetry and unused:
+        nothing about a potential depends on the clock.
         """
-        now = self.input_time if now is None else now
         neurons = self.all_neurons() if isinstance(self.all_neurons(), list) else list(self.all_neurons())
         for neuron, draw in zip(neurons, gaussians(rng, len(neurons), sigma)):
-            if now is not None:
-                neuron.leak(now)
             neuron.noise = draw
             neuron.potential = max(neuron.minimum_potential, neuron.potential + draw)
 
