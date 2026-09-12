@@ -22,16 +22,29 @@ def pinned(monkeypatch):
     monkeypatch.setattr(Neuron, "refractory_hops", 3.0)
 
 
-def test_release_is_the_gamma_density_of_the_refire_delay():
+HOP = 5.0 / 3.0
+
+
+def gamma2_cdf(x):  # alpha 2, theta 1: F(x) = 1 - e^-x (1 + x)
+    return 1.0 - math.exp(-x) * (1.0 + x)
+
+
+def test_release_is_the_gamma_density_of_the_refire_delay_averaged_over_a_hop():
     d = Dopamine(release_alpha=2.0, release_theta=1.0)
-    assert d.release_amount(0.0) == 0.0  # an instant refire releases nothing under alpha 2
-    assert d.release_amount(1.0) == pytest.approx(math.exp(-1))  # the peak, (alpha - 1) * theta past the refractory period
-    assert d.release_amount(2.0) == pytest.approx(2.0 * math.exp(-2))
-    assert d.release_amount(-0.5) == 0.0  # a rounding hair early counts as instant
-    scaled = Dopamine(release_alpha=2.0, release_theta=5.0)
-    assert scaled.release_amount(5.0) == pytest.approx(5.0 * math.exp(-1) / 25.0)
-    assert Dopamine(release_alpha=1.0, release_theta=5.0).release_amount(0.0) == pytest.approx(1 / 5.0)  # alpha 1: the old exponential, over theta
+    assert d.release_amount(0.0) == pytest.approx(gamma2_cdf(HOP) / HOP)  # the mass in the first hop, over the hop
+    assert d.release_amount(1.0) == pytest.approx((gamma2_cdf(1.0 + HOP) - gamma2_cdf(1.0)) / HOP)
+    assert d.release_amount(-0.5) == d.release_amount(0.0)  # a rounding hair early counts as instant
+    assert d.release_amount(0.0) > d.release_amount(5.0) > d.release_amount(20.0) > 0  # and it decays
+    exponential = Dopamine(release_alpha=1.0, release_theta=5.0)  # alpha 1: the old exponential shape, over theta
+    assert exponential.release_amount(0.0) == pytest.approx((1 - math.exp(-HOP / 5.0)) / HOP)
+    assert exponential.release_amount(5.0) == pytest.approx(math.exp(-1) * (1 - math.exp(-HOP / 5.0)) / HOP)
+    spiky = Dopamine(release_alpha=0.5, release_theta=1.0)  # alpha below 1: the density is infinite at 0, the release is not
+    assert spiky.release_amount(0.0) == pytest.approx(math.erf(math.sqrt(HOP)) / HOP) and math.isfinite(spiky.release_amount(0.0))
+    assert spiky.release_amount(30.0) == pytest.approx((math.erf(math.sqrt(30 + HOP)) - math.erf(math.sqrt(30.0))) / HOP)
     assert d.delay_of(previous=0.0, now=5.0) == 0.0 and d.delay_of(0.0, 7.5) == 2.5
+    from walnutbutter.dopamine import gamma_cdf
+    assert gamma_cdf(2.0, 0.0) == 0.0 and gamma_cdf(2.0, 3.0) == pytest.approx(gamma2_cdf(3.0)) and gamma_cdf(0.5, 4.0) == pytest.approx(math.erf(2.0))
+    assert gamma_cdf(1.5, 60.0) == pytest.approx(1.0) and gamma_cdf(11.0, 2.0) == pytest.approx(8.308e-06, rel=1e-3)
     with pytest.raises(ValueError):
         Dopamine(tau=0)
     with pytest.raises(ValueError):
@@ -85,9 +98,11 @@ def test_a_loop_that_refires_releases_and_moves_its_gated_incoming_weights():
     waves = schedule.run(until=6.0, on_wave=lambda w: learn(dopamine, w, (-2.0, 2.0)))
     assert [w.time for w in waves] == [0.0, pytest.approx(5 / 3), pytest.approx(10 / 3), pytest.approx(5.0)]
     assert a.spikes == 2 and a.previous_fired_at == 0.0 and a.fired_at == pytest.approx(5.0)
-    assert dopamine.releases == 1 and dopamine.total == 0.0 and dopamine.updates == 1  # a's refire at delay 0: eligible, releases nothing
-    assert c_a.weight == 1.0 and x_a.weight == 1.0  # the eligibility (its release) was 0, so nothing moved
-    assert c_a.last_signal == pytest.approx(5.0) and x_a.last_signal is None  # the gate is set up all the same
+    instant = dopamine.release_amount(0.0)
+    assert dopamine.releases == 1 and dopamine.total == pytest.approx(instant) and dopamine.updates == 1  # a's refire at delay 0
+    # release-first: the update saw D = instant minus an expectation still at 0; e = instant; gated to the synapse that carried
+    assert c_a.weight == pytest.approx(1.0 + 0.1 * instant * instant) and x_a.weight == 1.0
+    assert c_a.last_signal == pytest.approx(5.0) and x_a.last_signal is None  # the gate: no signal, no change
     assert b.connection_to(c).weight == 1.0  # b and c fired once each: no refire, nothing released, nothing moved
     # a refire one millisecond late is the peak: previous spike at 0, refire at 6 ms
     from walnutbutter.propagation import Wave
@@ -96,9 +111,10 @@ def test_a_loop_that_refires_releases_and_moves_its_gated_incoming_weights():
     late.previous_fired_at, late.fired_at, feed.last_signal = 0.0, 6.0, 6.0
     expected_before = dopamine.expected()  # the advantage is read before the expectation moves
     advantage = learn(dopamine, Wave(0, 6.0, fired=[late]), (-2.0, 2.0))
-    assert advantage == pytest.approx(math.exp(-1) - expected_before) and dopamine.total == pytest.approx(math.exp(-1))
+    late_release = dopamine.release_amount(1.0)
+    assert advantage == pytest.approx(dopamine.peek(6.0) - expected_before) and dopamine.total == pytest.approx(instant + late_release)
     assert dopamine.expected() > expected_before  # and then it moved a little toward what it saw
-    assert feed.weight == pytest.approx(1.0 + 0.1 * advantage * math.exp(-1))  # lr * advantage * release, gated
+    assert feed.weight == pytest.approx(1.0 + 0.1 * advantage * late_release)  # lr * advantage * release, gated
 
 
 @pytest.mark.parametrize("order", ORDERS)

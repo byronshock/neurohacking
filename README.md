@@ -49,7 +49,7 @@ walnutbutter                 # open the window, free-run, learn, report accuracy
 walnutbutter --headless --epochs 20000 -q   # the same without a window, for a fixed number of epochs
 walnutbutter --step          # window where each Space press runs one epoch
 walnutbutter --no-learn      # just watch the untrained network
-walnutbutter --problem sustain_inputs   # the 16 inputs on 8 neurons, 20 ms epochs, the inputs read back as the outputs; learns by dopamine (AUTHORITY.md §8)
+walnutbutter --problem sustain_inputs   # the 16 four-bit inputs as they are on 4 neurons, 20 ms epochs; score = which input neurons spiked again, against the pattern; learns by dopamine (AUTHORITY.md §8)
 walnutbutter --trace runs/sustain.csv   # one line per epoch: epoch, time, dopamine, expected, score (default: next to the checkpoint)
 walnutbutter --rule reinforce           # the pre-alpha's global-reward rule instead, run by the Teacher
 walnutbutter --refractory-hops 3.7 --release-theta 2 --order update-first   # the clock and dopamine knobs (see --help)
@@ -396,9 +396,10 @@ wiring (`connect_by_distance`) remains in the library for reference.
 whose previous spike was at `t_prev` and which fires again at `t`, a delay
 `d = t - t_prev - refractory` past the end of its refractory period,
 releases the gamma density of that delay, `d^(alpha-1) exp(-d/theta) /
-(Gamma(alpha) theta^alpha)` (`--release-alpha` 2, `--release-theta` 1 ms by
-default: nothing for an instant refire, a peak of 1/e a millisecond later,
-then a decay). Releases pool into one
+(Gamma(alpha) theta^alpha)`, averaged over the hop that follows it so that
+it is finite for every alpha (`--release-alpha` 2, `--release-theta` 1 ms
+by default: about 0.3 for an instant refire, a peak a little later, then a
+decay). Releases pool into one
 global value that decays with `--dopamine-tau` (default 20 ms) and is read
 without being depleted. The network's expectation of it is an exponential
 moving average of the value over `--expectation-tau` (default 10 minutes),

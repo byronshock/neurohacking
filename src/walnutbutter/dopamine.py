@@ -1,10 +1,14 @@
 """Dopamine: the reward, produced locally by refiring neurons and consumed globally (AUTHORITY.md §0, §6).
 
 A neuron whose previous spike was at t_prev and which fires again at t
-releases the gamma density of its delay d = t - t_prev - refractory past
-the end of its refractory period, d^(alpha-1) exp(-d/theta) / (Gamma(alpha)
-theta^alpha): with alpha 2 and theta 1 ms, nothing for an instant refire,
-a peak of 1/e one millisecond later, then a decay. The
+releases according to the gamma density of its delay d = t - t_prev -
+refractory past the end of its refractory period, d^(alpha-1) exp(-d/theta)
+/ (Gamma(alpha) theta^alpha), averaged over the hop that follows the delay
+(the schedule's own resolution): the gamma mass in [d, d + hop) over hop.
+That is the density itself as the hop shrinks, and it stays finite for
+alpha < 1, where the density is infinite at zero delay and an instant
+refire is the common case. With alpha 2 and theta 1 ms the release is
+about 0.3 for an instant refire, peaks a little later, then decays. The
 releases pool into one global value that decays lazily with `tau` and is
 read without being depleted. The network's expectation of it is an
 exponential moving average of the value with time constant
@@ -31,6 +35,48 @@ from .neuron import Neuron
 ORDERS = ("release-first", "update-first")
 
 
+def gamma_cdf(a: float, x: float) -> float:
+    """The regularised lower incomplete gamma P(a, x): the mass of a gamma(a, 1) distribution below x.
+
+    Pure Python (series below a + 1, a continued fraction above; Numerical
+    Recipes' gser and gcf), so both engines compute the same bits and the
+    object engine needs no scipy.
+    """
+    if x <= 0.0:
+        return 0.0
+    log_prefactor = -x + a * math.log(x) - math.lgamma(a)
+    if x < a + 1.0:
+        term = total = 1.0 / a
+        ap = a
+        for _ in range(1000):
+            ap += 1.0
+            term *= x / ap
+            total += term
+            if abs(term) < abs(total) * 1e-16:
+                break
+        return total * math.exp(log_prefactor)
+    tiny = 1e-300
+    b = x + 1.0 - a
+    c = 1.0 / tiny
+    d = 1.0 / b
+    h = d
+    for i in range(1, 1000):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        if abs(d) < tiny:
+            d = tiny
+        c = b + an / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-16:
+            break
+    return 1.0 - math.exp(log_prefactor) * h
+
+
 class Dopamine:
     """The global dopamine value, its expectation, and the arithmetic of a wave of refires."""
 
@@ -54,7 +100,7 @@ class Dopamine:
         self.tau = float(tau)
         self.release_alpha = float(release_alpha)
         self.release_theta = float(release_theta)
-        self._release_norm = math.gamma(self.release_alpha) * self.release_theta ** self.release_alpha
+        self._release_cache: dict[tuple[float, float], float] = {}  # delays repeat (hops and intervals), so remember them
         self.order = order
         self.lr = float(lr)
         self.expectation_tau = float(expectation_tau)
@@ -94,11 +140,17 @@ class Dopamine:
         return self.peek(time) - self.expectation
 
     def release_amount(self, delay: float) -> float:
-        """What a refire `delay` milliseconds past the end of its refractory period releases: the gamma density at the delay."""
+        """What a refire `delay` ms past the end of its refractory period releases: the gamma density averaged over the next hop."""
         delay = max(0.0, delay)
-        if delay == 0.0:
-            return 0.0 if self.release_alpha > 1.0 else (math.inf if self.release_alpha < 1.0 else 1.0 / self._release_norm)
-        return delay ** (self.release_alpha - 1.0) * math.exp(-delay / self.release_theta) / self._release_norm
+        hop = Neuron.hop()
+        key = (round(delay, 9), hop)
+        amount = self._release_cache.get(key)
+        if amount is None:
+            low = gamma_cdf(self.release_alpha, delay / self.release_theta)
+            high = gamma_cdf(self.release_alpha, (delay + hop) / self.release_theta)
+            amount = (high - low) / hop
+            self._release_cache[key] = amount
+        return amount
 
     def delay_of(self, previous: float, now: float) -> float:
         return now - previous - Neuron.refractory

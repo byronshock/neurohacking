@@ -261,9 +261,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--critic",
         choices=sorted(CRITICS),
         default=CRITIC,
-        help=f"how the reward is judged: row (fraction of output neurons matching the target), decoded "
+        help=f"how the reward is judged: row (fraction of output neurons matching the target), sustained (of the "
+        f"neurons the target says should be on, the fraction on: did the forced neurons sustain?), decoded "
         f"(read the row as a word, error-correct it, fraction of data bits right), or decoded-exact "
-        f"(all data bits right or nothing). Default: {CRITIC}",
+        f"(all data bits right or nothing). Default: {CRITIC}, or the problem's",
     )
     parser.add_argument(
         "--lr",
@@ -408,9 +409,6 @@ def build_parser() -> argparse.ArgumentParser:
 def cli_main(argv: list[str] | None = None) -> int:
     """Run the CLI. Returns a process exit code (0 = success)."""
     args = build_parser().parse_args(argv)
-    problem = PROBLEMS[args.problem]
-    if args.across is None:
-        args.across = 2 * CODES[args.ecc].code_bits if args.ecc else problem.across
     args.show = not args.headless and args.seeds is None  # a seed batch is headless by definition
     args.fast = args.show and not args.step
     try:
@@ -436,6 +434,8 @@ def cli_main(argv: list[str] | None = None) -> int:
 def apply_problem(args: argparse.Namespace) -> None:
     """Settle what the problem decides: whether a Teacher scores or trains, the epoch's length, the target, the readout."""
     problem = PROBLEMS[args.problem]
+    if args.across is None:
+        args.across = 2 * CODES[args.ecc].code_bits if args.ecc else problem.across
     args.learn = not args.no_learn  # a Teacher scores every problem; whether it may train is the problem's
     if not problem.trained:
         if args.rule == "reinforce":
@@ -443,9 +443,11 @@ def apply_problem(args: argparse.Namespace) -> None:
         args.homeostasis, args.unstick = 0.0, 0.0  # nothing outside the network moves a threshold
     if problem.target is not None:
         args.target = problem.target
+    if problem.critic is not None:
+        args.critic = problem.critic
     if args.interval is None:
         args.interval = problem.interval if problem.interval is not None else INTERVAL
-    args.readout, args.read_window = problem.readout, problem.read_window
+    args.readout, args.read, args.read_window, args.coding = problem.readout, problem.read, problem.read_window, problem.coding
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -548,11 +550,13 @@ def _run(args: argparse.Namespace) -> int:
                 grid = GridOfNeurons(**settings)
             grid.interval = args.interval
             grid.problem = args.problem
-            grid.readout, grid.read_window = args.readout, args.read_window
+            grid.readout, grid.read, grid.read_window, grid.coding = args.readout, args.read, args.read_window, args.coding
             if not PROBLEMS[args.problem].trained:
                 print(
                     f"problem {args.problem}: {PROBLEMS[args.problem].description}. Epochs {args.interval:g} ms apart; "
-                    f"scored on the {args.readout} row against {args.target}; nothing outside the network trains it",
+                    f"scored on the {args.readout} row against {args.target} by the {args.critic} critic, on meaning "
+                    f"{'spiked again after the input' if args.read == 'again' else 'fired this epoch' if args.read == 'fired' else f'fired in the last {args.read_window:g} ms'}; "
+                    "nothing outside the network trains it",
                     file=sys.stderr,
                 )
             if args.ecc:
@@ -575,7 +579,8 @@ def _run(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
             if not args.no_permute or loaded:
-                print(f"input permutation: place i along the bottom row shows coded bit {grid.permutation}", file=sys.stderr)
+                laid = "coded" if grid.coding == "complement" else "raw"
+                print(f"input permutation: place i along the bottom row shows {laid} bit {grid.permutation}", file=sys.stderr)
             if args.rule == "dopamine":
                 if grid.dopamine is None:  # a loaded checkpoint brings its own pool
                     grid.dopamine = Dopamine(tau=args.dopamine_tau, release_alpha=args.release_alpha, release_theta=args.release_theta,
@@ -757,7 +762,8 @@ def _seed_worker(job: dict) -> dict:
     Neuron.refractory, Neuron.refractory_hops = job.get("refractory", Neuron.refractory), job.get("refractory_hops", Neuron.refractory_hops)
     grid.interval = job.get("interval", grid.interval)
     grid.problem = job.get("problem")
-    grid.readout, grid.read_window = job.get("readout", "top"), job.get("read_window")
+    grid.readout, grid.read, grid.read_window = job.get("readout", "top"), job.get("read", "fired"), job.get("read_window")
+    grid.coding = job.get("coding", "complement")
     if job["teacher"].get("rule", RULE) == "dopamine":
         grid.dopamine = Dopamine(**job["dopamine"])
     if job.get("engine") == "arrays":
@@ -838,7 +844,7 @@ def _run_seeds(args: argparse.Namespace) -> int:
                      "save": save, "lattice": lattice, "ecc": args.ecc, "engine": args.engine or "objects",
                      "layers": args.layers, "refractory": args.refractory, "refractory_hops": args.refractory_hops,
                      "interval": args.interval, "dopamine": dopamine, "problem": args.problem,
-                     "readout": args.readout, "read_window": args.read_window})
+                     "readout": args.readout, "read": args.read, "read_window": args.read_window, "coding": args.coding})
     if args.engine == "arrays":
         try:
             import numpy, scipy  # noqa: F401

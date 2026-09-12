@@ -217,8 +217,11 @@ shows coded bit $\pi(i)$. With an error-correcting code (`--ecc`), 4 data
 bits are first encoded to 7 (Hamming) or 6 (parity) before complement
 coding.
 
-The neurons whose bit is 1 are **forced** to fire at $t_e$, refractory
-period permitting. A neuron forced this epoch is marked as such, which only
+(A problem may instead lay the raw bits down as they are, `coding = raw`:
+sustain_inputs does, §8. A problem also says what "on" means at the read:
+fired this epoch, spiked again after the input's moment, or fired within a
+window before the horizon.) The neurons whose bit is 1 are **forced** to fire
+at $t_e$, refractory period permitting. A neuron forced this epoch is marked as such, which only
 the reinforce rule (§6.7) consults.
 
 ### 4.4 Waves
@@ -318,13 +321,18 @@ $e^{-\delta / \text{DOPAMINE\_RELEASE\_TAU}}$):
 $$d_j = \frac{\delta^{\alpha - 1} e^{-\delta / \theta}}{\Gamma(\alpha)\,\theta^{\alpha}},
 \qquad \alpha = \text{DOPAMINE\_RELEASE\_ALPHA} = 2,\ \theta = \text{DOPAMINE\_RELEASE\_THETA} = 1\text{ ms}.$$
 
-With $\alpha = 2$ an instant refire releases nothing, the release peaks at
-$1/e$ one millisecond past the end of the refractory period, and it decays
-from there. *Tension with §0*, which says maximum dopamine is released when
-the neuron fires immediately after the refractory period: with this
-$\alpha$ the maximum comes $(\alpha - 1)\theta$ later, and $\alpha = 1$
-recovers §0's exponential. For Byron and Cedric to settle in §0. A neuron's
-first ever spike releases nothing.
+*Claude's implementation note:* the density is averaged over the hop that
+follows the delay, $d_j = \big[F(\delta + h) - F(\delta)\big] / h$ with $F$
+the gamma distribution function and $h$ the hop. That is the density as the
+hop shrinks, and it is finite for every $\alpha$: for $\alpha < 1$ the
+density itself is infinite at zero delay, and an instant refire is the
+common case here (the first sweep arm at $\alpha = 0.5$ read "dopamine
+inf" within a minute). With $\alpha = 2$, $\theta = 1$ ms an instant refire
+releases about 0.3, the release peaks a little later, and it decays from
+there. *Tension with §0*, which says maximum dopamine is released when the
+neuron fires immediately after the refractory period: for $\alpha > 1$ the
+maximum comes later, and $\alpha \le 1$ recovers §0's shape. For Byron and
+Cedric to settle in §0. A neuron's first ever spike releases nothing.
 Forced neurons are neurons (§0): a forced refire releases and learns like
 any other.
 
@@ -452,8 +460,32 @@ the layout, the inputs, and whether anything outside the network trains it.
   is the input pattern itself (copy), and a neuron is read as on if it
   fired within the last refractory period before the read at the end of
   the 20 ms, so the forced spike itself does not count and only a
-  sustained neuron scores. The score is the row critic: the fraction of
-  input neurons whose read state matches the pattern. Nothing outside the
-  network moves a threshold (homeostasis and un-sticking off). The record
-  goes to a CSV next to the checkpoint: epoch, time, dopamine, expected,
-  score.
+  sustained neuron scores. Nothing outside the network moves a threshold
+  (homeostasis and un-sticking off). The record goes to a CSV next to the
+  checkpoint: epoch, time, dopamine, expected, score.
+
+  *Decided (Byron, September 12, 2026), replacing the row critic:* what we
+  are interested in is: did the neurons that were forced to fire sustain?
+  Only the four neurons that were forced to fire are scored. The score is
+  the **sustained** critic: of the input neurons the pattern forced, the
+  fraction read as on at the end of the epoch. The unforced four are not
+  scored at all. (Under the row critic a uniform row, all on or all off,
+  scored 0.5 whatever was forced, which is why every sweep to this point
+  read 0.500.)
+
+  *Decided (Byron, September 12, 2026), simplifying the task:* rather than
+  complement-coding the inputs, the sixteen inputs are presented as 4 bits
+  each, laid down as they are on a 4-across, 10-row grid (no complement
+  coding: 0000 forces nothing, 1111 forces all four). The score is the
+  original row critic over all four input neurons, forced or not: the
+  forced ones should be on at the read and the others off. The `sustained`
+  critic stays available (`--critic sustained`).
+
+  *Decided (Byron, September 12, 2026), replacing the read window:* the
+  read asks whether the neuron fired again at all, rather than whether it
+  fired in the last 5 ms. A neuron is on at the read if it spiked at any
+  moment strictly after the input's moment $t_e$: for a forced neuron, a
+  refire; for an unforced one, any spike in the epoch. (The 5 ms window read
+  one phase in three of a fully sustaining neuron as off, on a 2 ms hop
+  grid with a 6 ms cadence: the 2/3 ceiling of the low grid.) The window
+  read stays available to a problem as `read = "window"`.

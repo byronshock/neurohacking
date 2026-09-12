@@ -46,8 +46,10 @@ class Network:
         self.schedule = Schedule()  # signals in flight, across epochs
         self.dopamine = None  # a dopamine.Dopamine when the dopamine rule runs (set by whoever builds the run)
         self.readout = "top"  # what is read as the output: the top row, or "input" (the inputs are the outputs)
-        self.read_window: float | None = None  # None: an output is on if it fired this epoch; else if it fired within
-        # this many ms before the horizon (the read at the end of the epoch)
+        self.coding = "complement"  # how raw bits reach the input row: "complement" (bits then their negations) or "raw" (as they are)
+        self.read = "fired"  # what "on" means at the read: "fired" this epoch; "again", spiked after the epoch's input moment
+        # (a forced neuron must have refired); "window", within read_window ms before the horizon
+        self.read_window: float | None = None  # the window for read == "window"
         self.ecc: str | None = None  # name of the error-correcting code applied before complement coding, if any
         self.input_data: list[bool] | None = None  # the raw data bits when ecc is on
 
@@ -76,11 +78,14 @@ class Network:
         return [self.get_neuron_at(place, 0) for place in range(self.across)]
 
     def output_fired(self) -> list[bool]:
-        """Whether each output neuron is on: fired this epoch, or, with a read window, within it before the horizon."""
-        if self.read_window is None:
-            return [neuron.has_fired for neuron in self.output_row()]
-        since = self.horizon - self.read_window
-        return [neuron.fired_at is not None and neuron.fired_at + slack(neuron.fired_at) >= since for neuron in self.output_row()]
+        """Whether each output neuron is on at the read: see `read`."""
+        if self.read == "again":
+            after = self.time + slack(self.time)  # strictly after the input's moment: a forced neuron must have spiked again
+            return [neuron.fired_at is not None and neuron.fired_at > after for neuron in self.output_row()]
+        if self.read == "window" and self.read_window is not None:
+            since = self.horizon - self.read_window
+            return [neuron.fired_at is not None and neuron.fired_at + slack(neuron.fired_at) >= since for neuron in self.output_row()]
+        return [neuron.has_fired for neuron in self.output_row()]
 
     def input_width(self) -> int:
         """How many neurons the input covers: one bit of the (coded, permuted) pattern each."""
@@ -106,8 +111,12 @@ class Network:
         return CODES[self.ecc] if self.ecc else None
 
     def raw_bit_count(self) -> int:
-        """How many raw bits an input takes: half the count across, or the code's data bits when a code is on."""
+        """How many raw bits an input takes: half the count across (complement coding), all of it (raw), or the code's data bits."""
         width = self.input_width()
+        if self.coding == "raw":
+            if self.code:
+                raise ValueError("an error-correcting code needs complement coding; raw coding lays the bits down as they are")
+            return width
         if width % 2:
             raise ValueError(f"complement coding needs an even number of input neurons, got {width}")
         if self.code:
@@ -139,7 +148,7 @@ class Network:
         if len(bits) != wanted:
             raise ValueError(f"expected {wanted} input bits for {self.input_width()} input neurons, got {len(bits)}")
         word = self.code.encode(bits) if self.code else bits
-        coded = complement_code(word)
+        coded = list(word) if self.coding == "raw" else complement_code(word)
         self.set_input([coded[i] for i in self.permutation], time)
         self.input_data = bits if self.code else None
         self.input_bits = word  # the bits that were complement-coded: the codeword with ecc, the raw bits without

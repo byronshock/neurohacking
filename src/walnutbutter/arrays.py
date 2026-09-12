@@ -80,7 +80,7 @@ class ArrayNetwork(Network):
         self.time, self.interval, self.input_time = mesh.time, mesh.interval, mesh.input_time
         self.horizon = mesh.horizon
         self.dopamine = mesh.dopamine  # shared: one pool, whichever engine runs
-        self.readout, self.read_window = mesh.readout, mesh.read_window
+        self.readout, self.read, self.read_window, self.coding = mesh.readout, mesh.read, mesh.read_window, mesh.coding
         self.seed = mesh.seed
         self.threshold = mesh.threshold
         self.minimum_potential = mesh.minimum_potential
@@ -321,10 +321,12 @@ class ArrayNetwork(Network):
         return self.mesh.fired_neurons()
 
     def output_fired(self) -> list[bool]:
-        if self.read_window is None:
-            return (self.fired_wave[self.output_index] >= 0).tolist()
         fired_at = self.fired_at[self.output_index]
-        return (fired_at + slack_v(fired_at) >= self.horizon - self.read_window).tolist()
+        if self.read == "again":
+            return (fired_at > self.time + slack(self.time)).tolist()
+        if self.read == "window" and self.read_window is not None:
+            return (fired_at + slack_v(fired_at) >= self.horizon - self.read_window).tolist()
+        return (self.fired_wave[self.output_index] >= 0).tolist()
 
     # --- learning: dopamine ---------------------------------------------------------
 

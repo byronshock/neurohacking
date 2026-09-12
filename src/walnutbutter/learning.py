@@ -188,8 +188,21 @@ def decoded_exact(grid: GridOfNeurons, target: str = "reversed") -> float:
     return 1.0 if decoded_output(grid, target) == expected_data(grid) else 0.0
 
 
+def sustained(grid: GridOfNeurons, target: str = "copy") -> float:
+    """Of the output neurons the target says should be on, the fraction that are on: did the forced neurons sustain?
+
+    Byron, September 12, 2026: the neurons that were not forced are not
+    scored at all. With no neuron to sustain the score is 0.
+    """
+    fired = output_fired(grid)
+    want = expected_outputs(grid, target)
+    forced = [f for f, w in zip(fired, want) if w]
+    return sum(1 for f in forced if f) / len(forced) if forced else 0.0
+
+
 CRITICS = {
     "row": accuracy,  # fraction of the output row matching the target, neuron by neuron
+    "sustained": sustained,  # of the neurons the target says should be on, the fraction on: the forced neurons that sustained
     "decoded": decoded_accuracy,  # fraction of data bits right after reading and error-correcting the row
     "decoded-exact": decoded_exact,  # all data bits right after correction, or nothing
 }

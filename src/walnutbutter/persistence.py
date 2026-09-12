@@ -43,6 +43,7 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         "weight_range": list(grid.weight_range),
         "permutation": grid.permutation,
         "ecc": grid.ecc,
+        "coding": grid.coding,  # complement or raw
         "problem": getattr(grid, "problem", None),  # what the run was asked to do (problems.PROBLEMS)
         "engine": engine,
         "random_weights": grid.weight is None if not lattice else True,
@@ -141,6 +142,7 @@ def restore(path: str | Path) -> tuple[GridOfNeurons, dict]:
     )
     grid.permutation = list(data["permutation"])
     grid.ecc = _ecc_name(data)
+    grid.coding = data.get("coding", "complement")
     load_weights(grid, data)
     grid.epoch = data["epoch"]
     return grid, data
@@ -164,6 +166,7 @@ def _restore_columns(data: dict) -> HexColumns:
     )
     columns.permutation = list(data["permutation"])
     columns.ecc = _ecc_name(data)
+    columns.coding = data.get("coding", "complement")
     load_weights(columns, data)
     columns.epoch = data["epoch"]
     return columns
@@ -226,6 +229,7 @@ def _restore_lattice(data: dict) -> CartesianNodes:
             nodes.add(x, y)
     nodes.permutation = list(data["permutation"])
     nodes.ecc = _ecc_name(data)
+    nodes.coding = data.get("coding", "complement")
     nodes.receptive_field_sigma = data.get("receptive_field_sigma")
     nodes.reach = data.get("reach")
     neurons = nodes.neurons
