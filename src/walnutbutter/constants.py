@@ -41,6 +41,9 @@ DOPAMINE_RELEASE_THETA = 1.0  # ms: its scale; the release peaks at (alpha - 1) 
 DOPAMINE_TAU = 20.0  # ms: decay of the global dopamine value
 DOPAMINE_EXPECTATION_TAU = 600_000.0  # ms (10 minutes): the exponential window of the expected dopamine trace, from 0 (Byron, September 12, 2026)
 DOPAMINE_ORDER = "release-first"  # at a refire, release before the weight update, or update-first (dopamine.ORDERS)
+DOPAMINE_PUNISH = True  # an input neuron whose bit is 0 has the sign of its update reversed when it refires (Byron, September 12, 2026)
+DOPAMINE_PUNISH_GAIN = 2.0  # and that reversed update is this many times as large as a reward (Byron, September 12, 2026, 'for now')
+WEIGHT_DECAY = 1e-4  # every weight moves toward 0 by this fraction each epoch: synapses that forget on their own (Byron, same day, 'for now')
 
 # --- the reinforce rule of the pre-alpha, factored out behind RULE = "reinforce" ---
 TARGET = "reversed"  # what the top row should show, derived from the input row (learning.TARGETS)

@@ -117,6 +117,58 @@ def test_a_loop_that_refires_releases_and_moves_its_gated_incoming_weights():
     assert feed.weight == pytest.approx(1.0 + 0.1 * advantage * late_release)  # lr * advantage * release, gated
 
 
+def test_an_input_neuron_that_should_not_fire_is_punished_for_refiring():
+    """Two input neurons with the same history; the one whose bit is 0 moves its weight the opposite way."""
+    from walnutbutter.propagation import Wave
+    grid = GridOfNeurons(across=2, rows=2, weight=1.0, omega=0)
+    yes, no = grid.input_row()
+    grid.set_input([True, False])
+    assert yes.should_fire is True and no.should_fire is False and grid.get_neuron_at(0, 0).should_fire is None
+    feeders = [Neuron("f1").connect(yes, 9), Neuron("f2").connect(no, 10)]
+    for neuron, feed in zip((yes, no), feeders):
+        neuron.previous_fired_at, neuron.fired_at, feed.last_signal = 0.0, 6.0, 6.0
+    dopamine = Dopamine(tau=20.0, release_alpha=2.0, release_theta=1.0, lr=0.1)
+    advantage = learn(dopamine, Wave(0, 6.0, fired=[yes, no]), (-2.0, 2.0))
+    release = dopamine.release_amount(1.0)
+    assert feeders[0].weight == pytest.approx(1.0 + 0.1 * advantage * release)  # should fire: rewarded
+    assert feeders[1].weight == pytest.approx(1.0 - 2.0 * 0.1 * advantage * release)  # should not: reversed, and twice as hard
+    assert dopamine.releases == 2 and dopamine.total == pytest.approx(2 * release)  # both released as any neuron does
+    lenient = Dopamine(tau=20.0, release_alpha=2.0, release_theta=1.0, lr=0.1, punish=False)
+    for feed in feeders:
+        feed.weight = 1.0
+    a2 = learn(lenient, Wave(0, 6.0, fired=[yes, no]), (-2.0, 2.0))
+    assert feeders[0].weight == pytest.approx(feeders[1].weight) == pytest.approx(1.0 + 0.1 * a2 * release)
+    assert Dopamine.from_state(lenient.state()).punish is False
+    harsh = Dopamine(punish_gain=3.0)
+    assert Dopamine.from_state(harsh.state()).punish_gain == 3.0
+    with pytest.raises(ValueError):
+        Dopamine(decay=1.0)
+
+
+def test_synapses_forget_by_the_decay_each_epoch_in_both_engines():
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("scipy")
+    from walnutbutter.arrays import ArrayNetwork
+
+    grid = GridOfNeurons(across=4, rows=3, weight=None, seed=6, omega=0)
+    grid.dopamine = Dopamine(decay=0.01, lr=0.0)  # no learning: only the forgetting
+    before = [c.weight for c in grid.connections.values()]
+    run_epoch(grid, verbose=False)
+    assert [c.weight for c in grid.connections.values()] == pytest.approx([w * 0.99 for w in before])
+    run_epoch(grid, verbose=False)
+    assert [c.weight for c in grid.connections.values()] == pytest.approx([w * 0.99 * 0.99 for w in before])
+    twin = GridOfNeurons(across=4, rows=3, weight=None, seed=6, omega=0)
+    twin.dopamine = Dopamine(decay=0.01, lr=0.0)
+    net = ArrayNetwork(twin)
+    run_epoch(net, verbose=False)
+    run_epoch(net, verbose=False)
+    assert np.allclose(net.weight, [c.weight for c in grid.connections.values()], atol=1e-15)
+    still = GridOfNeurons(across=4, rows=3, weight=None, seed=6, omega=0)
+    still.dopamine = Dopamine(decay=0.0, lr=0.0)
+    run_epoch(still, verbose=False)
+    assert [c.weight for c in still.connections.values()] == before  # decay 0: nothing forgets
+
+
 @pytest.mark.parametrize("order", ORDERS)
 def test_both_engines_learn_identically_by_dopamine(order):
     np = pytest.importorskip("numpy")
@@ -173,6 +225,7 @@ def test_sustain_inputs_runs_by_dopamine_and_checkpoints_it(tmp_path, capsys):
                      "--save-weights", str(save)]) == 0
     err = capsys.readouterr().err
     assert "rule: dopamine, release-first" in err and "release gamma(alpha 2, theta 1 ms)" in err and "after 30 epochs" in err
+    assert "bit-0 input neurons punished 2x for refiring" in err and "weight decay 0.0001 per epoch" in err
     data = json.loads(save.read_text())
     assert data["dopamine"]["releases"] > 0 and data["problem"] == "sustain_inputs" and data["learning"]["rule"] == "dopamine"
     assert cli_main(["--headless", "--load-weights", str(save), "--epochs", "5", "--no-save"]) == 0

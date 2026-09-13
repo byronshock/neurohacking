@@ -105,6 +105,8 @@ class Network:
             raise ValueError(f"input time {time} is before the schedule has already run to, {self.horizon}")
         self.input_pattern = pattern
         self.input_time = time
+        for neuron, bit in zip(self.input_row(), pattern):
+            neuron.should_fire = bit  # the learning rule reverses its sign for a neuron that should not fire (dopamine.py)
 
     @property
     def code(self) -> Code | None:
@@ -184,7 +186,16 @@ class Network:
         for neuron in self.input_neurons():
             self.schedule.stimulus(neuron, self.time)
         self.horizon = self.time + self.interval if until is None else float(until)
-        return self.schedule.run(self.horizon, self.waves, self._on_wave)
+        waves = self.schedule.run(self.horizon, self.waves, self._on_wave)
+        self.forget()
+        return waves
+
+    def forget(self) -> None:
+        """Synapses that forget on their own: every weight moves toward zero by the dopamine rule's decay, once per epoch."""
+        if self.dopamine is not None and self.dopamine.decay > 0.0:
+            keep = 1.0 - self.dopamine.decay
+            for connection in self.connections.values():
+                connection.weight *= keep
 
     def _on_wave(self, wave: Wave) -> None:
         """After a wave has fired: the refires learn, when the dopamine rule runs."""

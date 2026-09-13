@@ -42,6 +42,7 @@ class Neuron:
         self.has_fired = False  # fired in the current epoch
         self.fired_in_wave: int | None = None  # the wave of the current epoch it (last) fired in; None until it fires
         self.forced = False  # forced to fire by the stimulus in the current epoch
+        self.should_fire: bool | None = None  # an input neuron's bit this epoch (True forced, False should not fire); None: not an input
         self.fired_at: float | None = None  # clock time of the last spike, across epochs
         self.previous_fired_at: float | None = None  # clock time of the spike before that
         self.spikes = 0  # how many times this neuron has ever fired

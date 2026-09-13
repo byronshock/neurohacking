@@ -18,8 +18,8 @@ from .columns import HexColumns
 from .grid import GridOfNeurons
 from .inputs import CODES, DEFAULT_CODE, parse_bits
 from .constants import (
-    ACROSS, CRITIC, DOPAMINE_EXPECTATION_TAU, DOPAMINE_ORDER, DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA, DOPAMINE_TAU,
-    ELIGIBILITY, HOMEOSTASIS, INTERVAL, LATE, LR,
+    ACROSS, CRITIC, DOPAMINE_EXPECTATION_TAU, DOPAMINE_ORDER, DOPAMINE_PUNISH_GAIN, DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA,
+    DOPAMINE_TAU, ELIGIBILITY, WEIGHT_DECAY, HOMEOSTASIS, INTERVAL, LATE, LR,
     MINIMUM_POTENTIAL, OMEGA, PROBLEM, REACH, REFRACTORY, REFRACTORY_HOPS, ROWS, RULE, SIGMA, TARGET, TARGET_RATE,
     THRESHOLD, THRESHOLD_RANGE, UNSTICK, UNSTICK_TARGET, WEIGHT_EPSILON, WEIGHT_RANGE,
 )
@@ -243,6 +243,26 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"at a refire, release the dopamine before the weight update or after it (default: {DOPAMINE_ORDER})",
     )
     parser.add_argument(
+        "--no-punish",
+        action="store_true",
+        help="do not reverse the update of an input neuron that should not fire (by default, above-expected dopamine "
+        "punishes a bit-0 input neuron for refiring instead of rewarding it)",
+    )
+    parser.add_argument(
+        "--punish-gain",
+        type=float,
+        default=DOPAMINE_PUNISH_GAIN,
+        metavar="GAIN",
+        help=f"a should-not-fire refire is punished this many times as hard as a refire is rewarded (default: {DOPAMINE_PUNISH_GAIN:g})",
+    )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=WEIGHT_DECAY,
+        metavar="FRACTION",
+        help=f"every weight moves toward 0 by this fraction each epoch: synapses that forget (default: {WEIGHT_DECAY:g}; 0 = off)",
+    )
+    parser.add_argument(
         "--target",
         choices=sorted(TARGETS),
         default=TARGET,
@@ -424,6 +444,9 @@ def cli_main(argv: list[str] | None = None) -> int:
     if args.dopamine_tau <= 0 or args.release_alpha <= 0 or args.release_theta <= 0 or args.expectation_tau <= 0:
         print("error: --dopamine-tau, --release-alpha, --release-theta and --expectation-tau must be positive", file=sys.stderr)
         return 2
+    if args.punish_gain < 0 or not 0 <= args.weight_decay < 1:
+        print("error: --punish-gain must not be negative and --weight-decay must be in [0, 1)", file=sys.stderr)
+        return 2
     Neuron.refractory, Neuron.refractory_hops = args.refractory, args.refractory_hops
     try:
         return _run(args)
@@ -584,10 +607,13 @@ def _run(args: argparse.Namespace) -> int:
             if args.rule == "dopamine":
                 if grid.dopamine is None:  # a loaded checkpoint brings its own pool
                     grid.dopamine = Dopamine(tau=args.dopamine_tau, release_alpha=args.release_alpha, release_theta=args.release_theta,
-                                             order=args.order, lr=args.lr, expectation_tau=args.expectation_tau)
+                                             order=args.order, lr=args.lr, expectation_tau=args.expectation_tau,
+                                             punish=not args.no_punish, punish_gain=args.punish_gain, decay=args.weight_decay)
                 print(f"rule: dopamine, {grid.dopamine.order}, tau {grid.dopamine.tau:g} ms, release gamma(alpha "
                       f"{grid.dopamine.release_alpha:g}, theta {grid.dopamine.release_theta:g} ms), expectation tau "
-                      f"{grid.dopamine.expectation_tau:g} ms, lr {grid.dopamine.lr:g}; hop {Neuron.hop():g} ms", file=sys.stderr)
+                      f"{grid.dopamine.expectation_tau:g} ms, lr {grid.dopamine.lr:g}, "
+                      f"{f'bit-0 input neurons punished {grid.dopamine.punish_gain:g}x for refiring' if grid.dopamine.punish else 'no punishment'}, "
+                      f"weight decay {grid.dopamine.decay:g} per epoch; hop {Neuron.hop():g} ms", file=sys.stderr)
             else:
                 grid.dopamine = None
             engine = args.engine or (data.get("engine", "objects") if loaded else "objects")
@@ -827,7 +853,8 @@ def _run_seeds(args: argparse.Namespace) -> int:
         rule=args.rule,
     )
     dopamine = dict(tau=args.dopamine_tau, release_alpha=args.release_alpha, release_theta=args.release_theta,
-                    order=args.order, lr=args.lr, expectation_tau=args.expectation_tau)
+                    order=args.order, lr=args.lr, expectation_tau=args.expectation_tau, punish=not args.no_punish,
+                    punish_gain=args.punish_gain, decay=args.weight_decay)
     if args.no_learn:
         print("error: --seeds is for comparing learning runs; drop --no-learn", file=sys.stderr)
         return 2

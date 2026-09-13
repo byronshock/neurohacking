@@ -103,6 +103,7 @@ class ArrayNetwork(Network):
             if x.has_fired:
                 self.fired_wave[self.index[x]] = x.fired_in_wave
         self.forced = np.array([x.forced for x in neurons], dtype=bool)
+        self.sign = np.array([-1.0 if x.should_fire is False else 1.0 for x in neurons])  # -1: an input neuron that should not fire this epoch
         # the clock: when each neuron last spiked (-inf: never), the spike before that, and how many spikes ever
         self.fired_at = np.array([-np.inf if x.fired_at is None else x.fired_at for x in neurons], dtype=float)
         self.previous_fired_at = np.array([-np.inf if x.previous_fired_at is None else x.previous_fired_at for x in neurons], dtype=float)
@@ -291,6 +292,11 @@ class ArrayNetwork(Network):
         self.noise = noise[:n]
         np.maximum(self.potential + self.noise, self.floor, out=self.potential)
 
+    def set_input(self, pattern, time: float | None = None) -> None:
+        super().set_input(pattern, time)
+        self.sign[:] = 1.0
+        self.sign[self.input_index[~np.asarray(self.input_pattern, dtype=bool)]] = -1.0
+
     def fire_input(self, until: float | None = None) -> list[ArrayWave]:
         if self.input_pattern is None:
             raise ValueError("no input pattern set; call set_input() first")
@@ -300,7 +306,14 @@ class ArrayNetwork(Network):
         forced[self.input_index[np.asarray(self.input_pattern, dtype=bool)]] = True
         self._stimulate(forced, self.time)
         self.horizon = self.time + self.interval if until is None else float(until)
-        return self._run(self.horizon)
+        waves = self._run(self.horizon)
+        self.forget()
+        return waves
+
+    def forget(self) -> None:
+        if self.dopamine is not None and self.dopamine.decay > 0.0:
+            self.weight *= 1.0 - self.dopamine.decay
+            self._matrix_dirty = True
 
     def propagate(self, fire=(), inputs=None, now: float | None = None, until: float | None = None) -> list[ArrayWave]:
         """Run a cascade from the mesh neurons `fire`, forced at `now` (default: the clock), up to `until` (default: one interval)."""
@@ -347,6 +360,8 @@ class ArrayNetwork(Network):
                 return
             step = np.zeros(n)
             step[ridx] = dopamine.lr * advantage * np.array(releases)
+            if dopamine.punish:
+                step *= np.where(self.sign < 0, -dopamine.punish_gain, 1.0)  # a should-not-fire refire: reversed, and outweighing a reward
             mask = self.active & refired_v[self.target] & (self.last_signal > self.previous_fired_at[self.target])
             low, high = self.weight_range
             self.weight[mask] = np.clip(self.weight[mask] + step[self.target[mask]], low, high)
@@ -416,6 +431,7 @@ class ArrayNetwork(Network):
             neuron.has_fired = wave >= 0
             neuron.fired_in_wave = wave if wave >= 0 else None
             neuron.forced = bool(self.forced[i])
+            neuron.should_fire = None if neuron.should_fire is None else bool(self.sign[i] > 0)
             neuron.fired_at = None if self.fired_at[i] == -np.inf else float(self.fired_at[i])
             neuron.previous_fired_at = None if self.previous_fired_at[i] == -np.inf else float(self.previous_fired_at[i])
             neuron.spikes = int(self.spikes[i])

@@ -41,6 +41,9 @@ KNOBS = {  # knob -> (command-line flag, label)
     "interval": ("--interval", "interval (ms)"),
     "lr": ("--lr", "lr"),
     "sigma": ("--sigma", "sigma"),
+    "punish_gain": ("--punish-gain", "punish gain"),
+    "decay": ("--weight-decay", "weight decay"),
+    "seed": ("--seed", "seed"),
 }
 
 
@@ -48,11 +51,13 @@ def parse() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--name", required=True, help="the sweep's name: runs/<name>/ and docs/<name>.*")
     for knob in KNOBS:
-        parser.add_argument(f"--{knob.replace('_', '-')}", type=float, nargs="+", default=None, metavar="V")
+        if knob != "seed":
+            parser.add_argument(f"--{knob.replace('_', '-')}", type=float, nargs="+", default=None, metavar="V")
     parser.add_argument("--epochs", type=int, default=1_000_000)
-    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--seed", type=int, nargs="+", default=[1], help="one or more seeds; several make a seed axis")
     parser.add_argument("--engine", default="arrays")
     parser.add_argument("--order", default=None, help="release-first or update-first (fixed for the sweep)")
+    parser.add_argument("--no-punish", action="store_true", help="pass --no-punish to every arm")
     parser.add_argument("--summary", action="store_true", help="summarise what is on disk; run nothing")
     return parser.parse_args()
 
@@ -60,13 +65,14 @@ def parse() -> argparse.Namespace:
 def grid(args) -> tuple[list[str], list[dict]]:
     """The swept knobs (more than one value), and every arm as {knob: value} over all knobs given."""
     given = {knob: getattr(args, knob) for knob in KNOBS if getattr(args, knob) is not None}
+    given["seed"] = list(args.seed)  # always an arm's last knob, so names read ...-seedN as before
     swept = [knob for knob, values in given.items() if len(values) > 1]
     arms = [dict(zip(given, values)) for values in itertools.product(*given.values())]
     return swept, arms
 
 
 def arm_name(arm: dict, args) -> str:
-    return "-".join(f"{knob}{value:g}" for knob, value in arm.items()) + f"-seed{args.seed}"
+    return "-".join(f"{knob}{value:g}" for knob, value in arm.items())
 
 
 def run_arm(job: tuple) -> dict:
@@ -84,11 +90,13 @@ def run_arm(job: tuple) -> dict:
         if stale.exists():
             stale.unlink()  # an incomplete arm starts over: the trace is appended, so it must not carry old rows
     command = [PYTHON, "-m", "walnutbutter", "--problem", "sustain_inputs", "--headless", "--engine", args.engine,
-               "--epochs", str(args.epochs), "--seed", str(args.seed), "--save-weights", str(save), "--report", "60"]
+               "--epochs", str(args.epochs), "--save-weights", str(save), "--report", "60"]
     for knob, value in arm.items():
         command += [KNOBS[knob][0], f"{value:g}"]
     if args.order:
         command += ["--order", args.order]
+    if args.no_punish:
+        command += ["--no-punish"]
     started = time.perf_counter()
     with open(log, "w") as handle:
         code = subprocess.call(command, stdout=handle, stderr=subprocess.STDOUT, cwd=ROOT)
@@ -109,6 +117,7 @@ def summarise(args) -> None:
     out = ROOT / "runs" / args.name
     fixed = {knob: values[0] for knob, values in ((k, getattr(args, k)) for k in KNOBS) if values is not None and len(values) == 1}
     rows, traces = [], {}
+    size = "8x10"  # replaced by the first checkpoint's own size below
     for arm in arms:
         name = arm_name(arm, args)
         save, trace = out / f"{name}.json", out / f"{name}.csv"
@@ -117,6 +126,7 @@ def summarise(args) -> None:
             rows.append({"arm": arm, "label": label, "missing": True})
             continue
         data = json.loads(save.read_text())
+        size = f"{data['across']}x{data['rows']}"
         t = read_trace(trace)
         n = len(t["score"])
         tenth = max(1, n // 10)
@@ -134,7 +144,7 @@ def summarise(args) -> None:
     head = " | ".join(KNOBS[k][1] for k in swept)
     lines = [
         f"# Sweep {args.name} (September 12, 2026)", "",
-        f"sustain_inputs, 8x10 hex grid, {args.engine} engine, seed {args.seed} (paired), {args.epochs:,} epochs per arm, 20 ms epochs. "
+        f"sustain_inputs, {size} hex grid, {args.engine} engine, seed{'s' if len(args.seed) > 1 else ''} {', '.join(str(s) for s in args.seed)}, {args.epochs:,} epochs per arm, 20 ms epochs. "
         + ("Fixed: " + ", ".join(f"{KNOBS[k][1]} {v:g}" for k, v in fixed.items()) + ". " if fixed else "")
         + f"Swept: {', '.join(KNOBS[k][1] for k in swept)}. Everything else at the defaults in constants.py.",
         f"Driver: `sweep-driver.py`; figures: `{args.name}-expected.png`, `{args.name}-score.png`; every arm's checkpoint, "
@@ -151,20 +161,36 @@ def summarise(args) -> None:
         lines.append("| " + " | ".join(cells) + f" | {r['score_to_date']:.3f} | {r['score_last_tenth']:.3f} | {r['score_max']:.3f} | "
                      f"{r['expected_final']:.4g} | {r['expected_last_tenth']:.4g} | {r['expected_peak']:.4g} | {r['dopamine_last_tenth']:.4g} | "
                      f"{r['releases']:,} | {r['total_released']:.4g} | {r['spikes']:,} | {r['neurons_spiked']} | {r['weights_plus']} | {r['weights_minus']} |")
+    if "seed" in swept and len(swept) > 1:  # the seed-averaged view, per setting of the other swept knobs
+        others = [k for k in swept if k != "seed"]
+        groups: dict = {}
+        for r in rows:
+            if r.get("missing"):
+                continue
+            groups.setdefault(tuple(r["arm"][k] for k in others), []).append(r)
+        lines += ["", f"Averaged over the {len(args.seed)} seeds (mean, then the range across seeds):", "",
+                  "| " + " | ".join(KNOBS[k][1] for k in others) + " | seeds | score last tenth | range | score to date | range | spikes | pinned at +1 |",
+                  "|" + "---|" * (len(others) + 7)]
+        for key, group in groups.items():
+            last = [r["score_last_tenth"] for r in group]
+            date = [r["score_to_date"] for r in group]
+            lines.append("| " + " | ".join(f"{v:g}" for v in key) + f" | {len(group)} | {sum(last) / len(last):.3f} | {min(last):.3f} to {max(last):.3f} | "
+                         f"{sum(date) / len(date):.3f} | {min(date):.3f} to {max(date):.3f} | {sum(r['spikes'] for r in group) / len(group):,.0f} | "
+                         f"{sum(r['weights_plus'] for r in group) / len(group):.1f} |")
     (ROOT / "docs" / f"{args.name}.md").write_text("\n".join(lines) + "\n")
     if traces:
-        plot(traces, [r["label"] for r in rows], swept, arms, args)
+        plot(traces, [r["label"] for r in rows], swept, arms, args, size)
     print("\n".join(lines))
 
 
-def plot(traces: dict, labels: list[str], swept: list[str], arms: list[dict], args) -> None:
+def plot(traces: dict, labels: list[str], swept: list[str], arms: list[dict], args, size: str = "8x10") -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     SURFACE, INK, INK2, MUTED, GRID = "#fcfcfb", "#1a1a19", "#5f5e58", "#8a897f", "#e6e5df"
     BLUE, ORANGE = "#2a78d6", "#eb6834"
-    if len(swept) >= 2:  # rows by the first swept knob, columns by the second
+    if len(swept) == 2:  # rows by the first swept knob, columns by the second; more than two: a wrapped list
         rows_of = sorted({arm[swept[0]] for arm in arms})
         cols_of = sorted({arm[swept[1]] for arm in arms})
         n_rows, n_cols = len(rows_of), len(cols_of)
@@ -219,7 +245,7 @@ def plot(traces: dict, labels: list[str], swept: list[str], arms: list[dict], ar
                 ax.set_ylabel(ylabel, color=INK2, fontsize=8)
         if which == "expected":
             axes[0][0].legend(loc="upper right", frameon=False, fontsize=7, labelcolor=INK2)
-        fig.suptitle(f"{args.name}: sustain_inputs 8x10 seed {args.seed}, {args.epochs:,} epochs per arm: "
+        fig.suptitle(f"{args.name}: sustain_inputs {size}, seed{'s' if len(args.seed) > 1 else ''} {', '.join(str(s) for s in args.seed)}, {args.epochs:,} epochs per arm: "
                      f"{'dopamine_expected against the pool' if which == 'expected' else 'score, 500-epoch moving average'}",
                      x=0.01, ha="left", color=INK, fontsize=11)
         fig.tight_layout(rect=(0, 0, 1, 0.95))

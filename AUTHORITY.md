@@ -80,6 +80,9 @@ literal of its own.
 | DOPAMINE_TAU | 20 ms | decay of the global dopamine value |
 | DOPAMINE_EXPECTATION_TAU | 10 min | exponential window of the expected dopamine trace, which starts at 0 |
 | DOPAMINE_ORDER | release-first | at a refire, release before the weight update (or update-first) |
+| DOPAMINE_PUNISH | on | an input neuron whose bit is 0 has its update reversed when it refires |
+| DOPAMINE_PUNISH_GAIN | 2 | and that reversed update is this many times a reward (§6.8) |
+| WEIGHT_DECAY | 10⁻⁴ | every weight moves toward 0 by this fraction each epoch: synapses that forget (§6.8) |
 
 The reinforce rule, factored out behind RULE = reinforce, keeps its own:
 
@@ -380,6 +383,17 @@ $$w_{ij} \leftarrow \mathrm{clip}\big(w_{ij} + \text{LR} \cdot A(t) \cdot e_j \c
 This keeps REINFORCE's shape, presynaptic activity × postsynaptic
 eligibility × global signal, with the global signal now $A(t)$.
 
+*Decided (Byron, September 12, 2026):* the system has no knowledge of how
+it is being scored: a neuron that should fire is forced, checked, and
+rewarded or anti-rewarded by the rule, but a neuron that SHOULD NOT FIRE
+(input bit 0) is free to be recruited into sustaining the others. For
+neurons that should not fire, the learning rule is applied but the reward
+is reversed upon firing: if the dopamine is greater than expected, the
+neuron is punished for firing instead of rewarded. In the update above,
+$\text{LR}$ takes a minus sign for a refiring input neuron whose bit this
+epoch is 0. Its release, and hidden and forced neurons, are unchanged.
+DOPAMINE_PUNISH switches it (`--no-punish`).
+
 ### 6.6 Order within a wave
 
 All the refires in one wave are handled together: their releases are
@@ -407,7 +421,54 @@ firing rate ($r_j$, RATE_MEMORY) and drifts thresholds toward TARGET_RATE
 THRESHOLD_RANGE. Under RULE = dopamine the Teacher only scores and reports;
 the network learns by §6.2–6.6.
 
-### 6.8 What is reported
+### 6.8 Earned activity — decided for now
+
+*Proposed by Claude, September 12, 2026, after the punishment rule (§6.5)
+moved the weights into the input row but not the score; decided by Byron
+the same day: "I do want synapses that forget on their own. For now."* The
+diagnosis:
+under these constants the mesh reverberates on its own, so every input
+neuron is driven every 6 ms whatever its bit, and the same synapses carry
+that drive in an epoch where it should fire and in one where it should
+not. Reward on the one and punishment on the other land on the same
+weights and cancel. Nothing a neuron can see distinguishes the two
+epochs except its own forced spike, and the rule gives that spike no role
+because the rest of the mesh fires the same either way. Two decisions
+together would give it one; either alone does not.
+
+1. **Punishment outweighs reward.** A refire that should not have
+   happened is punished DOPAMINE_PUNISH_GAIN times as hard as a refire that
+   should have is rewarded (proposed 2). For an input neuron driven by an
+   autonomous loop, the net over its bit-1 and bit-0 epochs is then
+   negative, and its incoming weights fall until the loop no longer fires
+   it unforced. For a loop that only runs when the neuron's own forced
+   spike starts it, there are no bit-0 refires to punish, the net is
+   positive, and it grows. The fixed point of the rule is the boundary the
+   task asks for: on when forced, off when not. Alone this fails, because
+   in a fully reverberating mesh the drive does not depend on the forced
+   spike, so the neuron falls silent in both cases and the score stays at
+   chance.
+
+2. **Weights decay toward zero.** Every weight moves toward 0 by a fraction
+   WEIGHT_DECAY per epoch (proposed $10^{-4}$: about two hundred epochs of
+   decay per learning step at LR 0.02). Activity that is not rewarded on
+   net dissolves, the intrinsic reverberation included, so sustained
+   activity has to be earned, and the only structures that earn it on net
+   are loops that depend on a forced spike. Alone this fails too: a quiet
+   mesh gives nothing to reward until exploration noise finds a refire, and
+   without (1) an autonomous loop, once found, is net neutral and survives.
+
+Together: decay empties the mesh of unearned reverberation, exploration
+seeds refires, reward grows the loops that a forced spike starts, and the
+asymmetric punishment dissolves any loop that learns to run without one.
+Both are single constants and stay local: DOPAMINE_PUNISH_GAIN
+(`--punish-gain`) and WEIGHT_DECAY (`--weight-decay`), the decay applied
+to every weight once per epoch, after the epoch's waves, in both engines.
+The alternative not taken: a global inhibition proportional to the mesh's
+activity, which also makes reverberation something to be earned but
+couples every neuron to the whole.
+
+### 6.9 What is reported
 
 Spikes to date, the neurons fired this epoch, the dopamine value and its
 expectation, releases and updates to date; the score of every epoch, its

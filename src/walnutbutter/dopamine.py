@@ -21,7 +21,14 @@ release together, then every incoming connection of each refiring neuron
 that carried a signal it integrated since its previous spike moves by
 lr * (value - expectation) * release (§6.4-6.6). `order` says whether the
 wave's releases join the pool before the value is read (release-first,
-default) or after (update-first). The object engine's update is `learn()`
+default) or after (update-first). With `punish` (default on), an input
+neuron whose bit this epoch is 0, one that should not fire, has the sign of
+its update reversed when it refires: above-expected dopamine punishes it
+for firing instead of rewarding it (Byron, September 12, 2026), and
+`punish_gain` times as hard as a reward. Its release is unchanged; hidden
+and forced neurons are unchanged. `decay` is the fraction every weight
+moves toward zero each epoch: synapses that forget on their own, so that
+sustained activity has to be earned (AUTHORITY.md §6.8). The object engine's update is `learn()`
 below; the array engine does the same arithmetic on vectors (arrays.py).
 """
 
@@ -29,7 +36,10 @@ from __future__ import annotations
 
 import math
 
-from .constants import DOPAMINE_EXPECTATION_TAU, DOPAMINE_ORDER, DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA, DOPAMINE_TAU, LR
+from .constants import (
+    DOPAMINE_EXPECTATION_TAU, DOPAMINE_ORDER, DOPAMINE_PUNISH, DOPAMINE_PUNISH_GAIN, DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA,
+    DOPAMINE_TAU, LR, WEIGHT_DECAY,
+)
 from .neuron import Neuron
 
 ORDERS = ("release-first", "update-first")
@@ -88,7 +98,12 @@ class Dopamine:
         order: str = DOPAMINE_ORDER,
         lr: float = LR,
         expectation_tau: float = DOPAMINE_EXPECTATION_TAU,
+        punish: bool = DOPAMINE_PUNISH,
+        punish_gain: float = DOPAMINE_PUNISH_GAIN,
+        decay: float = WEIGHT_DECAY,
     ):
+        if punish_gain < 0 or not 0.0 <= decay < 1.0:
+            raise ValueError(f"the punishment gain must not be negative and the decay must be in [0, 1), got {punish_gain} and {decay}")
         if tau <= 0 or expectation_tau <= 0:
             raise ValueError(f"dopamine time constants must be positive, got tau {tau} and expectation tau {expectation_tau}")
         if release_alpha <= 0 or release_theta <= 0:
@@ -104,6 +119,9 @@ class Dopamine:
         self.order = order
         self.lr = float(lr)
         self.expectation_tau = float(expectation_tau)
+        self.punish = bool(punish)  # reverse the update of an input neuron that should not fire
+        self.punish_gain = float(punish_gain)  # and make it this many times as large
+        self.decay = float(decay)  # the fraction every weight moves toward zero each epoch
         self.expectation = 0.0  # the expected dopamine trace: an exponential moving average of the value, from 0
         self.level = 0.0  # the global value, as of `updated`
         self.updated = 0.0  # clock time the level was last brought up to date
@@ -192,7 +210,8 @@ class Dopamine:
         """What a checkpoint records."""
         return {
             "tau": self.tau, "release_alpha": self.release_alpha, "release_theta": self.release_theta, "order": self.order, "lr": self.lr,
-            "expectation_tau": self.expectation_tau, "expectation": self.expectation,
+            "expectation_tau": self.expectation_tau, "expectation": self.expectation, "punish": self.punish,
+            "punish_gain": self.punish_gain, "decay": self.decay,
             "level": self.level, "updated": self.updated, "total": self.total,
             "releases": self.releases, "updates": self.updates,
         }
@@ -201,7 +220,8 @@ class Dopamine:
     def from_state(cls, data: dict) -> "Dopamine":
         dopamine = cls(tau=data["tau"], release_alpha=data.get("release_alpha", DOPAMINE_RELEASE_ALPHA),
                        release_theta=data.get("release_theta", DOPAMINE_RELEASE_THETA), order=data["order"], lr=data["lr"],
-                       expectation_tau=data.get("expectation_tau", DOPAMINE_EXPECTATION_TAU))
+                       expectation_tau=data.get("expectation_tau", DOPAMINE_EXPECTATION_TAU), punish=data.get("punish", DOPAMINE_PUNISH),
+                       punish_gain=data.get("punish_gain", DOPAMINE_PUNISH_GAIN), decay=data.get("decay", WEIGHT_DECAY))
         dopamine.level, dopamine.updated, dopamine.total = data["level"], data["updated"], data["total"]
         dopamine.expectation = data.get("expectation", 0.0)
         dopamine.releases, dopamine.updates = data["releases"], data["updates"]
@@ -222,13 +242,15 @@ def learn(dopamine: Dopamine, wave, weight_range: tuple[float, float]) -> float:
             continue
         refires.append((neuron, dopamine.release_amount(dopamine.delay_of(previous, wave.time))))
     low, high = weight_range
-    lr = dopamine.lr
+    lr, punish, gain = dopamine.lr, dopamine.punish, dopamine.punish_gain
 
     def update(advantage: float) -> None:
         if not advantage:
             return
         for neuron, release in refires:
             step = lr * advantage * release
+            if punish and neuron.should_fire is False:
+                step = -gain * step  # it should not have fired: the reward is reversed, and outweighs a reward
             since = neuron.previous_fired_at
             for connection in neuron.incoming:
                 if connection.is_active and connection.last_signal is not None and connection.last_signal > since:

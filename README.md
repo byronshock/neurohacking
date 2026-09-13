@@ -410,7 +410,13 @@ release`, clipped to the weight range: REINFORCE's shape, presynaptic
 activity x postsynaptic eligibility x global signal, with the eligibility
 the neuron's own release and nothing traced back through the network.
 `--order` says whether a wave's releases join the pool before its updates
-read it (`release-first`, default) or after. Every neuron learns this way,
+read it (`release-first`, default) or after. An input neuron whose bit is
+0 this epoch, one that should not fire, has the sign of its update
+reversed when it refires, so above-expected dopamine punishes it, and
+`--punish-gain` (default 2) times as hard as a reward (`--no-punish`
+switches that off). Every weight also moves toward zero by
+`--weight-decay` per epoch (default 1e-4): synapses that forget on their
+own, so that sustained activity has to be earned (AUTHORITY.md §6.8). Every neuron learns this way,
 forced inputs included: input, hidden and output neurons differ only in
 where external connections land. At every input each neuron's potential is
 nudged by exploration noise (`--sigma`, default 0.1; 0 switches it off).
