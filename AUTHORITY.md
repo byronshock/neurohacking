@@ -504,7 +504,7 @@ The alternative not taken: a global inhibition proportional to the mesh's
 activity, which also makes reverberation something to be earned but
 couples every neuron to the whole.
 
-### 6.10 The external teacher — decided, the current rule
+### 6.9 The external teacher — decided, the current rule
 
 *Decided (Byron, September 12, 2026):* the dopamine student-as-teacher is
 very hard to figure out for now, so revert to an external teacher. This
@@ -540,7 +540,23 @@ locally would double-count it; `--punish` turns it back on. Weight decay
 it is posed for: reversal the reinforce rule, sustain_inputs and
 improved_sustain the teacher.
 
-### 6.9 What is reported
+### 6.10 A cycle has been found — noted, not implemented
+
+*Byron and Cedric, September 13, 2026:* we have a new learning rule. When a
+forced-input neuron fires again within the epoch, a cycle has been found.
+Not to be implemented right now; noted here as the next rule to try.
+
+The finding it answers is the one the sweeps of September 12 and 13 kept
+arriving at (`docs/findings-2026-09-13.md`): nothing a neuron can observe
+differs between an epoch where it should fire and one where it should not,
+because the mesh around it behaves the same either way and its own forced
+spike reaches nothing but itself. A refire *within the epoch that forced
+it* is the one event that cannot happen without that neuron's own spike
+having travelled out and come back. It is pattern-dependent by
+construction, it is local to the neuron that observes it, and it is exactly
+what the task asks the substance to do.
+
+### 6.11 What is reported
 
 Spikes to date, the neurons fired this epoch, the dopamine value and its
 expectation, releases and updates to date; the score of every epoch, its
