@@ -99,7 +99,7 @@ def test_the_bottom_layer_is_the_input_and_the_top_layer_the_output():
     bits = stack.new_random_input()
     assert len(bits) == 15 and len(stack.input_pattern) == 30 and sum(stack.input_pattern) == 15
     run_epoch(stack, verbose=False)
-    assert all(n.fired_in_wave == 0 for n, bit in zip(stack.layer(0), stack.input_pattern) if bit)
+    assert all(n.forced for n, bit in zip(stack.layer(0), stack.input_pattern) if bit)
     assert len(output_row(stack)) == 30
     one = HexColumns(seed=1)
     assert one.input_width() == 8 and len(one.input_row()) == 8 and one.input_row()[0].name == "Column_0_9_L0"

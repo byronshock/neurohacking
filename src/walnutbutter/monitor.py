@@ -9,6 +9,7 @@ from __future__ import annotations
 import random
 from typing import Sequence
 
+from .constants import ACROSS, MINIMUM_POTENTIAL, OMEGA, ROWS, THRESHOLD, WEIGHT_RANGE
 from .grid import GridOfNeurons
 from .inputs import format_bits
 
@@ -22,17 +23,17 @@ def run_epoch(
     discharge: bool = False,
     time: float | None = None,
 ) -> list:
-    """Start a cascade: present an input (random unless `bits` is given) at `time`, and propagate.
+    """One epoch: present an input (random unless `bits` is given) at `time`, and run the schedule to the next input's time.
 
-    Weights, shortcuts and thresholds are untouched. Every neuron's fired
-    state is cleared and fired neurons' potentials with it; unfired neurons
-    keep theirs, which leaks as the clock moves to `time` (default: the
-    network's interval after the last input). With `discharge=True` every
-    potential is zeroed first, the old epoch-by-epoch behaviour. With
-    `noise` > 0 a Gaussian draw of that standard deviation (the exploration
-    used by learning) is added to every neuron's potential; each neuron
-    remembers it as `noise`. Prints the input unless `verbose` is False.
-    Returns the waves.
+    Weights, shortcuts and thresholds are untouched by this function (the
+    dopamine rule, if the network has one, learns as it runs; the teacher
+    rule accumulates eligibility for the Teacher to pay at the read). Every
+    neuron's fired-this-epoch state is cleared; potentials are kept (there
+    is no leak), or zeroed with `discharge=True`. `time` defaults to the
+    network's interval after the last input. With `noise` > 0 a Gaussian
+    draw of that standard deviation (the exploration) is added to every
+    neuron's potential; each neuron remembers it as `noise`. Prints the
+    input unless `verbose` is False. Returns the epoch's waves.
     """
     grid.reset(discharge)
     if bits is None:
@@ -50,16 +51,16 @@ def run_epoch(
 
 
 def main(
-    across: int = 8,
-    rows: int = 10,
+    across: int = ACROSS,
+    rows: int = ROWS,
     weight: float | None = None,
-    threshold: float = 0.25,
+    threshold: float = THRESHOLD,
     seed: int | None = None,
-    omega: float = 0.2,
+    omega: float = OMEGA,
     input_bits: Sequence[bool] | None = None,
     permute: bool = True,
-    weight_range: tuple[float, float] = (-1.0, 1.0),
-    minimum_potential: float = -1.0,
+    weight_range: tuple[float, float] = WEIGHT_RANGE,
+    minimum_potential: float = MINIMUM_POTENTIAL,
 ) -> GridOfNeurons:
     """Build a across x rows grid, run one epoch on its bottom row, and return it.
 

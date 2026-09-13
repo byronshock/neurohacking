@@ -39,11 +39,11 @@ def test_receive_accumulates_but_never_fires():
     assert a.potential == 1.0 and a.ready and not a.has_fired
 
 
-def test_fired_neuron_ignores_further_input():
+def test_fired_neuron_ignores_further_input_while_refractory():
     a = Neuron("a")
-    a.fire()
-    a.receive(5.0)
-    assert a.potential == 0.0
+    a.fire(now=0.0)
+    assert not a.receive(5.0, now=1.0) and a.potential == 0.0  # refractory: not integrated
+    assert a.receive(5.0, now=5.0) and a.potential == 5.0  # recovered: there is nothing else that blocks
 
 
 def test_negative_input_inhibits():
@@ -67,7 +67,7 @@ def test_signal_only_travels_in_the_connection_direction(capsys):
     propagate(fire=[b])
     assert b.has_fired and not a.has_fired
     b.reset()
-    propagate(fire=[a])
+    propagate(fire=[a], now=10.0)  # b has recovered from its own spike by then
     assert a.has_fired and b.has_fired
 
 
@@ -113,14 +113,16 @@ def test_reset_keeps_an_unfired_potential_and_discharges_on_request():
     assert a.potential == 0.0 and not a.has_fired  # a spike resets the potential
 
 
-def test_charge_accumulates_across_epochs_until_the_neuron_fires(capsys):
+def test_charge_accumulates_across_epochs_until_the_neuron_fires(capsys, monkeypatch):
+    import math
+    monkeypatch.setattr(Neuron, "tau", math.inf)  # no leak: the charge is kept from one epoch to the next
     a, b = Neuron("a"), Neuron("b", threshold=0.25)
     a.connect(b, weight=0.1)
     fired_on = None
     for epoch in range(1, 6):
         a.reset(discharge=False)
         b.reset(discharge=False)
-        propagate(fire=[a])
+        propagate(fire=[a], now=10.0 * epoch)
         if b.has_fired:
             fired_on = epoch
             break
@@ -165,11 +167,13 @@ def test_minimum_potential_defaults_to_minus_one_and_is_configurable():
     assert b.potential == -0.2
 
 
-def test_carried_charge_respects_the_floor_across_epochs(capsys):
+def test_carried_charge_respects_the_floor_across_epochs(capsys, monkeypatch):
+    import math
+    monkeypatch.setattr(Neuron, "tau", math.inf)  # no leak: the inhibition is kept from one epoch to the next
     a, b = Neuron("a"), Neuron("b", minimum_potential=-0.5)
     a.connect(b, weight=-0.4)
-    for _ in range(5):
+    for epoch in range(5):
         a.reset(discharge=False)
         b.reset(discharge=False)
-        propagate(fire=[a])
+        propagate(fire=[a], now=10.0 * epoch)
     assert b.potential == -0.5

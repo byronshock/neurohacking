@@ -57,11 +57,42 @@ def test_default_grid_fills_the_default_window_in_both_directions():
     assert grid_h / (600 - 48) > 0.95
 
 
-def test_unfired_is_grey_and_fired_shades_by_wave():
-    assert viz.neuron_colour(None, 3) == viz.UNFIRED
-    assert viz.neuron_colour(0, 3) == viz.FIRED_CENTRE
-    assert viz.neuron_colour(3, 3) == viz.FIRED_EDGE
-    assert viz.neuron_colour(0, 0) == viz.FIRED_CENTRE  # a single wave must not divide by zero
+def test_unfired_is_grey_and_fired_cools_from_hot_to_cool_by_age():
+    assert viz.neuron_colour(None, 10.0, 10.0) == viz.UNFIRED
+    assert viz.neuron_colour(10.0, 10.0, 10.0) == viz.HOT  # fired at the end of the epoch
+    assert viz.neuron_colour(0.0, 10.0, 10.0) == viz.COOL  # an epoch ago
+    assert viz.neuron_colour(-50.0, 10.0, 10.0) == viz.COOL  # or longer: clamped
+    assert viz.neuron_colour(5.0, 10.0, 10.0) == viz._lerp_colour(viz.HOT, viz.COOL, 0.5)
+    assert viz.neuron_colour(3.0, 10.0, 0.0) == viz.COOL  # a zero span must not divide by zero
+    grid = GridOfNeurons(across=4, rows=3, weight=1.0, omega=0)
+    grid.set_input_bits([True, False])
+    grid.fire_input()
+    assert viz.heat(grid) == (grid.horizon, grid.interval)
+
+
+def test_space_pauses_and_resumes_the_free_run_and_the_trace_draws(monkeypatch, capsys):
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    grid = main(across=8, rows=4, weight=1.0, seed=1)
+    state = {"paused": False}
+    assert viz.handle_event(key(pygame.K_SPACE), grid, None, state) == (True, True) and state["paused"]
+    assert grid.epoch == 1  # pausing runs nothing
+    assert viz.handle_event(key(pygame.K_SPACE), grid, None, state) == (True, True) and not state["paused"]
+    assert "[Space] resume" in viz.caption_fast(grid, 100.0, 30, paused=True)
+    assert "[Space] pause" in viz.caption_fast(grid, 100.0, 30)
+    surface = pygame.Surface((300, 200))
+    viz.draw(surface, grid, trace=True)  # the mesh above, the raster below
+    assert surface.get_at((150, 190))[:3] == viz.TRACE_BACKGROUND or surface.get_at((150, 190))[:3] != viz.BACKGROUND
+    frames = []
+    scripted = [[key(pygame.K_SPACE)], [], [], [key(pygame.K_SPACE)], [], [pygame.event.Event(pygame.QUIT)]]
+
+    def fake_get():
+        frames.append(grid.epoch)
+        return scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)]
+
+    monkeypatch.setattr(pygame.event, "get", fake_get)
+    viz.show(grid, 200, 150, fast=True, fps=50)
+    assert frames[1] == frames[2] == frames[3]  # paused: no epochs ran
+    assert frames[-1] > frames[3]  # resumed
 
 
 def test_draw_grid_paints_fired_and_unfired_neurons(capsys):
@@ -115,7 +146,8 @@ def test_space_runs_a_new_epoch_every_time(capsys):
     for expected_epoch in (2, 3, 4, 5):
         assert viz.handle_event(key(pygame.K_SPACE), grid) == (True, True)
         assert grid.epoch == expected_epoch
-        assert grid.waves[0].fired == grid.input_neurons()  # fresh wave 0 each time
+        assert grid.waves[0].time == grid.time  # fresh wave 0 each time, at the input's time
+        assert {n for n in grid.waves[0].fired if n.forced} <= set(grid.input_neurons())  # forced only where the input says
         inputs.add(tuple(grid.input_bits))
     assert len(inputs) > 1
 
@@ -222,7 +254,7 @@ def test_fast_caption_reports_the_rate(capsys):
     grid = main(across=8, rows=4, weight=1.0, seed=1)
     text = viz.caption_fast(grid, 1234.5, 30)
     assert "free-running at 1,234 epochs/s, monitored at 30 Hz" in text
-    assert "[Space]" not in text
+    assert "[Space] new input" not in text and "[Space] pause" in text
 
 
 def test_cli_defaults_to_a_free_running_learning_window(monkeypatch, capsys):
@@ -247,7 +279,7 @@ def test_window_teaches_after_each_epoch_and_shows_accuracy(monkeypatch, capsys)
     assert viz.handle_event(key(pygame.K_SPACE), grid, teacher) == (True, True)
     assert teacher.epochs == 2 and grid.epoch == 2
     assert any(n.noise != 0 for n in grid.neurons.values())  # Space ran the epoch with exploration
-    assert "learning all-off" in viz.caption(grid, teacher)
+    assert "teaching all-off" in viz.caption(grid, teacher)
     scripted = [[], [pygame.event.Event(pygame.QUIT)]]
     monkeypatch.setattr(pygame.event, "get", lambda: scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)])
     viz.show(grid, 200, 150, fast=True, fps=50, teacher=teacher)

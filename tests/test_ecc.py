@@ -93,7 +93,7 @@ def test_random_inputs_with_a_code_are_always_valid_codewords(capsys):
         run_epoch(grid, verbose=False)
         assert HAMMING74.syndrome(grid.input_bits) == (0, 0, 0)
         assert len(grid.input_data) == 4 and sum(grid.input_pattern) == 7
-        assert [n.fired_in_wave == 0 for n in grid.input_row()] == grid.input_pattern
+        assert all(n.forced <= bit for n, bit in zip(grid.input_row(), grid.input_pattern))  # forced only where the bit is 1 (and it was not refractory)
     run_epoch(grid)
     out = capsys.readouterr().out
     assert "data " in out and " -> hamming74 " in out and " -> bottom row " in out

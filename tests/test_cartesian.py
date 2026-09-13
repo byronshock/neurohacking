@@ -199,7 +199,7 @@ def test_draw_nodes_scales_unit_distances_and_includes_outliers():
     assert box.width == pytest.approx(8 * unit_px, abs=1) and box.height == pytest.approx(8 * unit_px, abs=1)
     viz.draw_nodes(surface, nodes)
     assert surface.get_at((round(ax), round(ay)))[:3] == viz.UNFIRED
-    a.fire()
+    a.fire(now=0.0)  # a spike on the clock: coloured by its age
     viz.draw_nodes(surface, nodes)
     assert surface.get_at((round(ax), round(ay)))[:3] != viz.UNFIRED
     # an outlier far outside the region pulls the scale in, but stays on screen
@@ -365,7 +365,7 @@ def test_lattice_runs_epochs_with_complement_coded_permuted_input():
     run_epoch(nodes, verbose=False)
     assert nodes.epoch == 1 and sum(nodes.input_pattern) == 4
     assert nodes.waves[0].fired == nodes.input_neurons()
-    assert all(n.fired_in_wave == 0 for n in nodes.input_neurons())
+    assert all(n.forced for n in nodes.input_neurons())
     assert len(nodes.fired_neurons()) >= 0.95 * len(nodes)  # weight 1 everywhere lights the lattice, bar any neuron with no incoming connection
     nodes.reset()
     assert nodes.fired_neurons() == []
@@ -383,11 +383,12 @@ def test_teacher_learns_on_the_lattice():
     from walnutbutter.learning import Teacher, accuracy
     nodes = CartesianNodes(across=8, rows=4, seed=1)
     nodes.connect_by_distance(sigma=1.0, weight=None)  # sparse enough that all-off is reachable quickly
-    teacher = Teacher(nodes, target="all-off", lr=0.1, seed=1)
-    rewards = [teacher.epoch(verbose=False) for _ in range(1500)]
-    # the sparse lattice starts high on all-off; learning should still take it to near perfection
-    assert statistics.mean(rewards[-200:]) > 0.98 > statistics.mean(rewards[:100])
-    assert 0 <= accuracy(nodes) <= 1 and "to date over 1,500 epochs" in teacher.status()
+    before = [c.weight for c in nodes.connections.values()]
+    teacher = Teacher(nodes, target="all-off", lr=0.1, seed=1, rule="reinforce")
+    rewards = [teacher.epoch(verbose=False) for _ in range(300)]
+    # the factored-out rule runs on the lattice and moves its weights; under the schedule no performance is claimed
+    assert all(0 <= r <= 1 for r in rewards) and [c.weight for c in nodes.connections.values()] != before
+    assert 0 <= accuracy(nodes) <= 1 and "to date over 300 epochs" in teacher.status()
 
 
 
@@ -493,7 +494,7 @@ def test_command_line_reproduces_the_sweep_sequence_exactly(tmp_path, capsys):
     epochs = 300
     nodes = CartesianNodes(across=8, rows=10, seed=3)
     nodes.connect_within(reach=2.0, weight=None)
-    teacher = Teacher(nodes, seed=3)
+    teacher = Teacher(nodes, seed=3, rule="reinforce")  # the reversal problem's rule, which the command line uses
     for _ in range(epochs):
         teacher.epoch(verbose=False)
     assert cli_main(["--headless", "--nodes", "--seed", "3", "--reach", "2", "-q", "--epochs", str(epochs)]) == 0

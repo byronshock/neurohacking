@@ -21,6 +21,7 @@ import math
 import random
 from typing import Iterator
 
+from .constants import ACROSS, MINIMUM_POTENTIAL, REACH, ROWS, THRESHOLD, WEIGHT_RANGE
 from .connection import Connection
 from .network import Network
 from .neuron import Neuron
@@ -58,17 +59,17 @@ class CartesianNodes(Network):
 
     def __init__(
         self,
-        across: int = 8,
-        rows: int = 10,
+        across: int = ACROSS,
+        rows: int = ROWS,
         layout: str = "hex",
         count: int | None = None,
         width: float | None = None,
         height: float | None = None,
         seed: int | None = None,
-        threshold: float = 0.25,
-        minimum_potential: float = -1.0,
+        threshold: float = THRESHOLD,
+        minimum_potential: float = MINIMUM_POTENTIAL,
         permute: bool = True,
-        weight_range: tuple[float, float] = (-1.0, 1.0),
+        weight_range: tuple[float, float] = WEIGHT_RANGE,
     ):
         if layout not in ("hex", "random"):
             raise ValueError(f"layout must be 'hex' or 'random', got {layout!r}")
@@ -197,8 +198,8 @@ class CartesianNodes(Network):
         sigma: float = 1.5,
         scale: float = 1.0,
         weight: float | None = 1.0,
-        weight_range: tuple[float, float] = (-1.0, 1.0),
-        neighbour_radius: float = 2.0,
+        weight_range: tuple[float, float] = WEIGHT_RANGE,
+        neighbour_radius: float = REACH,
         epsilon: float = 1e-6,
     ) -> int:
         """Wire the population in two tiers. Returns the number of connections made.
@@ -255,10 +256,10 @@ class CartesianNodes(Network):
 
     def connect_within(
         self,
-        reach: float = 2.0,
+        reach: float = REACH,
         epsilon: float = 1e-6,
         weight: float | None = 1.0,
-        weight_range: tuple[float, float] = (-1.0, 1.0),
+        weight_range: tuple[float, float] = WEIGHT_RANGE,
     ) -> int:
         """Butter that is spread near other butter connects: every ordered pair within `reach` units.
 

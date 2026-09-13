@@ -76,7 +76,7 @@ def test_decoding_critic_without_a_code_compares_raw_bits():
 
 
 def test_critics_registry_and_teacher_validation():
-    assert set(CRITICS) == {"row", "decoded", "decoded-exact"}
+    assert set(CRITICS) == {"row", "sustained", "decoded", "decoded-exact"}
     grid = hamming_grid()
     run_epoch(grid, verbose=False)
     teacher = Teacher(grid, critic="decoded", seed=1)

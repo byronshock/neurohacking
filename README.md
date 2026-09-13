@@ -3,18 +3,24 @@
 A living network of simple neurons on a plane, and the substance you build
 it from.
 
-Each neuron is a fire-once threshold unit: weighted input accumulates until
-it crosses a threshold, the neuron fires exactly once per epoch, and its
-signal travels one-way, wave by wave, along weighted connections. The
-network's input is a complement-coded, permuted bit pattern forced onto its
-bottom row; its output is the top row, which is taught to show that pattern
-reversed. Learning is global reinforcement: every epoch a single scalar
-reward, the output's accuracy, is broadcast to every connection and combined
-with each neuron's exploration noise (node-perturbation REINFORCE), with a
-slow homeostatic drift of thresholds and an un-sticking rule for saturated
-outputs. There is no training run and no evaluation run, only one run that
-keeps going: the window is a 30 Hz monitor on a free-running system that
-learns, checkpoints itself, and reports as it goes.
+The system is specified in `AUTHORITY.md`; the code follows it. Each
+neuron is an integrate-and-fire unit with no leak: weighted input
+accumulates until it crosses a threshold, the neuron fires and resets, and
+for an absolute refractory period it ignores everything. Its signal travels
+one-way along weighted connections, one hop per connection, on a clock in
+nominal milliseconds; a wave is everything that happens at one moment. A
+neuron may fire as often as its refractory period allows, so a tight loop
+can carry a neuron's own spike back to refire it, and activity sustains
+itself. The network's input is a complement-coded, permuted bit pattern
+forced onto its bottom row; its output is the top row. Learning is
+**dopamine**: a neuron that fires again after its refractory period
+releases dopamine, most when it refires the instant it may, into one
+global pool; at that same refire its incoming synapses that carried a
+signal since its previous spike move together in proportion to the pool
+minus the network's expectation of it. There is no training run and no
+evaluation run, only one run that keeps going: the window is a 30 Hz
+monitor on a free-running system that learns, checkpoints itself, and
+reports as it goes.
 
 Two containers build networks. The **hex grid** wires every cell to its two
 rings of neighbours plus a few random small-world shortcuts. **Walnut butter**
@@ -43,6 +49,11 @@ walnutbutter                 # open the window, free-run, learn, report accuracy
 walnutbutter --headless --epochs 20000 -q   # the same without a window, for a fixed number of epochs
 walnutbutter --step          # window where each Space press runs one epoch
 walnutbutter --no-learn      # just watch the untrained network
+walnutbutter --problem sustain_inputs   # the 16 four-bit inputs as they are on 4 neurons, 20 ms epochs; score = which input neurons spiked again, against the pattern; learns by dopamine (AUTHORITY.md §8)
+walnutbutter --problem improved_sustain # the same on a 10x7 grid wired to reach 3, the 4 inputs in the middle of the middle row
+walnutbutter --trace runs/sustain.csv   # one line per epoch: epoch, time, dopamine, expected, score (default: next to the checkpoint)
+walnutbutter --rule reinforce           # the pre-alpha's global-reward rule instead, run by the Teacher
+walnutbutter --refractory-hops 3.7 --release-theta 2 --order update-first   # the clock and dopamine knobs (see --help)
 walnutbutter --across 24 --rows 20       # a bigger mesh than the default 8 x 10: 12 input bits, coded to 24
 walnutbutter --ecc                        # 4 data bits -> Hamming (7, 4) -> 14 across, on a 14 x 10 field
 walnutbutter --ecc parity64               # the (6, 4) detect-only code on 12 across instead
@@ -61,7 +72,8 @@ python -m walnutbutter       # same thing without the installed command
 bits (half the count across), complement-codes them by appending their negations,
 and scrambles the 8 coded bits with a random permutation of the places along the row that
 is drawn once per run and never changes. The bottom-row neurons whose bit is
-1 are forced to fire in wave 0, so exactly half of the row fires every time.
+1 are forced to fire at the input's time (refractory period permitting), so
+up to half of the row fires every time.
 The raw bits, the coded bits and the permuted row are printed, and the
 permutation is printed once at the start. `--input 1011` supplies specific
 bits for the first epoch, `--no-permute` lays the coded bits down in order,
@@ -115,8 +127,9 @@ With `--step` nothing happens until you press **Space**, which resets every
 neuron (weights, shortcuts and thresholds are kept), draws a fresh random
 input, fires the bottom row and, unless `--no-learn`, teaches. The input
 neurons are ringed in white. Fired neurons are coloured, shading from
-yellow in wave 0 to orange in the last wave, unfired neurons are grey, and the
-neurons that were forced in wave 0 carry a white ring. Each neuron is drawn as a disc on its hexagonal cell, sized so neighbouring discs never touch. Adding `--save PATH`
+red for a spike at the end of the epoch cooling to blue over one epoch's
+length, neurons that never fired are grey, and the
+neurons that were forced this epoch carry a white ring. Each neuron is drawn as a disc on its hexagonal cell, sized so neighbouring discs never touch. Adding `--save PATH`
 writes whatever state the mesh is in when the window closes.
 
 ```python
@@ -194,48 +207,46 @@ nothing with the decoding critics, because the code absorbs it: the network
 is judged on the message, not the pixels, and the code's redundancy stands in
 for a population of outputs.
 
-**Firing rule.** Every neuron has a `threshold` (default 0.25) and a running
-`potential`. When a neuron fires, each of its active outgoing connections adds
-its weight to the target's potential. A neuron fires the moment its potential
-reaches its threshold, and it fires at most once until the grid is reset.
-Negative weights lower the potential, so they act as inhibitory connections.
-The input neurons are fired directly as an external stimulus, which ignores
-the threshold.
+**Firing rule** (AUTHORITY.md §5). Every neuron has a `threshold` (default
+0.25) and a running `potential`. When a neuron fires, each of its active
+outgoing connections delivers its weight to the target's potential one hop
+later. A neuron fires the moment its potential reaches its threshold, the
+spike resets the potential, and the potential leaks with time constant
+`--tau` (default 2 ms; `inf` switches it off), lazily: nothing happens to a
+quiet neuron, and when a signal arrives the potential is first decayed for
+the time since it was last brought up to date. Negative
+weights lower the potential, so they act as inhibitory connections. The
+input neurons are fired directly as an external stimulus, which ignores the
+threshold. A neuron that fired within `--refractory` milliseconds (default
+5) ignores every signal, forced stimulus included; that is the only thing
+that limits how often it fires. A neuron's threshold also falls with its
+silence, reaching zero `--bored-after` ms after its last spike (default
+200), so a bored neuron fires on its own and resets (AUTHORITY.md §5.4).
 
-**Propagation** is not recursive. `propagation.propagate` keeps a queue of
-waves: one list of connections whose signals are in flight, filled by the
-neurons that fired in the previous wave. In each wave it first delivers every
-queued signal, then fires every neuron that has reached its threshold,
-queueing their outgoing connections for the next wave. Every neuron and
-connection stays an object that receives and fires for itself; the queue
-adds no allocation per signal, which nearly doubled the epoch rate.
-Delivering everything before deciding who fires means the outcome never
-depends on the order neurons are stored in, and there is no recursion limit
-on grid size. The floor on a potential (`--minimum-potential`, default -1)
-is applied once a wave's signals are all in, so it acts on the wave's total
-and the order of arrival cannot matter there either. Each neuron records
-`fired_in_wave`, the grid keeps the list of `Wave` objects from its last
-epoch in `grid.waves`, and the visualizer shades fired neurons by wave.
-
-**Time.** The network runs on a clock in nominal milliseconds, and the
-neurons are leaky integrate-and-fire neurons with an absolute refractory
-period. Propagation is instantaneous: a cascade happens at one instant and
-the clock only advances between inputs, `--interval` milliseconds apart
-(default 10) unless an input is given its own time. The leak is lazy:
-nothing happens to a quiet neuron, and when a signal arrives the potential
-is first decayed for the time since it was last brought up to date,
-`exp(-elapsed / tau)`, then the signal is added. A neuron that fired within
-`--refractory` milliseconds (default 5) ignores every signal, forced
-stimulus included, and a spike resets its potential. `--tau` (default 2, from the sweep in `docs/tau-sweep.md`)
-and `--refractory` are global properties of neurons, one value for the
-whole network. Unfired neurons therefore keep what is left of their
-potential from one input to the next; `--discharge` zeroes everything
-between inputs instead, the old epoch-by-epoch behaviour, and a tau short
-against the interval is the same thing. Each output neuron carries the
-time of the cascade it fired in (`grid.output_times()`), so a run's output
-is a sequence of (neuron, time) pairs rather than one row per epoch.
-Checkpoints save the clock and every neuron's potential, last spike and
-last update, so a resumed run continues rather than restarts.
+**Time and the schedule** (§4). The network runs on a clock in nominal
+milliseconds. A signal takes one **hop** to travel a connection,
+`--refractory` / `--refractory-hops` (default 5 / 3 ms, and the ratio need
+not be an integer). Firing is never recursive: `propagation.Schedule` is a
+time-ordered queue of the signals in flight, and a **wave** is everything
+due at one moment, the signals arriving and the stimulus if an input lands
+then. In each wave every signal is delivered first (to targets that are not
+refractory), the floor on a potential (`--minimum-potential`, default -1)
+is applied to each touched neuron's total, and then every forced neuron and
+every neuron that has reached its threshold fires, its outgoing connections
+scheduled one hop later. Delivering everything before deciding who fires
+means the outcome never depends on the order neurons are stored in, and
+there is no recursion limit on grid size. An epoch is one input, stamped
+`--interval` milliseconds (default 10) after the last unless given its own
+time, and the schedule run up to the next input's time; signals still in
+flight then join the next epoch. Each connection stamps the time of the
+last signal its target integrated, the synapse's only trace. Each neuron
+records `fired_in_wave`, the grid keeps this epoch's `Wave` objects in
+`grid.waves`, the visualizer shades fired neurons by wave, and each output
+neuron carries the time of its last spike (`grid.output_times()`).
+`--discharge` zeroes every potential between inputs. Checkpoints save the
+clock, every neuron's potential and last two spikes, every synapse stamp,
+the signals in flight and the dopamine, so a resumed run continues
+mid-cascade rather than restarts.
 
 **Two engines, one network.** The object engine above is the one you watch:
 every neuron and connection is an object that receives and fires for
@@ -384,30 +395,63 @@ with `--load-weights`), and shows in the window or runs headless with
 no rows, so it is shown, not trained. The earlier Gaussian receptive-field
 wiring (`connect_by_distance`) remains in the library for reference.
 
-## Teaching the network
+## Learning
 
-The top row is the output. For each epoch the network is told what the top
-row should have shown, by default a **reversed** copy of the bottom-row
-input (`--target reversed`; `copy`, `all-off` and `all-on` also exist).
-Accuracy is the fraction of the 24 output neurons that match. Because the
-input is complement-coded, exactly half the outputs should fire, so an output
-row that never fires already scores 50%; that is the number to beat.
+**Dopamine** (AUTHORITY.md §6, the default, `--rule dopamine`). A neuron
+whose previous spike was at `t_prev` and which fires again at `t`, a delay
+`d = t - t_prev - refractory` past the end of its refractory period,
+releases the gamma density of that delay, `d^(alpha-1) exp(-d/theta) /
+(Gamma(alpha) theta^alpha)`, averaged over the hop that follows it so that
+it is finite for every alpha (`--release-alpha` 2, `--release-theta` 1 ms
+by default: about 0.3 for an instant refire, a peak a little later, then a
+decay). Releases pool into one
+global value that decays with `--dopamine-tau` (default 20 ms) and is read
+without being depleted. The network's expectation of it is an exponential
+moving average of the value over `--expectation-tau` (default 10 minutes),
+starting at 0. At the refire,
+every incoming synapse that carried a signal the neuron integrated since
+its previous spike moves together by `lr * (dopamine - expected) *
+release`, clipped to the weight range: REINFORCE's shape, presynaptic
+activity x postsynaptic eligibility x global signal, with the eligibility
+the neuron's own release and nothing traced back through the network.
+`--order` says whether a wave's releases join the pool before its updates
+read it (`release-first`, default) or after. An input neuron whose bit is
+0 this epoch, one that should not fire, has the sign of its update
+reversed when it refires, so above-expected dopamine punishes it, and
+`--punish-gain` (default 2) times as hard as a reward (`--no-punish`
+switches that off). Every weight also moves toward zero by
+`--weight-decay` per epoch (default 1e-4): synapses that forget on their
+own, so that sustained activity has to be earned (AUTHORITY.md §6.8). Every neuron learns this way,
+forced inputs included: input, hidden and output neurons differ only in
+where external connections land. At every input each neuron's potential is
+nudged by exploration noise (`--sigma`, default 0.1; 0 switches it off).
+Both engines do the same arithmetic and agree to the last bit.
 
-Learning is **global reinforcement**: a single scalar reward, the epoch's
-accuracy, is broadcast to every connection. Nothing is traced back through
-the network. Each epoch every neuron starts with a small random potential
-(exploration, `--sigma`), the epoch runs, and the reward is compared with a
-running average to give an *advantage*: better or worse than usual. Every
-connection that carried a signal into a neuron that was not a forced input
-then moves by `lr * advantage * eligibility`, where the eligibility is the
-target neuron's exploration noise. A neuron that was nudged towards firing
-in a better-than-usual epoch gets stronger inputs from whoever fed it. This
-is the REINFORCE / node-perturbation estimator, a three-factor rule:
-presynaptic activity x postsynaptic perturbation x global reward.
-The exploration noise is added on top of what survived the gap and leaks
-from there like everything else. `--eligibility hebb` swaps the perturbation for a plain Hebbian term (+1 if
-the target fired, -1 if not) with no noise. Forced inputs are never adjusted
-and weights stay within [-1, 1].
+**The external teacher** (`--rule teacher`, the default for the sustain
+problems, AUTHORITY.md §6.10). The teacher scores the read: +0.25 for each
+input neuron that is on when its bit is 1 or off when its bit is 0, −0.25
+for each one that is not, so four inputs give a score of −1, −0.5, 0, 0.5
+or 1. During the epoch a refire adds its release to the `eligibility` of
+each gated incoming synapse instead of moving it; at the read every synapse
+moves by `lr * score * eligibility` and the trace is cleared. The dopamine
+pool still runs and is reported but decides nothing, and the bit-0
+punishment is off, since the score already accounts for those neurons.
+
+**The reinforce rule** (`--rule reinforce`) is the pre-alpha's global
+reinforcement, factored out and kept for comparison. On a trained problem
+(`--problem reversal`) the `Teacher` tells the network each epoch what the
+top row should have shown, by default a **reversed** copy of the bottom-row
+input (`--target reversed`; `copy`, `all-off` and `all-on` also exist), and
+scores the fraction of output neurons that match; under the dopamine rule
+it only scores and reports. Under the reinforce rule a single scalar
+reward, the epoch's accuracy, is compared with a running average to give an
+*advantage*, and every connection that carried a signal into a neuron that
+was not a forced input moves by `lr * advantage * eligibility`, where the
+eligibility is the target neuron's exploration noise (node-perturbation
+REINFORCE) or, with `--eligibility hebb`, +1 if the target fired and -1 if
+not. Forced inputs are never adjusted and weights stay within [-1, 1].
+Under the schedule the mesh reverberates on its own, so no performance is
+claimed for this rule any more.
 
 A signal that arrives after its target has already fired is dropped on
 delivery and changes nothing in the epoch, yet by default its connection is
@@ -424,6 +468,14 @@ shape of spike-timing-dependent plasticity, where a presynaptic spike after
 the postsynaptic one weakens the synapse). `Teacher` wraps all this; use
 `teacher.epoch()` instead of `run_epoch(grid)` so the exploration noise is
 injected.
+
+**The trace.** Every scored run appends one line per epoch to a CSV next
+to its checkpoint (`--trace FILE` to choose it, `--no-trace` to skip it):
+epoch, time in ms, the dopamine value, the expectation, and the score.
+In the window every neuron is coloured by the time of its last spike, red
+at the end of the epoch cooling to blue over one epoch's length, and Space
+pauses the free run at the end of an epoch to show its trace, a raster of
+every spike, time across and neuron down; Space resumes.
 
 **Output.** Runs are silent apart from the progress reports and the final
 summary: printing is far slower than learning, and a headless run of millions
@@ -453,7 +505,7 @@ neurons end up that way. To counter it, every
 neuron tracks its own firing rate and slowly moves its threshold toward a
 target rate (`--homeostasis`, default 1e-6 per epoch,
 `--target-rate`, default 0.5); firing too often raises the threshold, too
-rarely lowers it. Neurons forced in wave 0 are left out for that epoch, as
+rarely lowers it. Neurons forced this epoch are left out for that epoch, as
 reinforcement leaves them out; an unforced input neuron is treated like any
 other. `--homeostasis 0` switches it off. Per-neuron thresholds are saved in
 checkpoints.
@@ -499,13 +551,16 @@ pytest
 ## Layout
 
 ```
+AUTHORITY.md   the specification: constants, substance, connectivity, signalling, activation, learning; the code follows it
 src/walnutbutter/
   connection.py Connection: ID, source and target neurons, weight, is_active, kind
-  neuron.py    Neuron: threshold, potential, receive(), fire(), reset()
-  propagation.py wave-by-wave propagate(): one list of connections in flight per wave
+  neuron.py    Neuron: threshold, potential, refractory period, receive(), fire(), reset(); no leak
+  clock.py     the clock's tolerance: when two moments are the same moment
+  propagation.py Schedule: the time-ordered queue of signals in flight, run a wave at a time; propagate()
+  dopamine.py  Dopamine: the global pool, its expectation, and the learning at a refire
   arrays.py    ArrayNetwork: the same network as numpy vectors and a scipy sparse matrix (--engine arrays)
   exploration.py the Box-Muller noise draws both engines share
-  learning_rules.py constants shared by the learning code of both engines
+  constants.py every global constant: the default network, the neuron's clock, the learning rule's knobs
   grid.py      GridOfNeurons: builds the rectangle of hexagons and wires up both rings of neighbours
   columns.py   HexColumns: the cells extruded into layers in R3 (--layers); bottom layer in, top layer out
   butter.py    WalnutButter: smears of neuron density (per unit cell) on the plane; shapes Rect and Disc
@@ -513,6 +568,7 @@ src/walnutbutter/
   inputs.py    random bits, complement coding, parsing and formatting
   monitor.py   main(): build a grid and run its first epoch; run_epoch(): reset and present a new input
   learning.py  output targets, reward, the global-reinforcement rule, and Teacher
+  problems.py  the problems (--problem): layout, inputs, and whether a Teacher trains the network
   persistence.py checkpoint() and restore() for learned weights
   visualizer.py hex geometry and pygame drawing: show() and save()
   cli.py       argument parsing and the `walnutbutter` command
