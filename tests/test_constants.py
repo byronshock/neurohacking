@@ -62,4 +62,5 @@ def test_the_teacher_and_the_rule_read_the_constants():
     assert p["expectation_tau"] == C.DOPAMINE_EXPECTATION_TAU == build_parser().parse_args([]).expectation_tau
     assert p["punish"] == C.DOPAMINE_PUNISH and not build_parser().parse_args([]).no_punish
     assert (p["punish_gain"], p["decay"]) == (C.DOPAMINE_PUNISH_GAIN, C.WEIGHT_DECAY)
+    assert p["expectation_start"] == C.DOPAMINE_EXPECTATION_START == build_parser().parse_args([]).expectation_start
     assert (build_parser().parse_args([]).punish_gain, build_parser().parse_args([]).weight_decay) == (C.DOPAMINE_PUNISH_GAIN, C.WEIGHT_DECAY)

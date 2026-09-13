@@ -43,6 +43,7 @@ KNOBS = {  # knob -> (command-line flag, label)
     "sigma": ("--sigma", "sigma"),
     "punish_gain": ("--punish-gain", "punish gain"),
     "decay": ("--weight-decay", "weight decay"),
+    "expectation_start": ("--expectation-start", "expectation start"),
     "seed": ("--seed", "seed"),
 }
 

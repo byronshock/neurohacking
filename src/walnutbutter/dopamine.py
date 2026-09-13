@@ -37,8 +37,8 @@ from __future__ import annotations
 import math
 
 from .constants import (
-    DOPAMINE_EXPECTATION_TAU, DOPAMINE_ORDER, DOPAMINE_PUNISH, DOPAMINE_PUNISH_GAIN, DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA,
-    DOPAMINE_TAU, LR, WEIGHT_DECAY,
+    DOPAMINE_EXPECTATION_START, DOPAMINE_EXPECTATION_TAU, DOPAMINE_ORDER, DOPAMINE_PUNISH, DOPAMINE_PUNISH_GAIN,
+    DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA, DOPAMINE_TAU, LR, WEIGHT_DECAY,
 )
 from .neuron import Neuron
 
@@ -101,6 +101,7 @@ class Dopamine:
         punish: bool = DOPAMINE_PUNISH,
         punish_gain: float = DOPAMINE_PUNISH_GAIN,
         decay: float = WEIGHT_DECAY,
+        expectation_start: float = DOPAMINE_EXPECTATION_START,
     ):
         if punish_gain < 0 or not 0.0 <= decay < 1.0:
             raise ValueError(f"the punishment gain must not be negative and the decay must be in [0, 1), got {punish_gain} and {decay}")
@@ -122,7 +123,7 @@ class Dopamine:
         self.punish = bool(punish)  # reverse the update of an input neuron that should not fire
         self.punish_gain = float(punish_gain)  # and make it this many times as large
         self.decay = float(decay)  # the fraction every weight moves toward zero each epoch
-        self.expectation = 0.0  # the expected dopamine trace: an exponential moving average of the value, from 0
+        self.expectation = float(expectation_start)  # the expected dopamine trace: an exponential moving average of the value
         self.level = 0.0  # the global value, as of `updated`
         self.updated = 0.0  # clock time the level was last brought up to date
         self.total = 0.0  # every unit ever released: the actual counts to date
@@ -223,7 +224,7 @@ class Dopamine:
                        expectation_tau=data.get("expectation_tau", DOPAMINE_EXPECTATION_TAU), punish=data.get("punish", DOPAMINE_PUNISH),
                        punish_gain=data.get("punish_gain", DOPAMINE_PUNISH_GAIN), decay=data.get("decay", WEIGHT_DECAY))
         dopamine.level, dopamine.updated, dopamine.total = data["level"], data["updated"], data["total"]
-        dopamine.expectation = data.get("expectation", 0.0)
+        dopamine.expectation = data.get("expectation", DOPAMINE_EXPECTATION_START)
         dopamine.releases, dopamine.updates = data["releases"], data["updates"]
         return dopamine
 

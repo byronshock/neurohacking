@@ -78,7 +78,8 @@ literal of its own.
 | SIGMA | 0.1 | exploration noise: standard deviation added to each neuron's potential at every input |
 | DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA | 2, 1 ms | shape and scale of the gamma density that gives the amount released against the refire delay past the refractory period |
 | DOPAMINE_TAU | 20 ms | decay of the global dopamine value |
-| DOPAMINE_EXPECTATION_TAU | 10 min | exponential window of the expected dopamine trace, which starts at 0 |
+| DOPAMINE_EXPECTATION_TAU | 10 min | exponential window of the expected dopamine trace |
+| DOPAMINE_EXPECTATION_START | 0 | where that trace starts; a high start holds early learning back (Byron, September 12, 2026) |
 | DOPAMINE_ORDER | release-first | at a refire, release before the weight update (or update-first) |
 | DOPAMINE_PUNISH | on | an input neuron whose bit is 0 has its update reversed when it refires |
 | DOPAMINE_PUNISH_GAIN | 2 | and that reversed update is this many times a reward (§6.8) |

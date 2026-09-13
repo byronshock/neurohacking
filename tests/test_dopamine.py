@@ -72,6 +72,11 @@ def test_the_pool_decays_lazily_and_the_expectation_is_an_exponential_window_fro
     assert Dopamine.from_state(d.state()).state() == d.state()
     with pytest.raises(ValueError):
         Dopamine(expectation_tau=0)
+    high = Dopamine(tau=20.0, expectation_tau=100.0, expectation_start=20.0)
+    assert high.expected() == 20.0 and high.advantage(0.0) == -20.0  # a high start: every early refire is punished
+    high.step(10.0, [1.0], update=lambda a: None)
+    assert high.expected() == pytest.approx(20.0 + (1 - math.exp(-0.1)) * (1.0 - 20.0))
+    assert Dopamine.from_state(high.state()).expected() == high.expected()
 
 
 def test_release_first_and_update_first_differ_in_what_the_update_sees():

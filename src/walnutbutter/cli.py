@@ -18,7 +18,7 @@ from .columns import HexColumns
 from .grid import GridOfNeurons
 from .inputs import CODES, DEFAULT_CODE, parse_bits
 from .constants import (
-    ACROSS, CRITIC, DOPAMINE_EXPECTATION_TAU, DOPAMINE_ORDER, DOPAMINE_PUNISH_GAIN, DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA,
+    ACROSS, CRITIC, DOPAMINE_EXPECTATION_START, DOPAMINE_EXPECTATION_TAU, DOPAMINE_ORDER, DOPAMINE_PUNISH_GAIN, DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA,
     DOPAMINE_TAU, ELIGIBILITY, WEIGHT_DECAY, HOMEOSTASIS, INTERVAL, LATE, LR,
     MINIMUM_POTENTIAL, OMEGA, PROBLEM, REACH, REFRACTORY, REFRACTORY_HOPS, ROWS, RULE, SIGMA, TARGET, TARGET_RATE,
     THRESHOLD, THRESHOLD_RANGE, UNSTICK, UNSTICK_TARGET, WEIGHT_EPSILON, WEIGHT_RANGE,
@@ -219,6 +219,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=DOPAMINE_EXPECTATION_TAU,
         metavar="MS",
         help=f"exponential window of the expected dopamine trace, which starts at 0 (default: {DOPAMINE_EXPECTATION_TAU:g} ms, 10 minutes)",
+    )
+    parser.add_argument(
+        "--expectation-start",
+        type=float,
+        default=DOPAMINE_EXPECTATION_START,
+        metavar="UNITS",
+        help=f"where the expected dopamine trace starts (default: {DOPAMINE_EXPECTATION_START:g}); a high start holds early learning back",
     )
     parser.add_argument(
         "--release-alpha",
@@ -608,10 +615,11 @@ def _run(args: argparse.Namespace) -> int:
                 if grid.dopamine is None:  # a loaded checkpoint brings its own pool
                     grid.dopamine = Dopamine(tau=args.dopamine_tau, release_alpha=args.release_alpha, release_theta=args.release_theta,
                                              order=args.order, lr=args.lr, expectation_tau=args.expectation_tau,
-                                             punish=not args.no_punish, punish_gain=args.punish_gain, decay=args.weight_decay)
+                                             punish=not args.no_punish, punish_gain=args.punish_gain, decay=args.weight_decay,
+                                             expectation_start=args.expectation_start)
                 print(f"rule: dopamine, {grid.dopamine.order}, tau {grid.dopamine.tau:g} ms, release gamma(alpha "
                       f"{grid.dopamine.release_alpha:g}, theta {grid.dopamine.release_theta:g} ms), expectation tau "
-                      f"{grid.dopamine.expectation_tau:g} ms, lr {grid.dopamine.lr:g}, "
+                      f"{grid.dopamine.expectation_tau:g} ms from {grid.dopamine.expectation:g}, lr {grid.dopamine.lr:g}, "
                       f"{f'bit-0 input neurons punished {grid.dopamine.punish_gain:g}x for refiring' if grid.dopamine.punish else 'no punishment'}, "
                       f"weight decay {grid.dopamine.decay:g} per epoch; hop {Neuron.hop():g} ms", file=sys.stderr)
             else:
@@ -854,7 +862,7 @@ def _run_seeds(args: argparse.Namespace) -> int:
     )
     dopamine = dict(tau=args.dopamine_tau, release_alpha=args.release_alpha, release_theta=args.release_theta,
                     order=args.order, lr=args.lr, expectation_tau=args.expectation_tau, punish=not args.no_punish,
-                    punish_gain=args.punish_gain, decay=args.weight_decay)
+                    punish_gain=args.punish_gain, decay=args.weight_decay, expectation_start=args.expectation_start)
     if args.no_learn:
         print("error: --seeds is for comparing learning runs; drop --no-learn", file=sys.stderr)
         return 2
