@@ -73,7 +73,8 @@ def test_delivered_connections_are_those_whose_source_fired():
     delivered = delivered_connections(grid)
     assert delivered
     assert all(c.source.has_fired for c in delivered)
-    assert all(c in delivered for c in grid.connections.values() if c.source.has_fired and c.is_active)
+    in_flight = {c for _, c in grid.schedule.pending()}  # a source that fired just before the horizon: its signals wait for the next epoch
+    assert all(c in delivered or c in in_flight for c in grid.connections.values() if c.source.has_fired and c.is_active)
 
 
 def test_reinforce_moves_delivered_weights_by_advantage_times_noise():
@@ -94,8 +95,9 @@ def test_ignoring_late_signals_skips_those_that_arrived_after_their_target_fired
     grid = GridOfNeurons(across=8, rows=4, weight=None, seed=2, omega=0)
     run_epoch(grid, verbose=False, noise=0.1, rng=random.Random(2))
     before = {c.id: c.weight for c in grid.connections.values()}
-    counted = {s.connection for s in delivered_signals(grid) if landed(s) and not s.target.forced}
-    late = {s.connection for s in delivered_signals(grid) if not landed(s)}
+    last = {s.connection: s for s in delivered_signals(grid)}  # the rule judges a connection by its last delivery of the epoch
+    counted = {c for c, s in last.items() if landed(s) and not s.target.forced}
+    late = {c for c, s in last.items() if not landed(s)}
     assert counted and late  # some signals arrived too late to count
     reinforce(grid, advantage=0.5, lr=0.01, sigma=0.1, late="ignore")
     for c in grid.connections.values():

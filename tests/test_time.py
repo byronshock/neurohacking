@@ -43,15 +43,21 @@ def test_the_defaults_and_the_horizon(clock):
         run_epoch(grid, verbose=False, time=30.0)  # the schedule has already run to 35
 
 
-def test_a_signal_takes_one_hop_and_charge_never_leaks(clock):
+def test_a_signal_takes_one_hop_and_charge_leaks_lazily(clock, monkeypatch):
+    import math
+    monkeypatch.setattr(Neuron, "tau", 2.0)
     a, b = Neuron("a"), Neuron("b", threshold=1.0)
     a.connect(b, weight=0.5)
     waves = propagate(fire=[a], now=0.0)
     assert [w.time for w in waves] == [0.0, pytest.approx(HOP)] and waves[1].fired == []
-    assert b.potential == 0.5 and not b.has_fired
-    assert b.receive(0.0, now=1000.0) and b.potential == 0.5  # nothing happens to a quiet neuron, ever
-    propagate(fire=[a], now=10.0)  # the second half arrives: the charge was kept until it fired
-    assert b.has_fired and b.fired_at == pytest.approx(10.0 + HOP) and b.potential == 0.0 and b.spikes == 1
+    assert b.potential == 0.5 and not b.has_fired and b.last_update == pytest.approx(HOP)
+    assert b.potential_at(HOP + 2.0) == pytest.approx(0.5 * math.exp(-1)) and b.potential == 0.5  # a read changes nothing
+    assert b.receive(0.0, now=HOP + 2.0) and b.potential == pytest.approx(0.5 * math.exp(-1))  # an arrival leaks first
+    monkeypatch.setattr(Neuron, "tau", math.inf)
+    assert b.receive(0.0, now=1000.0) and b.potential == pytest.approx(0.5 * math.exp(-1))  # no leak when tau is infinite
+    quiet = Neuron("q")
+    quiet.receive(0.2, now=0.0)
+    assert quiet.potential == 0.2 and quiet.potential_at(20.0) == 0.2
 
 
 def test_a_neuron_ignores_signals_and_stimulus_during_its_refractory_period(clock):
@@ -139,7 +145,7 @@ def test_the_clock_survives_a_checkpoint(tmp_path, clock):
     path = tmp_path / "clock.json"
     data = checkpoint(grid, path, teacher)
     assert data["time"] == 32.0 and data["horizon"] == 36.0 and data["interval"] == 4.0
-    assert data["refractory"] == 5.0 and data["refractory_hops"] == 3.0 and data["learning"]["rule"] == "dopamine"
+    assert data["refractory"] == 5.0 and data["refractory_hops"] == 3.0 and data["learning"]["rule"] == "teacher"
     assert len(data["potentials"]) == len(data["fired_at"]) == len(data["previous_fired_at"]) == len(data["spikes"]) == 24
     assert len(data["last_signal"]) == len(grid.connections) == len(data["weights"])
     assert data["pending"] == [[t, c.id] for t, c in grid.schedule.pending()] and data["pending"]  # signals in flight at the horizon
@@ -168,16 +174,55 @@ def test_columns_run_on_the_same_clock(clock):
     assert stack.time == 2.0 and stack.waves[0].time == 2.0 and stack.waves[0].fired == []  # every forced neuron is still refractory
 
 
+def test_a_bored_neuron_fires_on_its_own_after_its_silence(clock, monkeypatch):
+    monkeypatch.setattr(Neuron, "bored_after", 200.0)
+    a = Neuron("a", threshold=0.25)
+    assert a.threshold_at(0.0) == 0.25 and a.threshold_at(100.0) == pytest.approx(0.125) and a.threshold_at(200.0) == pytest.approx(0.0)
+    assert a.threshold_at(400.0) == pytest.approx(-0.25)  # and on down, for a neuron sitting below zero
+    assert not a.can_fire(199.0) and a.can_fire(200.0)  # potential 0: fires the moment the threshold reaches it
+    a.fire(now=200.0)
+    assert a.threshold_at(200.0) == 0.25  # the spike resets the silence
+    monkeypatch.setattr(Neuron, "bored_after", 0.0)
+    assert a.threshold_at(1000.0) == 0.25  # off: the threshold is the threshold
+    monkeypatch.setattr(Neuron, "bored_after", 200.0)
+    # a neuron nobody talks to, in a network: it fires at the first wave after 200 ms, the next input
+    grid = GridOfNeurons(across=4, rows=3, weight=0.0, omega=0)  # weight 0: nothing propagates
+    lonely = grid.get_neuron_at(1, 1)
+    for _ in range(21):
+        run_epoch(grid, bits=[False, False], verbose=False)  # inputs 10 ms apart: the 21st lands at 200 ms
+    assert lonely.spikes == 1 and lonely.fired_at == 200.0  # inputs at 0, 10, ..., the wave at 200 ms fires it
+    assert lonely.previous_fired_at is None
+
+
+def test_both_engines_agree_on_bored_neurons(clock, monkeypatch):
+    np = pytest.importorskip("numpy")
+    from walnutbutter.arrays import ArrayNetwork
+    monkeypatch.setattr(Neuron, "bored_after", 60.0)
+    mesh = GridOfNeurons(across=6, rows=4, weight=None, seed=3, threshold=3.0)  # nothing fires but the inputs and the bored
+    net = ArrayNetwork(GridOfNeurons(across=6, rows=4, weight=None, seed=3, threshold=3.0))
+    for _ in range(40):
+        run_epoch(mesh, verbose=False)
+        run_epoch(net, verbose=False)
+        assert [n.spikes for n in mesh.all_neurons()] == net.spikes.tolist()
+        assert [(-np.inf if n.fired_at is None else n.fired_at) for n in mesh.all_neurons()] == net.fired_at.tolist()
+    assert all(n.spikes >= 5 for n in mesh.all_neurons())  # every neuron, input or hidden, has fired on its own a few times
+
+
 def test_cli_clock_options_and_validation(tmp_path, capsys):
     save = tmp_path / "t.json"
     assert cli_main(["--headless", "-a", "6", "-r", "4", "--seed", "1", "--epochs", "5", "--interval", "2.5", "--refractory", "3",
                      "--refractory-hops", "2", "--save-weights", str(save)]) == 0
     data = json.loads(save.read_text())
     assert data["time"] == 10.0 and data["interval"] == 2.5 and data["refractory"] == 3.0 and data["refractory_hops"] == 2.0
-    assert Neuron.refractory == 5.0 and Neuron.refractory_hops == 3.0  # restored after the command
+    assert data["bored_after"] == 200.0 and data["tau"] == 2.0 and len(data["last_update"]) == 24
+    assert Neuron.refractory == 5.0 and Neuron.refractory_hops == 3.0 and Neuron.bored_after == 200.0  # restored after the command
+    assert cli_main(["--headless", "-a", "6", "-r", "4", "--seed", "1", "--epochs", "3", "--bored-after", "0", "--no-save"]) == 0
+    assert cli_main(["--headless", "--bored-after", "-1"]) == 2
     assert cli_main(["--headless", "--seeds", "2", "--seed", "1", "-a", "6", "-r", "4", "--epochs", "5", "--interval", "2", "--no-save"]) == 0
     capsys.readouterr()
     assert cli_main(["--headless", "--refractory", "0"]) == 2
+    assert cli_main(["--headless", "--tau", "0"]) == 2
+    assert cli_main(["--headless", "-a", "6", "-r", "4", "--seed", "1", "--epochs", "3", "--tau", "inf", "--no-save"]) == 0
     assert cli_main(["--headless", "--refractory-hops", "0"]) == 2
     assert cli_main(["--headless", "--interval", "-1"]) == 2
     assert "must be positive" in capsys.readouterr().err

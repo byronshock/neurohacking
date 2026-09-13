@@ -279,7 +279,7 @@ def test_window_teaches_after_each_epoch_and_shows_accuracy(monkeypatch, capsys)
     assert viz.handle_event(key(pygame.K_SPACE), grid, teacher) == (True, True)
     assert teacher.epochs == 2 and grid.epoch == 2
     assert any(n.noise != 0 for n in grid.neurons.values())  # Space ran the epoch with exploration
-    assert "scoring all-off" in viz.caption(grid, teacher)
+    assert "teaching all-off" in viz.caption(grid, teacher)
     scripted = [[], [pygame.event.Event(pygame.QUIT)]]
     monkeypatch.setattr(pygame.event, "get", lambda: scripted.pop(0) if scripted else [pygame.event.Event(pygame.QUIT)])
     viz.show(grid, 200, 150, fast=True, fps=50, teacher=teacher)

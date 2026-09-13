@@ -50,6 +50,7 @@ walnutbutter --headless --epochs 20000 -q   # the same without a window, for a f
 walnutbutter --step          # window where each Space press runs one epoch
 walnutbutter --no-learn      # just watch the untrained network
 walnutbutter --problem sustain_inputs   # the 16 four-bit inputs as they are on 4 neurons, 20 ms epochs; score = which input neurons spiked again, against the pattern; learns by dopamine (AUTHORITY.md §8)
+walnutbutter --problem improved_sustain # the same on a 10x7 grid wired to reach 3, the 4 inputs in the middle of the middle row
 walnutbutter --trace runs/sustain.csv   # one line per epoch: epoch, time, dopamine, expected, score (default: next to the checkpoint)
 walnutbutter --rule reinforce           # the pre-alpha's global-reward rule instead, run by the Teacher
 walnutbutter --refractory-hops 3.7 --release-theta 2 --order update-first   # the clock and dopamine knobs (see --help)
@@ -210,13 +211,17 @@ for a population of outputs.
 0.25) and a running `potential`. When a neuron fires, each of its active
 outgoing connections delivers its weight to the target's potential one hop
 later. A neuron fires the moment its potential reaches its threshold, the
-spike resets the potential, and nothing else ever changes it: there is no
-leak, so sub-threshold charge is kept for as long as it takes. Negative
+spike resets the potential, and the potential leaks with time constant
+`--tau` (default 2 ms; `inf` switches it off), lazily: nothing happens to a
+quiet neuron, and when a signal arrives the potential is first decayed for
+the time since it was last brought up to date. Negative
 weights lower the potential, so they act as inhibitory connections. The
 input neurons are fired directly as an external stimulus, which ignores the
 threshold. A neuron that fired within `--refractory` milliseconds (default
 5) ignores every signal, forced stimulus included; that is the only thing
-that limits how often it fires.
+that limits how often it fires. A neuron's threshold also falls with its
+silence, reaching zero `--bored-after` ms after its last spike (default
+200), so a bored neuron fires on its own and resets (AUTHORITY.md §5.4).
 
 **Time and the schedule** (§4). The network runs on a clock in nominal
 milliseconds. A signal takes one **hop** to travel a connection,
@@ -421,6 +426,16 @@ forced inputs included: input, hidden and output neurons differ only in
 where external connections land. At every input each neuron's potential is
 nudged by exploration noise (`--sigma`, default 0.1; 0 switches it off).
 Both engines do the same arithmetic and agree to the last bit.
+
+**The external teacher** (`--rule teacher`, the default for the sustain
+problems, AUTHORITY.md §6.10). The teacher scores the read: +0.25 for each
+input neuron that is on when its bit is 1 or off when its bit is 0, −0.25
+for each one that is not, so four inputs give a score of −1, −0.5, 0, 0.5
+or 1. During the epoch a refire adds its release to the `eligibility` of
+each gated incoming synapse instead of moving it; at the read every synapse
+moves by `lr * score * eligibility` and the trace is cleared. The dopamine
+pool still runs and is reported but decides nothing, and the bit-0
+punishment is off, since the score already accounts for those neurons.
 
 **The reinforce rule** (`--rule reinforce`) is the pre-alpha's global
 reinforcement, factored out and kept for comparison. On a trained problem

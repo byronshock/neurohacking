@@ -26,7 +26,8 @@ def run_epoch(
     """One epoch: present an input (random unless `bits` is given) at `time`, and run the schedule to the next input's time.
 
     Weights, shortcuts and thresholds are untouched by this function (the
-    dopamine rule, if the network has one, learns as it runs). Every
+    dopamine rule, if the network has one, learns as it runs; the teacher
+    rule accumulates eligibility for the Teacher to pay at the read). Every
     neuron's fired-this-epoch state is cleared; potentials are kept (there
     is no leak), or zeroed with `discharge=True`. `time` defaults to the
     network's interval after the last input. With `noise` > 0 a Gaussian

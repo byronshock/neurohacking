@@ -91,7 +91,7 @@ def test_main_random_input_is_reproducible_by_seed(capsys):
 def test_cli_runs_and_returns_zero(capsys):
     assert cli_main(["--headless", "-v", "--weight", "1"]) == 0
     captured = capsys.readouterr()
-    assert captured.out.count("fired in wave 0.") == 4  # half of the 8-place bottom row
+    assert captured.out.count("fired in wave 0.") >= 4  # half of the 8-place bottom row, plus any neuron the exploration noise put over threshold
     assert "80 of 80 neurons fired" in captured.err  # default 8 x 10
     assert "input permutation:" in captured.err
 
@@ -100,7 +100,7 @@ def test_cli_input_option_sets_the_pattern(capsys):
     assert cli_main(["--headless", "-v", "--across", "6", "--rows", "3", "--weight", "1", "--input", "110", "--no-permute"]) == 0
     captured = capsys.readouterr()
     assert "epoch 1 at 0 ms: input 110 -> coded 110001 -> bottom row 110001" in captured.out
-    assert captured.out.count("fired in wave 0.") == 3
+    assert captured.out.count("fired in wave 0.") >= 3  # the three forced, plus any neuron the exploration noise put over threshold
     assert "input permutation:" not in captured.err
 
 
@@ -208,7 +208,7 @@ def test_cli_rejects_unknown_target():
 
 def test_cli_learns_by_default_and_no_learn_switches_it_off(capsys):
     assert cli_main(["--headless", "--across", "8", "--rows", "4", "-q", "--seed", "1", "--epochs", "3"]) == 0
-    assert "scoring reversed" in capsys.readouterr().err  # under the dopamine rule the Teacher only scores
+    assert "learning reversed" in capsys.readouterr().err  # the reversal problem is posed for the reinforce rule
     assert cli_main(["--headless", "--across", "8", "--rows", "4", "-q", "--seed", "1", "--epochs", "3", "--no-learn"]) == 0
     assert "learning" not in capsys.readouterr().err
 

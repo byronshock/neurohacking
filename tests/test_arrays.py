@@ -231,5 +231,5 @@ def test_the_visualizer_draws_an_array_network_through_its_mesh(tmp_path, monkey
     viz.save(net, str(path), 200, 150)
     assert path.exists() and path.stat().st_size > 0
     text = viz.caption(net, teacher)
-    assert "fired" in text and "scoring" in text
+    assert "fired" in text and "teaching" in text
     assert [n.has_fired for n in net.mesh.all_neurons()] == [w >= 0 for w in net.fired_wave.tolist()]

@@ -81,6 +81,7 @@ class ArrayNetwork(Network):
         self.horizon = mesh.horizon
         self.dopamine = mesh.dopamine  # shared: one pool, whichever engine runs
         self.readout, self.read, self.read_window, self.coding = mesh.readout, mesh.read, mesh.read_window, mesh.coding
+        self.rule = mesh.rule
         self.seed = mesh.seed
         self.threshold = mesh.threshold
         self.minimum_potential = mesh.minimum_potential
@@ -108,6 +109,7 @@ class ArrayNetwork(Network):
         self.fired_at = np.array([-np.inf if x.fired_at is None else x.fired_at for x in neurons], dtype=float)
         self.previous_fired_at = np.array([-np.inf if x.previous_fired_at is None else x.previous_fired_at for x in neurons], dtype=float)
         self.spikes = np.array([x.spikes for x in neurons], dtype=np.int64)
+        self.last_update = np.array([x.last_update for x in neurons], dtype=float)  # the lazy leak's bookkeeping
 
         e = len(mesh.connections)
         connections = [mesh.connections[i] for i in range(1, e + 1)]
@@ -117,6 +119,7 @@ class ArrayNetwork(Network):
         self.active = np.array([c.is_active for c in connections], dtype=bool)
         self.last_signal = np.array([-np.inf if c.last_signal is None else c.last_signal for c in connections], dtype=float)
         self.delivered_wave = np.full(e, -1, dtype=np.int64)  # the wave of this epoch each connection delivered in
+        self.eligibility = np.array([c.eligibility for c in connections], dtype=float)  # what each synapse has earned this epoch
         self._active_edges = np.flatnonzero(self.active)
         self._build_matrix()
 
@@ -215,16 +218,23 @@ class ArrayNetwork(Network):
                 both = self._matrix @ firing
                 incoming, touched = both[:n], both[n:] > 0
                 take = touched & ~refractory
+                self.leak(time, take)  # the lazy leak: a neuron is brought up to date when a signal reaches it
                 potential[take] = np.maximum(potential[take] + incoming[take], floor[take])
                 delivering = self.active & (firing[self.source] > 0)
                 self.delivered_wave[delivering] = number
                 self.last_signal[delivering & take[self.target]] = time
             fire_forced = (stimulus & ~refractory) if stimulus is not None else np.zeros(n, dtype=bool)
-            fired = fire_forced | (take & (potential >= threshold))
+            if Neuron.bored_after > 0.0:  # threshold homeostasis: the threshold falls with the silence since the last spike
+                since = np.where(self.fired_at == -np.inf, 0.0, self.fired_at)
+                facing = threshold - threshold * (time - since) / Neuron.bored_after
+            else:
+                facing = threshold
+            fired = fire_forced | (~refractory & (self.potential_at(time) >= facing))  # everyone, touched or not, like the object engine
             idx = np.flatnonzero(fired)
             if len(idx):
                 self.previous_fired_at[idx] = self.fired_at[idx]
                 self.fired_at[idx] = time
+                self.last_update[idx] = time
                 potential[idx] = 0.0  # the spike resets the potential
                 fired_wave[idx] = number
                 self.spikes[idx] += 1
@@ -276,12 +286,34 @@ class ArrayNetwork(Network):
             self.potential[:] = 0.0
         self.fired_wave[:] = -1
         self.forced[:] = False
+        if self.rule == "teacher":
+            self.eligibility[:] = 0.0  # a new epoch earns its own credit
         self.noise[:] = 0.0
         self.delivered_wave[:] = -1
         self.waves = []
 
+    def leak(self, now: float, which=None) -> None:
+        """Bring potentials up to `now` (all, or the boolean mask `which`): one vector operation, the same arithmetic as the objects."""
+        mask = np.ones(len(self.potential), dtype=bool) if which is None else which
+        elapsed = now - self.last_update
+        moving = mask & (elapsed > 0.0)
+        if moving.any():
+            if Neuron.tau != math.inf:
+                self.potential[moving] *= np.exp(-elapsed[moving] / Neuron.tau)
+            self.last_update[moving] = now
+
+    def potential_at(self, now: float) -> np.ndarray:
+        """Every potential as it stands at `now`, decayed for the time since its last update; changes nothing."""
+        elapsed = np.maximum(now - self.last_update, 0.0)
+        if Neuron.tau == math.inf:
+            return self.potential
+        return self.potential * np.exp(-elapsed / Neuron.tau)
+
     def perturb(self, sigma: float, rng, now: float | None = None) -> None:
         """Exploration: the same Box-Muller draws as the object engine (see exploration.py), done as a vector."""
+        now = self.input_time if now is None else now
+        if now is not None:
+            self.leak(now)
         n = len(self.neurons_list)
         draws = np.array(uniforms(rng, n))
         angle = TWO_PI * draws[0::2]
@@ -355,6 +387,16 @@ class ArrayNetwork(Network):
         refired_v = np.zeros(n, dtype=bool)
         refired_v[ridx] = True
 
+        def gated() -> np.ndarray:
+            return self.active & refired_v[self.target] & (self.last_signal > self.previous_fired_at[self.target])
+
+        def earn(_advantage: float) -> None:
+            """The teacher rule: remember what each gated synapse earned; the signal comes at the read."""
+            earned = np.zeros(n)
+            earned[ridx] = np.array(releases)
+            mask = gated()
+            self.eligibility[mask] += earned[self.target[mask]]
+
         def update(advantage: float) -> None:
             if not advantage:
                 return
@@ -362,12 +404,24 @@ class ArrayNetwork(Network):
             step[ridx] = dopamine.lr * advantage * np.array(releases)
             if dopamine.punish:
                 step *= np.where(self.sign < 0, -dopamine.punish_gain, 1.0)  # a should-not-fire refire: reversed, and outweighing a reward
-            mask = self.active & refired_v[self.target] & (self.last_signal > self.previous_fired_at[self.target])
+            mask = gated()
             low, high = self.weight_range
             self.weight[mask] = np.clip(self.weight[mask] + step[self.target[mask]], low, high)
             self._matrix_dirty = True
 
-        return dopamine.step(time, releases, update)
+        return dopamine.step(time, releases, earn if self.rule == "teacher" else update)
+
+    def apply_teacher(self, signal: float, lr: float) -> int:
+        """An external teacher's signal at the read (see dopamine.apply_teacher), as one vector operation."""
+        earned = self.eligibility != 0.0
+        moved = 0
+        if signal:
+            low, high = self.weight_range
+            self.weight[earned] = np.clip(self.weight[earned] + lr * signal * self.eligibility[earned], low, high)
+            self._matrix_dirty = True
+            moved = int(earned.sum())
+        self.eligibility[:] = 0.0
+        return moved
 
     # --- learning: the reinforce rule, factored out ---------------------------------
 
@@ -434,6 +488,7 @@ class ArrayNetwork(Network):
             neuron.should_fire = None if neuron.should_fire is None else bool(self.sign[i] > 0)
             neuron.fired_at = None if self.fired_at[i] == -np.inf else float(self.fired_at[i])
             neuron.previous_fired_at = None if self.previous_fired_at[i] == -np.inf else float(self.previous_fired_at[i])
+            neuron.last_update = float(self.last_update[i])
             neuron.spikes = int(self.spikes[i])
         connections = self.mesh.connections
         for i, (weight, last) in enumerate(zip(self.weight.tolist(), self.last_signal.tolist()), start=1):
@@ -442,7 +497,9 @@ class ArrayNetwork(Network):
         mesh = self.mesh
         mesh.epoch = self.epoch
         mesh.time, mesh.interval, mesh.input_time, mesh.horizon = self.time, self.interval, self.input_time, self.horizon
-        mesh.dopamine = self.dopamine
+        mesh.dopamine, mesh.rule = self.dopamine, self.rule
+        for i, weight in enumerate(self.eligibility.tolist(), start=1):
+            connections[i].eligibility = weight
         mesh.waves = [Wave(w.number, w.time, [], [self.neurons_list[i] for i in w.fired.tolist()]) for w in self.waves]
         mesh.schedule.clear()
         for time, i in self.pending():

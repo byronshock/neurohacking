@@ -44,6 +44,9 @@ KNOBS = {  # knob -> (command-line flag, label)
     "punish_gain": ("--punish-gain", "punish gain"),
     "decay": ("--weight-decay", "weight decay"),
     "expectation_start": ("--expectation-start", "expectation start"),
+    "bored_after": ("--bored-after", "bored after (ms)"),
+    "tau": ("--tau", "tau (ms)"),
+    "threshold": ("--threshold", "threshold"),
     "seed": ("--seed", "seed"),
 }
 
@@ -57,6 +60,7 @@ def parse() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=1_000_000)
     parser.add_argument("--seed", type=int, nargs="+", default=[1], help="one or more seeds; several make a seed axis")
     parser.add_argument("--engine", default="arrays")
+    parser.add_argument("--problem", default="sustain_inputs", help="the problem every arm runs (default: sustain_inputs)")
     parser.add_argument("--order", default=None, help="release-first or update-first (fixed for the sweep)")
     parser.add_argument("--no-punish", action="store_true", help="pass --no-punish to every arm")
     parser.add_argument("--summary", action="store_true", help="summarise what is on disk; run nothing")
@@ -90,7 +94,7 @@ def run_arm(job: tuple) -> dict:
     for stale in (save, save.with_suffix(".csv")):
         if stale.exists():
             stale.unlink()  # an incomplete arm starts over: the trace is appended, so it must not carry old rows
-    command = [PYTHON, "-m", "walnutbutter", "--problem", "sustain_inputs", "--headless", "--engine", args.engine,
+    command = [PYTHON, "-m", "walnutbutter", "--problem", args.problem, "--headless", "--engine", args.engine,
                "--epochs", str(args.epochs), "--save-weights", str(save), "--report", "60"]
     for knob, value in arm.items():
         command += [KNOBS[knob][0], f"{value:g}"]
@@ -145,7 +149,7 @@ def summarise(args) -> None:
     head = " | ".join(KNOBS[k][1] for k in swept)
     lines = [
         f"# Sweep {args.name} (September 12, 2026)", "",
-        f"sustain_inputs, {size} hex grid, {args.engine} engine, seed{'s' if len(args.seed) > 1 else ''} {', '.join(str(s) for s in args.seed)}, {args.epochs:,} epochs per arm, 20 ms epochs. "
+        f"{args.problem}, {size} hex grid, {args.engine} engine, seed{'s' if len(args.seed) > 1 else ''} {', '.join(str(s) for s in args.seed)}, {args.epochs:,} epochs per arm, 20 ms epochs. "
         + ("Fixed: " + ", ".join(f"{KNOBS[k][1]} {v:g}" for k, v in fixed.items()) + ". " if fixed else "")
         + f"Swept: {', '.join(KNOBS[k][1] for k in swept)}. Everything else at the defaults in constants.py.",
         f"Driver: `sweep-driver.py`; figures: `{args.name}-expected.png`, `{args.name}-score.png`; every arm's checkpoint, "
@@ -246,7 +250,7 @@ def plot(traces: dict, labels: list[str], swept: list[str], arms: list[dict], ar
                 ax.set_ylabel(ylabel, color=INK2, fontsize=8)
         if which == "expected":
             axes[0][0].legend(loc="upper right", frameon=False, fontsize=7, labelcolor=INK2)
-        fig.suptitle(f"{args.name}: sustain_inputs {size}, seed{'s' if len(args.seed) > 1 else ''} {', '.join(str(s) for s in args.seed)}, {args.epochs:,} epochs per arm: "
+        fig.suptitle(f"{args.name}: {args.problem} {size}, seed{'s' if len(args.seed) > 1 else ''} {', '.join(str(s) for s in args.seed)}, {args.epochs:,} epochs per arm: "
                      f"{'dopamine_expected against the pool' if which == 'expected' else 'score, 500-epoch moving average'}",
                      x=0.01, ha="left", color=INK, fontsize=11)
         fig.tight_layout(rect=(0, 0, 1, 0.95))

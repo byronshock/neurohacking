@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from .constants import INTERVAL
-from .dopamine import learn
+from .dopamine import apply_teacher, learn
 from .exploration import gaussians
 from .inputs import CODES, DEFAULT_CODE, Code, complement_code
 from .neuron import Neuron
@@ -44,9 +44,11 @@ class Network:
         self.input_time: float | None = None  # when the pending input arrives
         self.horizon = 0.0  # the time the schedule has run to: the next input may not come before it
         self.schedule = Schedule()  # signals in flight, across epochs
-        self.dopamine = None  # a dopamine.Dopamine when the dopamine rule runs (set by whoever builds the run)
+        self.dopamine = None  # a dopamine.Dopamine when the dopamine or teacher rule runs (set by whoever builds the run)
+        self.rule = "dopamine"  # "dopamine": the refires move the weights themselves; "teacher": they earn eligibility, the teacher pays at the read
         self.readout = "top"  # what is read as the output: the top row, or "input" (the inputs are the outputs)
         self.coding = "complement"  # how raw bits reach the input row: "complement" (bits then their negations) or "raw" (as they are)
+        self.input_cells: list[tuple[int, int]] | None = None  # an input zone, (place, row) cells, in place of the bottom row
         self.read = "fired"  # what "on" means at the read: "fired" this epoch; "again", spiked after the epoch's input moment
         # (a forced neuron must have refired); "window", within read_window ms before the horizon
         self.read_window: float | None = None  # the window for read == "window"
@@ -68,8 +70,19 @@ class Network:
     # --- input ------------------------------------------------------------
 
     def input_row(self) -> list[Neuron]:
-        """The bottom row of neurons, left to right: the network's input."""
+        """The network's input neurons in order: the bottom row, left to right, or the input zone if one is set."""
+        if self.input_cells is not None:
+            return [self.get_neuron_at(place, row) for place, row in self.input_cells]
         return [self.get_neuron_at(place, self.rows - 1) for place in range(self.across)]
+
+    def set_input_cells(self, cells) -> None:
+        """Put the input on these (place, row) cells instead of the bottom row; the permutation resets to the identity."""
+        cells = [(int(place), int(row)) for place, row in cells]
+        for place, row in cells:
+            if self.get_neuron_at(place, row) is None:
+                raise ValueError(f"no neuron at place {place}, row {row}")
+        self.input_cells = cells
+        self.permutation = list(range(len(cells)))
 
     def output_row(self) -> list[Neuron]:
         """The network's output, left to right: the top row, or the input row when the inputs are the outputs."""
@@ -89,7 +102,7 @@ class Network:
 
     def input_width(self) -> int:
         """How many neurons the input covers: one bit of the (coded, permuted) pattern each."""
-        return self.across
+        return len(self.input_cells) if self.input_cells is not None else self.across
 
     def next_time(self) -> float:
         """When the next input arrives if no time is given: the interval after the last one (the first at 0)."""
@@ -186,9 +199,13 @@ class Network:
         for neuron in self.input_neurons():
             self.schedule.stimulus(neuron, self.time)
         self.horizon = self.time + self.interval if until is None else float(until)
-        waves = self.schedule.run(self.horizon, self.waves, self._on_wave)
+        waves = self.schedule.run(self.horizon, self.waves, self._on_wave, self._everyone())
         self.forget()
         return waves
+
+    def _everyone(self) -> list[Neuron]:
+        neurons = self.all_neurons()
+        return neurons if isinstance(neurons, list) else list(neurons)
 
     def forget(self) -> None:
         """Synapses that forget on their own: every weight moves toward zero by the dopamine rule's decay, once per epoch."""
@@ -198,9 +215,9 @@ class Network:
                 connection.weight *= keep
 
     def _on_wave(self, wave: Wave) -> None:
-        """After a wave has fired: the refires learn, when the dopamine rule runs."""
+        """After a wave has fired: the refires learn (dopamine), or earn eligibility for the teacher to pay at the read."""
         if self.dopamine is not None:
-            learn(self.dopamine, wave, self.weight_range)
+            learn(self.dopamine, wave, self.weight_range, teacher=self.rule == "teacher")
 
     def total_spikes(self) -> int:
         return sum(neuron.spikes for neuron in self.all_neurons())
@@ -224,7 +241,7 @@ class Network:
         for neuron, amount in (inputs or {}).items():
             self.schedule.external(neuron, amount, now)
         self.horizon = now + self.interval if until is None else float(until)
-        return self.schedule.run(self.horizon, self.waves, self._on_wave)
+        return self.schedule.run(self.horizon, self.waves, self._on_wave, self._everyone())
 
     def reset(self, discharge: bool = False) -> None:
         """Start a new epoch: clear every neuron's fired-this-epoch state and this epoch's waves.
@@ -234,18 +251,24 @@ class Network:
         """
         for neuron in self.all_neurons():
             neuron.reset(discharge)
+        if self.rule == "teacher":
+            for connection in self.connections.values():
+                connection.eligibility = 0.0  # a new epoch earns its own credit
         self.waves = []
 
     def perturb(self, sigma: float, rng, now: float | None = None) -> None:
         """Exploration: add Gaussian noise of standard deviation `sigma` to every potential, floored.
 
-        Each neuron remembers its draw as `noise` (the reinforce rule's
-        eligibility). The draws come from `exploration.gaussians`, shared
-        with the array engine. `now` is accepted for symmetry and unused:
-        nothing about a potential depends on the clock.
+        The potential is first leaked to `now` (default: the pending input's
+        time), so the noise sits on top of what survived the gap. Each neuron
+        remembers its draw as `noise` (the reinforce rule's eligibility). The
+        draws come from `exploration.gaussians`, shared with the array engine.
         """
+        now = self.input_time if now is None else now
         neurons = self.all_neurons() if isinstance(self.all_neurons(), list) else list(self.all_neurons())
         for neuron, draw in zip(neurons, gaussians(rng, len(neurons), sigma)):
+            if now is not None:
+                neuron.leak(now)
             neuron.noise = draw
             neuron.potential = max(neuron.minimum_potential, neuron.potential + draw)
 

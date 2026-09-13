@@ -29,7 +29,9 @@ parameters with sweeps.
 * A neuron integrates delta functions to determine its potential and fires
   when the integral exceeds a threshold, at which point it resets. This is
   an integrate-and-fire neuron. Note that there is no leak, not even a lazy
-  leak.
+  leak. *Revised (Byron, September 12, 2026):* bring back the leaky
+  integrate-and-fire neuron; the infinite impulse response without the
+  leak is not wanted. The leak is lazy, with time constant TAU (§5.1).
 * A neuron firing is followed by an absolute refractory period during which
   the neuron ignores its inputs and does not integrate them. This is a
   feedback control mechanism and computational feature of the system.
@@ -64,16 +66,19 @@ literal of its own.
 | constant | value | meaning |
 |---|---|---|
 | THRESHOLD | 0.25 | $\theta$ every neuron starts with |
+| TAU | 2 ms | leak time constant of the potential, computed lazily on arrival; $\infty$ switches it off (§5.1) |
 | MINIMUM_POTENTIAL | −1 | floor on $p$: inhibition and carried-over charge go no lower |
 | REFRACTORY | 5 ms | absolute refractory period |
 | REFRACTORY_HOPS | 3 | the refractory period divided by the time a signal takes to travel one hop; not an integer, started at 3 |
 | INTERVAL | 10 ms | spacing of inputs when no time is given |
+| BORED_AFTER | 200 ms | silence after which a neuron's threshold has fallen to zero and it fires on its own (§5.4) |
 
 ### 1.3 Learning
 
 | constant | value | meaning |
 |---|---|---|
-| RULE | dopamine | which learning rule runs: dopamine (§6) or reinforce (§6.7, factored out) |
+| RULE | teacher | which learning rule runs: teacher (§6.10), dopamine (§6.2-6.6) or reinforce (§6.7) |
+| TEACHER_CREDIT | 0.25 | what each input neuron read correctly adds to the teacher's score, and each one read wrongly subtracts |
 | LR | 0.03 | learning rate |
 | SIGMA | 0.1 | exploration noise: standard deviation added to each neuron's potential at every input |
 | DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA | 2, 1 ms | shape and scale of the gamma density that gives the amount released against the refire delay past the refractory period |
@@ -138,9 +143,11 @@ the same network.
 
 ### 3.1 The guaranteed neighbourhood
 
-- **Hex grid.** Every neuron connects to its six neighbours (the first ring)
-  and to the twelve neighbours of those neighbours (the second ring):
-  eighteen local targets for an interior cell.
+- **Hex grid.** Every neuron connects to every cell within `reach` hex
+  steps: with the default reach 2, its six neighbours (the first ring) and
+  the twelve neighbours of those neighbours (the second ring), eighteen
+  local targets for an interior cell; reach 3 adds the eighteen cells of
+  the third ring, thirty-six in all.
 - **Columns.** Same position, never; horizontal distance $\le 1 + \varepsilon$
   (measured in the plane, ignoring height), always. The radius of one unit
   takes in a neuron's own column and the eighteen columns around it, in
@@ -252,19 +259,25 @@ the only trace of activity the target has (§6.4).
 
 ## 5. Activation rule — open
 
-Per §0, the neuron is integrate-and-fire with an absolute refractory
-period. There is no leak, not even a lazy leak.
+Per §0 as revised, the neuron is leaky integrate-and-fire with an absolute
+refractory period.
 
-### 5.1 Integration
+### 5.1 Integration, with a lazy leak
 
-A neuron integrates delta functions: a signal of weight $w$ arriving at
-time $t$ adds to the potential, and nothing else ever changes it:
+Nothing happens to a quiet neuron. When a signal of weight $w$ arrives at
+time $t$, the potential is first decayed for the time since it was last
+brought up to date, then the signal is added:
 
-$$p \leftarrow p + w .$$
+$$p \leftarrow p \, e^{-(t - t_{\text{last}}) / \tau}, \qquad t_{\text{last}} \leftarrow t, \qquad p \leftarrow p + w,$$
 
-Inhibition ($w < 0$) pushes the potential down, and once per wave the floor
-applies: $p \leftarrow \max(p, \text{MINIMUM\_POTENTIAL})$. Sub-threshold
-charge is kept for as long as it takes; it does not decay.
+with $\tau$ = TAU (Byron, September 12, 2026, bringing the leak back:
+"I don't like the infinite impulse response without the leak"; the default
+is the 2 ms his earlier sweep chose, and a hop is now 1.7 ms, so the leak
+acts within a cascade as well as between inputs). The exploration noise
+(§6.1) is added on top of the leaked potential at the input's moment, and
+a bored neuron's check (§5.4) compares the leaked potential against the
+falling threshold. Inhibition ($w < 0$) pushes the potential down, and
+once per wave the floor applies: $p \leftarrow \max(p, \text{MINIMUM\_POTENTIAL})$.
 
 ### 5.2 Firing
 
@@ -282,6 +295,28 @@ A neuron that fired at $t_{\text{fired}}$ is refractory while
 $t < t_{\text{fired}} + \text{REFRACTORY}$. While refractory it ignores every
 signal, does not integrate it, and cannot be forced. This is a feedback
 control mechanism and computational feature of the system (§0).
+
+### 5.4 Threshold homeostasis: bored neurons — decided for now
+
+*Decided (Byron, September 12, 2026):* we need a form of threshold
+homeostasis so bored neurons tend to fire after about 200 ms all on their
+own. *Claude's reading, built:* the threshold a neuron faces falls
+linearly with the silence since its last spike,
+
+$$\theta_j(t) = \theta_j \Big(1 - \frac{t - t_{\text{fired}}}{\text{BORED\_AFTER}}\Big),$$
+
+reaching zero at BORED_AFTER and continuing below it, so a neuron whose
+potential sits under zero fires later still; a spike resets it to
+$\theta_j$. A neuron that has never fired counts as silent since the
+clock started. Every wave now checks every neuron, touched or not, so a
+bored neuron fires at the first wave after its threshold has fallen to
+its potential: in a live mesh within a hop, in a dead one at the next
+input. (Before this, a neuron was only checked when a signal reached it,
+which also left a neuron recovered from its refractory period with enough
+potential waiting to be touched; both engines now fire it at once.) The
+spike it fires on its own is a spike like any other: it releases by its
+delay, which at 200 ms is nothing, and it resets the clock on its
+boredom.
 
 ## 6. Learning rule — open
 
@@ -469,6 +504,42 @@ The alternative not taken: a global inhibition proportional to the mesh's
 activity, which also makes reverberation something to be earned but
 couples every neuron to the whole.
 
+### 6.10 The external teacher — decided, the current rule
+
+*Decided (Byron, September 12, 2026):* the dopamine student-as-teacher is
+very hard to figure out for now, so revert to an external teacher. This
+teacher assigns reinforcement globally according to a score:
+
+- $+0.25$ for a forced-input neuron that sustains,
+- $+0.25$ for an input neuron whose input is zero and does not fire,
+- $-0.25$ for a forced-input neuron that fails to sustain,
+- $-0.25$ for an input neuron whose input is zero and does fire.
+
+Thus the possible scores for any input on reading its sustain behaviour are
+$-1$, $-0.5$, $0$, $0.5$ and $1$ (four input neurons at TEACHER_CREDIT
+each; a wider zone widens the range in the same steps).
+
+*Claude's reading, built:* the score is known only at the read, so the
+epoch's credit is carried by an **eligibility trace**. Everything in
+§6.2–6.5 stands except who supplies the global signal and when the weights
+move. During the epoch a refiring neuron's release (§6.2) is added to the
+`eligibility` of each of its gated incoming synapses (the gate of §6.5: a
+synapse that carried a signal the neuron integrated since its previous
+spike) instead of moving that synapse. At the read the teacher computes the
+score $S$ and every synapse moves by
+
+$$w_{ij} \leftarrow \mathrm{clip}\big(w_{ij} + \text{LR} \cdot S \cdot e_{ij},\ \text{WEIGHT\_RANGE}\big),$$
+
+with $e_{ij}$ the trace, which is then cleared: an epoch's credit never
+carries into the next. The dopamine pool still runs and is still reported,
+but it no longer decides anything. The §6.5 punishment of a bit-0 input
+neuron is switched **off** under this rule, because the teacher's score
+already knows which neurons should not have fired and reversing the sign
+locally would double-count it; `--punish` turns it back on. Weight decay
+(§6.8) and the bored neurons (§5.4) are unchanged. A problem names the rule
+it is posed for: reversal the reinforce rule, sustain_inputs and
+improved_sustain the teacher.
+
 ### 6.9 What is reported
 
 Spikes to date, the neurons fired this epoch, the dopamine value and its
@@ -551,3 +622,15 @@ the layout, the inputs, and whether anything outside the network trains it.
   one phase in three of a fully sustaining neuron as off, on a 2 ms hop
   grid with a 6 ms cadence: the 2/3 ceiling of the low grid.) The window
   read stays available to a problem as `read = "window"`.
+
+- **improved_sustain** (Byron, September 12, 2026). A different topology
+  for this problem: the hex grid consists of 7 rows by 10 across. The input
+  is presented in the MIDDLE, row 4, places 4 through 7 counted from 1
+  (row 3, places 3 to 6 counted from 0: the middle four of the middle row).
+  The reach is 3: every neuron is wired to every cell within three hex
+  steps (§3.1). No permutation, the bits land where they are. Everything
+  else as sustain_inputs: raw coding, 20 ms epochs, the same four neurons
+  read back as spiked again, the row critic, learning by dopamine, nothing
+  outside the network training it. A problem may name any input zone, a
+  list of (place, row) cells (`Network.set_input_cells`), in place of the
+  bottom row; a neuron may sit in several zones at once.

@@ -18,7 +18,7 @@ from .columns import HexColumns
 from .grid import GridOfNeurons
 from .inputs import CODES, DEFAULT_CODE, parse_bits
 from .constants import (
-    ACROSS, CRITIC, DOPAMINE_EXPECTATION_START, DOPAMINE_EXPECTATION_TAU, DOPAMINE_ORDER, DOPAMINE_PUNISH_GAIN, DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA,
+    ACROSS, BORED_AFTER, CRITIC, TAU, DOPAMINE_EXPECTATION_START, DOPAMINE_EXPECTATION_TAU, DOPAMINE_ORDER, DOPAMINE_PUNISH_GAIN, DOPAMINE_RELEASE_ALPHA, DOPAMINE_RELEASE_THETA,
     DOPAMINE_TAU, ELIGIBILITY, WEIGHT_DECAY, HOMEOSTASIS, INTERVAL, LATE, LR,
     MINIMUM_POTENTIAL, OMEGA, PROBLEM, REACH, REFRACTORY, REFRACTORY_HOPS, ROWS, RULE, SIGMA, TARGET, TARGET_RATE,
     THRESHOLD, THRESHOLD_RANGE, UNSTICK, UNSTICK_TARGET, WEIGHT_EPSILON, WEIGHT_RANGE,
@@ -202,9 +202,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--rule",
         choices=RULES,
-        default=RULE,
-        help=f"the learning rule (AUTHORITY.md §6): dopamine (neurons that refire release dopamine and move their "
-        f"weights as they fire) or reinforce (the pre-alpha's global-reward rule, run by the Teacher). Default: {RULE}",
+        default=None,
+        help=f"the learning rule (AUTHORITY.md §6): teacher (an external teacher scores the read and pays the epoch's "
+        f"eligibility), dopamine (the neurons pay themselves as they refire), or reinforce (the pre-alpha's rule). "
+        f"Default: the problem's, else {RULE}",
     )
     parser.add_argument(
         "--dopamine-tau",
@@ -248,6 +249,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=ORDERS,
         default=DOPAMINE_ORDER,
         help=f"at a refire, release the dopamine before the weight update or after it (default: {DOPAMINE_ORDER})",
+    )
+    parser.add_argument(
+        "--punish",
+        action="store_true",
+        help="reverse a bit-0 input neuron's update even under the teacher rule, whose score already knows about them",
     )
     parser.add_argument(
         "--no-punish",
@@ -366,11 +372,27 @@ def build_parser() -> argparse.ArgumentParser:
         "Each epoch runs the schedule up to the next input's time; signals still in flight then join the next epoch",
     )
     parser.add_argument(
+        "--tau",
+        type=float,
+        default=TAU,
+        metavar="MS",
+        help=f"leak time constant of every neuron, nominal milliseconds (default: {TAU:g}; inf switches the leak off). "
+        "The leak is computed only when a signal reaches a neuron",
+    )
+    parser.add_argument(
         "--refractory",
         type=float,
         default=REFRACTORY,
         metavar="MS",
         help=f"absolute refractory period of every neuron, nominal milliseconds (default: {REFRACTORY:g})",
+    )
+    parser.add_argument(
+        "--bored-after",
+        type=float,
+        default=BORED_AFTER,
+        metavar="MS",
+        help=f"threshold homeostasis: a neuron's threshold falls with its silence, reaching zero after this many ms "
+        f"without a spike, so a bored neuron fires on its own (default: {BORED_AFTER:g}; 0 = off)",
     )
     parser.add_argument(
         "--refractory-hops",
@@ -436,6 +458,7 @@ def build_parser() -> argparse.ArgumentParser:
 def cli_main(argv: list[str] | None = None) -> int:
     """Run the CLI. Returns a process exit code (0 = success)."""
     args = build_parser().parse_args(argv)
+    args.given_rule = args.rule  # what --rule said, if anything: it outlives a checkpoint's problem
     args.show = not args.headless and args.seeds is None  # a seed batch is headless by definition
     args.fast = args.show and not args.step
     try:
@@ -443,10 +466,13 @@ def cli_main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    was_verbose, was_refractory, was_hops = Neuron.verbose, Neuron.refractory, Neuron.refractory_hops
+    was_verbose, was_refractory, was_hops, was_bored, was_tau = Neuron.verbose, Neuron.refractory, Neuron.refractory_hops, Neuron.bored_after, Neuron.tau
     Neuron.verbose = bool(args.verbose) and not args.fast and not args.quiet
-    if args.refractory <= 0 or args.refractory_hops <= 0 or args.interval <= 0:
-        print("error: --refractory, --refractory-hops and --interval must be positive", file=sys.stderr)
+    if args.refractory <= 0 or args.refractory_hops <= 0 or args.interval <= 0 or args.tau <= 0:
+        print("error: --tau, --refractory, --refractory-hops and --interval must be positive", file=sys.stderr)
+        return 2
+    if args.bored_after < 0:
+        print("error: --bored-after must not be negative", file=sys.stderr)
         return 2
     if args.dopamine_tau <= 0 or args.release_alpha <= 0 or args.release_theta <= 0 or args.expectation_tau <= 0:
         print("error: --dopamine-tau, --release-alpha, --release-theta and --expectation-tau must be positive", file=sys.stderr)
@@ -454,11 +480,11 @@ def cli_main(argv: list[str] | None = None) -> int:
     if args.punish_gain < 0 or not 0 <= args.weight_decay < 1:
         print("error: --punish-gain must not be negative and --weight-decay must be in [0, 1)", file=sys.stderr)
         return 2
-    Neuron.refractory, Neuron.refractory_hops = args.refractory, args.refractory_hops
+    Neuron.refractory, Neuron.refractory_hops, Neuron.bored_after, Neuron.tau = args.refractory, args.refractory_hops, args.bored_after, args.tau
     try:
         return _run(args)
     finally:
-        Neuron.verbose, Neuron.refractory, Neuron.refractory_hops = was_verbose, was_refractory, was_hops
+        Neuron.verbose, Neuron.refractory, Neuron.refractory_hops, Neuron.bored_after, Neuron.tau = was_verbose, was_refractory, was_hops, was_bored, was_tau
 
 
 def apply_problem(args: argparse.Namespace) -> None:
@@ -475,9 +501,19 @@ def apply_problem(args: argparse.Namespace) -> None:
         args.target = problem.target
     if problem.critic is not None:
         args.critic = problem.critic
+    if args.rule is None:
+        args.rule = problem.rule or RULE
+    if args.rule == "teacher":
+        if problem.readout != "input":
+            raise ValueError(f"the teacher rule scores the input neurons, which {args.problem} does not read")
+        args.no_punish = not args.punish  # the teacher's score already knows about bit-0 neurons (§6.10)
     if args.interval is None:
         args.interval = problem.interval if problem.interval is not None else INTERVAL
     args.readout, args.read, args.read_window, args.coding = problem.readout, problem.read, problem.read_window, problem.coding
+    args.grid_reach, args.input_cells = problem.reach, problem.input_cells
+    args.no_permute = args.no_permute or not problem.permute
+    if args.rows == ROWS and problem.rows != ROWS:
+        args.rows = problem.rows  # the problem's rows, unless --rows was given (a value equal to the default is taken as not given)
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -512,6 +548,7 @@ def _run(args: argparse.Namespace) -> int:
             if data.get("problem") and data["problem"] != args.problem:
                 args.problem = data["problem"]
                 args.interval = None if PROBLEMS[args.problem].interval is not None else args.interval
+                args.rule = args.given_rule  # --rule if it was given, else the problem's
                 apply_problem(args)
                 print(f"problem: {args.problem} (from the checkpoint)", file=sys.stderr)
             if data.get("container") == "lattice":
@@ -577,7 +614,9 @@ def _run(args: argparse.Namespace) -> int:
                 )
                 grid.connect_within(reach=args.reach, weight=args.weight)
             else:
-                grid = GridOfNeurons(**settings)
+                grid = GridOfNeurons(**settings, reach=args.grid_reach)
+            if args.input_cells and not loaded:
+                grid.set_input_cells(args.input_cells)
             grid.interval = args.interval
             grid.problem = args.problem
             grid.readout, grid.read, grid.read_window, grid.coding = args.readout, args.read, args.read_window, args.coding
@@ -611,17 +650,19 @@ def _run(args: argparse.Namespace) -> int:
             if not args.no_permute or loaded:
                 laid = "coded" if grid.coding == "complement" else "raw"
                 print(f"input permutation: place i along the bottom row shows {laid} bit {grid.permutation}", file=sys.stderr)
-            if args.rule == "dopamine":
+            if args.rule in ("dopamine", "teacher"):
+                grid.rule = args.rule
                 if grid.dopamine is None:  # a loaded checkpoint brings its own pool
                     grid.dopamine = Dopamine(tau=args.dopamine_tau, release_alpha=args.release_alpha, release_theta=args.release_theta,
                                              order=args.order, lr=args.lr, expectation_tau=args.expectation_tau,
                                              punish=not args.no_punish, punish_gain=args.punish_gain, decay=args.weight_decay,
                                              expectation_start=args.expectation_start)
-                print(f"rule: dopamine, {grid.dopamine.order}, tau {grid.dopamine.tau:g} ms, release gamma(alpha "
+                print(f"rule: {args.rule}, {grid.dopamine.order}, tau {grid.dopamine.tau:g} ms, release gamma(alpha "
                       f"{grid.dopamine.release_alpha:g}, theta {grid.dopamine.release_theta:g} ms), expectation tau "
                       f"{grid.dopamine.expectation_tau:g} ms from {grid.dopamine.expectation:g}, lr {grid.dopamine.lr:g}, "
                       f"{f'bit-0 input neurons punished {grid.dopamine.punish_gain:g}x for refiring' if grid.dopamine.punish else 'no punishment'}, "
-                      f"weight decay {grid.dopamine.decay:g} per epoch; hop {Neuron.hop():g} ms", file=sys.stderr)
+                      f"weight decay {grid.dopamine.decay:g} per epoch; hop {Neuron.hop():g} ms, tau {Neuron.tau:g} ms, "
+                      f"bored after {Neuron.bored_after:g} ms", file=sys.stderr)
             else:
                 grid.dopamine = None
             engine = args.engine or (data.get("engine", "objects") if loaded else "objects")
@@ -788,15 +829,20 @@ def _seed_worker(job: dict) -> dict:
         )
         grid.connect_within(reach=job["lattice"]["reach"], weight=settings["weight"])
     elif not job.get("layers"):
-        grid = GridOfNeurons(**job["settings"], seed=seed)
+        grid = GridOfNeurons(**job["settings"], seed=seed, reach=job.get("grid_reach", 2))
+        if job.get("input_cells"):
+            grid.set_input_cells(job["input_cells"])
     if job.get("layers"):
         grid = HexColumns(layers=job["layers"], **job["settings"], seed=seed)
     if job.get("ecc"):
         grid.use_ecc(job["ecc"])
     Neuron.refractory, Neuron.refractory_hops = job.get("refractory", Neuron.refractory), job.get("refractory_hops", Neuron.refractory_hops)
+    Neuron.bored_after = job.get("bored_after", Neuron.bored_after)
+    Neuron.tau = job.get("tau", Neuron.tau)
     grid.interval = job.get("interval", grid.interval)
     grid.problem = job.get("problem")
     grid.readout, grid.read, grid.read_window = job.get("readout", "top"), job.get("read", "fired"), job.get("read_window")
+    grid.rule = job["teacher"].get("rule", RULE)
     grid.coding = job.get("coding", "complement")
     if job["teacher"].get("rule", RULE) == "dopamine":
         grid.dopamine = Dopamine(**job["dopamine"])
@@ -878,7 +924,8 @@ def _run_seeds(args: argparse.Namespace) -> int:
         jobs.append({"seed": seed, "epochs": args.epochs, "settings": settings, "teacher": teacher_kwargs,
                      "save": save, "lattice": lattice, "ecc": args.ecc, "engine": args.engine or "objects",
                      "layers": args.layers, "refractory": args.refractory, "refractory_hops": args.refractory_hops,
-                     "interval": args.interval, "dopamine": dopamine, "problem": args.problem,
+                     "interval": args.interval, "dopamine": dopamine, "problem": args.problem, "bored_after": args.bored_after,
+                     "tau": args.tau, "grid_reach": args.grid_reach, "input_cells": args.input_cells,
                      "readout": args.readout, "read": args.read, "read_window": args.read_window, "coding": args.coding})
     if args.engine == "arrays":
         try:

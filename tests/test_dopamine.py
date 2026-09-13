@@ -212,7 +212,7 @@ def test_the_weights_move_on_the_default_grid_and_stay_in_range():
 
 def test_the_teacher_scores_under_dopamine_and_reinforces_under_the_other_rule():
     grid = GridOfNeurons(across=8, rows=4, weight=None, seed=2, omega=0)
-    teacher = Teacher(grid, seed=2)
+    teacher = Teacher(grid, seed=2, rule="dopamine")
     assert teacher.rule == "dopamine" and grid.dopamine is not None and grid.dopamine.lr == teacher.lr
     teacher.epoch(verbose=False)
     assert "dopamine" in teacher.status() and "perturb, lr" not in teacher.status()
@@ -226,18 +226,18 @@ def test_the_teacher_scores_under_dopamine_and_reinforces_under_the_other_rule()
 
 def test_sustain_inputs_runs_by_dopamine_and_checkpoints_it(tmp_path, capsys):
     save = tmp_path / "s.json"
-    assert cli_main(["--headless", "--problem", "sustain_inputs", "--seed", "3", "--epochs", "30", "-r", "4",
+    assert cli_main(["--headless", "--problem", "sustain_inputs", "--rule", "dopamine", "--seed", "3", "--epochs", "30", "-r", "4",
                      "--save-weights", str(save)]) == 0
     err = capsys.readouterr().err
     assert "rule: dopamine, release-first" in err and "release gamma(alpha 2, theta 1 ms)" in err and "after 30 epochs" in err
     assert "bit-0 input neurons punished 2x for refiring" in err and "weight decay 0.0001 per epoch" in err
     data = json.loads(save.read_text())
     assert data["dopamine"]["releases"] > 0 and data["problem"] == "sustain_inputs" and data["learning"]["rule"] == "dopamine"
-    assert cli_main(["--headless", "--load-weights", str(save), "--epochs", "5", "--no-save"]) == 0
+    assert cli_main(["--headless", "--load-weights", str(save), "--rule", "dopamine", "--epochs", "5", "--no-save"]) == 0
     err = capsys.readouterr().err
     assert "from the checkpoint" in err and "rule: dopamine" in err
     assert cli_main(["--headless", "-a", "8", "-r", "4", "--seed", "1", "--epochs", "5", "--rule", "reinforce", "--no-save", "-q"]) == 0
     assert "perturb, lr" in capsys.readouterr().err
     assert cli_main(["--headless", "--order", "update-first", "--dopamine-tau", "0"]) == 2
     assert cli_main(["--headless", "--seeds", "2", "--seed", "1", "-a", "8", "-r", "4", "--epochs", "5", "--no-save",
-                     "--order", "update-first"]) == 0
+                     "--rule", "dopamine", "--order", "update-first"]) == 0

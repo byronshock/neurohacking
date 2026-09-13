@@ -161,7 +161,7 @@ def test_cli_bare_nodes_builds_a_learning_lattice(capsys):
     assert cli_main(["--headless", "--nodes", "--across", "6", "--rows", "4", "--seed", "1", "-q", "--epochs", "5", "--no-save"]) == 0
     err = capsys.readouterr().err
     assert "6x4 hexagonal lattice, 24 neurons at unit spacing" in err and "every pair within 2 units" in err
-    assert "scoring reversed" in err and "after 5 epochs" in err
+    assert "learning reversed" in err and "after 5 epochs" in err
 
 
 def test_cli_nodes_rejects_negative(capsys):
@@ -494,7 +494,7 @@ def test_command_line_reproduces_the_sweep_sequence_exactly(tmp_path, capsys):
     epochs = 300
     nodes = CartesianNodes(across=8, rows=10, seed=3)
     nodes.connect_within(reach=2.0, weight=None)
-    teacher = Teacher(nodes, seed=3)
+    teacher = Teacher(nodes, seed=3, rule="reinforce")  # the reversal problem's rule, which the command line uses
     for _ in range(epochs):
         teacher.epoch(verbose=False)
     assert cli_main(["--headless", "--nodes", "--seed", "3", "--reach", "2", "-q", "--epochs", str(epochs)]) == 0

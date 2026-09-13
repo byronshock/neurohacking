@@ -22,8 +22,9 @@ def test_the_command_line_defaults_are_the_constants():
     assert (args.rows, args.omega, args.reach, args.epsilon) == (C.ROWS, C.OMEGA, C.REACH, C.WEIGHT_EPSILON)
     assert (args.threshold, args.minimum_potential) == (C.THRESHOLD, C.MINIMUM_POTENTIAL)
     assert (args.interval, args.refractory, args.refractory_hops) == (None, C.REFRACTORY, C.REFRACTORY_HOPS)  # the problem's, else INTERVAL
-    assert (args.rule, args.dopamine_tau, args.release_alpha, args.release_theta, args.order) == (
-        C.RULE, C.DOPAMINE_TAU, C.DOPAMINE_RELEASE_ALPHA, C.DOPAMINE_RELEASE_THETA, C.DOPAMINE_ORDER)
+    assert args.rule is None and C.RULE == "teacher"  # the problem's rule, else the constant
+    assert (args.dopamine_tau, args.release_alpha, args.release_theta, args.order) == (
+        C.DOPAMINE_TAU, C.DOPAMINE_RELEASE_ALPHA, C.DOPAMINE_RELEASE_THETA, C.DOPAMINE_ORDER)
     assert args.problem == C.PROBLEM
     assert (args.target, args.critic, args.eligibility, args.late) == (C.TARGET, C.CRITIC, C.ELIGIBILITY, C.LATE)
     assert (args.lr, args.sigma, args.homeostasis, args.target_rate) == (C.LR, C.SIGMA, C.HOMEOSTASIS, C.TARGET_RATE)
@@ -31,7 +32,9 @@ def test_the_command_line_defaults_are_the_constants():
 
 
 def test_the_neuron_and_its_clock_read_the_constants():
-    assert (Neuron.refractory, Neuron.refractory_hops) == (C.REFRACTORY, C.REFRACTORY_HOPS)
+    assert (Neuron.refractory, Neuron.refractory_hops, Neuron.bored_after, Neuron.tau) == (C.REFRACTORY, C.REFRACTORY_HOPS, C.BORED_AFTER, C.TAU)
+    assert build_parser().parse_args([]).tau == C.TAU
+    assert build_parser().parse_args([]).bored_after == C.BORED_AFTER
     assert Neuron.hop() == C.REFRACTORY / C.REFRACTORY_HOPS
     neuron = Neuron()
     assert (neuron.threshold, neuron.minimum_potential) == (C.THRESHOLD, C.MINIMUM_POTENTIAL)

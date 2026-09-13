@@ -32,6 +32,7 @@ class Connection:
         self.is_active = is_active
         self.kind = kind  # "local" (a neighbour), "local2" (a neighbour of a neighbour), "small_world" (a shortcut)
         self.last_signal: float | None = None  # clock time of the last signal the target integrated along here: the synapse's only trace
+        self.eligibility = 0.0  # what this synapse has earned this epoch, awaiting the teacher's signal (dopamine.py)
 
     def joins(self, source: Neuron, target: Neuron) -> bool:
         """True if this connection runs from `source` to `target` (direction matters)."""

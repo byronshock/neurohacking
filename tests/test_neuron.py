@@ -113,7 +113,9 @@ def test_reset_keeps_an_unfired_potential_and_discharges_on_request():
     assert a.potential == 0.0 and not a.has_fired  # a spike resets the potential
 
 
-def test_charge_accumulates_across_epochs_until_the_neuron_fires(capsys):
+def test_charge_accumulates_across_epochs_until_the_neuron_fires(capsys, monkeypatch):
+    import math
+    monkeypatch.setattr(Neuron, "tau", math.inf)  # no leak: the charge is kept from one epoch to the next
     a, b = Neuron("a"), Neuron("b", threshold=0.25)
     a.connect(b, weight=0.1)
     fired_on = None
@@ -165,7 +167,9 @@ def test_minimum_potential_defaults_to_minus_one_and_is_configurable():
     assert b.potential == -0.2
 
 
-def test_carried_charge_respects_the_floor_across_epochs(capsys):
+def test_carried_charge_respects_the_floor_across_epochs(capsys, monkeypatch):
+    import math
+    monkeypatch.setattr(Neuron, "tau", math.inf)  # no leak: the inhibition is kept from one epoch to the next
     a, b = Neuron("a"), Neuron("b", minimum_potential=-0.5)
     a.connect(b, weight=-0.4)
     for epoch in range(5):

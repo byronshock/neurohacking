@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import math
+
 from .clock import slack
 from .connection import Connection
-from .constants import MINIMUM_POTENTIAL, REFRACTORY, REFRACTORY_HOPS, THRESHOLD
+from .constants import BORED_AFTER, MINIMUM_POTENTIAL, REFRACTORY, REFRACTORY_HOPS, TAU, THRESHOLD
 
 
 class Neuron:
-    """An integrate-and-fire neuron with an absolute refractory period, on a clock in nominal milliseconds.
+    """A leaky integrate-and-fire neuron with an absolute refractory period, on a clock in nominal milliseconds.
 
     AUTHORITY.md §0 and §5: the neuron integrates delta functions (a signal
-    adds its weight to the potential, and nothing else ever changes it: no
-    leak, not even a lazy one), fires when the potential reaches its
+    adds its weight to the potential), the potential leaks with time
+    constant `tau` (lazily: nothing happens to a quiet neuron, and when a
+    signal arrives the potential is first decayed for the time since it was
+    last brought up to date), and it fires when the potential reaches its
     threshold, and resets. A neuron that fired within the last `refractory`
     milliseconds ignores every signal, forced stimulus included. It
     remembers its last two spike times: the gap between them is what its
@@ -20,8 +24,10 @@ class Neuron:
     """
 
     verbose = False  # class-wide: print a line each time any neuron fires (off unless asked: walnutbutter -v)
+    tau = TAU  # leak time constant, nominal milliseconds (see constants.py); math.inf switches the leak off
     refractory = REFRACTORY  # absolute refractory period, nominal milliseconds (see constants.py)
     refractory_hops = REFRACTORY_HOPS  # refractory period / hop time (see constants.py)
+    bored_after = BORED_AFTER  # ms of silence after which the threshold has fallen to zero (see constants.py); 0 = off
 
     @classmethod
     def hop(cls) -> float:
@@ -45,6 +51,7 @@ class Neuron:
         self.should_fire: bool | None = None  # an input neuron's bit this epoch (True forced, False should not fire); None: not an input
         self.fired_at: float | None = None  # clock time of the last spike, across epochs
         self.previous_fired_at: float | None = None  # clock time of the spike before that
+        self.last_update = 0.0  # clock time the potential was last brought up to date (the lazy leak)
         self.spikes = 0  # how many times this neuron has ever fired
 
     def connect(
@@ -83,17 +90,34 @@ class Neuron:
         """
         return self.fired_at is not None and now + slack(now) < self.fired_at + Neuron.refractory
 
+    def potential_at(self, now: float) -> float:
+        """The potential as it stands at `now`, decayed for the time since it was last brought up to date; changes nothing."""
+        elapsed = now - self.last_update
+        if elapsed > 0.0 and Neuron.tau != math.inf:
+            return self.potential * math.exp(-elapsed / Neuron.tau)
+        return self.potential
+
+    def leak(self, now: float) -> None:
+        """Bring the potential up to `now`: decay it for the time since the last update. Lazy, so call it on arrival."""
+        elapsed = now - self.last_update
+        if elapsed > 0.0:
+            if Neuron.tau != math.inf:
+                self.potential *= math.exp(-elapsed / Neuron.tau)
+            self.last_update = now
+
     def receive(self, amount: float, now: float | None = None) -> bool:
-        """Take in weighted input at time `now`: integrate it, unless refractory. Returns whether it was integrated.
+        """Take in weighted input at time `now`: leak first, then integrate, unless refractory. Returns whether it was integrated.
 
         Receiving never fires the neuron by itself; the schedule checks
         readiness once every signal in the wave has been delivered, after
         `settle()` has applied the floor to the wave's total. Negative weights
         push the potential down (an inhibitory connection). Without `now` the
-        clock is not consulted and nothing blocks.
+        clock is not consulted: no leak, and nothing blocks.
         """
-        if now is not None and self.refractory_at(now):
-            return False
+        if now is not None:
+            if self.refractory_at(now):
+                return False
+            self.leak(now)
         self.potential += amount
         return True
 
@@ -109,14 +133,30 @@ class Neuron:
 
     @property
     def ready(self) -> bool:
-        """True if this neuron has enough input to fire."""
+        """True if this neuron has enough input to fire, against its resting threshold."""
         return self.potential >= self.threshold
 
+    def threshold_at(self, now: float) -> float:
+        """The threshold a bored neuron faces at `now`: its own, falling linearly with the silence since its last spike.
+
+        Threshold homeostasis (AUTHORITY.md §5.4): the threshold reaches zero
+        after `bored_after` ms without a spike and keeps falling at the same
+        rate, so a neuron that nobody talks to fires on its own, and resets
+        its threshold by firing. A neuron that has never fired has been
+        silent since the clock started.
+        """
+        if Neuron.bored_after <= 0.0:
+            return self.threshold
+        since = 0.0 if self.fired_at is None else self.fired_at
+        return self.threshold - self.threshold * (now - since) / Neuron.bored_after
+
     def can_fire(self, now: float | None) -> bool:
-        """Ready, and not refractory at `now` (the clock is ignored when `now` is None)."""
-        if now is not None and self.refractory_at(now):
+        """Enough potential for the threshold it faces at `now`, and not refractory (the clock is ignored when `now` is None)."""
+        if now is None:
+            return self.ready
+        if self.refractory_at(now):
             return False
-        return self.ready
+        return self.potential_at(now) >= self.threshold_at(now)
 
     def fire(self, wave: int = 0, now: float | None = None) -> list[Connection]:
         """Spike: mark this neuron as fired in `wave` at time `now` and return the connections to signal along.
@@ -133,6 +173,7 @@ class Neuron:
         if now is not None:
             self.previous_fired_at = self.fired_at
             self.fired_at = now
+            self.last_update = now
         if Neuron.verbose:
             print(f"{self.name} fired in wave {wave}.")
         return [connection for connection in self.outgoing if connection.is_active]
@@ -141,8 +182,8 @@ class Neuron:
         """Start a new epoch: clear the fired-this-epoch state.
 
         The potential is kept: a neuron that did not fire keeps its
-        sub-threshold charge for as long as it takes (there is no leak), and
-        a spike has already reset the potential of one that fired. With
+        sub-threshold charge, which leaks as the clock moves on, and a spike
+        has already reset the potential of one that fired. With
         `discharge=True` every potential is zeroed instead. Spike times are
         kept: the refractory period outlives the epoch.
         """

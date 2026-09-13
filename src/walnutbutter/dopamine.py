@@ -229,12 +229,16 @@ class Dopamine:
         return dopamine
 
 
-def learn(dopamine: Dopamine, wave, weight_range: tuple[float, float]) -> float:
+def learn(dopamine: Dopamine, wave, weight_range: tuple[float, float], teacher: bool = False) -> float:
     """The object engine's learning for one wave: its refires release, then move their gated incoming weights.
 
     A refire is a firing neuron with a previous spike. The gate: an incoming
     connection counts if its last integrated signal came after that
     previous spike. Returns the advantage the wave saw.
+
+    With `teacher`, the weights are not moved: each gated synapse adds the
+    refire's release to its `eligibility`, and an external teacher applies
+    the epoch's signal to the trace at the read (`apply_teacher`).
     """
     refires = []
     for neuron in wave.fired:
@@ -244,6 +248,14 @@ def learn(dopamine: Dopamine, wave, weight_range: tuple[float, float]) -> float:
         refires.append((neuron, dopamine.release_amount(dopamine.delay_of(previous, wave.time))))
     low, high = weight_range
     lr, punish, gain = dopamine.lr, dopamine.punish, dopamine.punish_gain
+
+    def earn(_advantage: float) -> None:
+        """The teacher rule: remember what each gated synapse earned; the signal comes at the read."""
+        for neuron, release in refires:
+            since = neuron.previous_fired_at
+            for connection in neuron.incoming:
+                if connection.is_active and connection.last_signal is not None and connection.last_signal > since:
+                    connection.eligibility += release
 
     def update(advantage: float) -> None:
         if not advantage:
@@ -258,4 +270,26 @@ def learn(dopamine: Dopamine, wave, weight_range: tuple[float, float]) -> float:
                     weight = connection.weight + step
                     connection.weight = low if weight < low else high if weight > high else weight
 
-    return dopamine.step(wave.time, [release for _, release in refires], update)
+    return dopamine.step(wave.time, [release for _, release in refires], earn if teacher else update)
+
+
+def apply_teacher(grid, signal: float, lr: float) -> int:
+    """An external teacher's signal at the read: move every synapse by lr * signal * what it earned, then clear the trace.
+
+    Returns the number of synapses moved. The trace is cleared whether or
+    not the signal was zero, so an epoch's credit never carries into the
+    next (AUTHORITY.md §6.10).
+    """
+    if getattr(grid, "engine", "objects") == "arrays":
+        return grid.apply_teacher(signal, lr)
+    low, high = grid.weight_range
+    step = lr * signal
+    moved = 0
+    for connection in grid.connections.values():
+        if connection.eligibility:
+            if step:
+                weight = connection.weight + step * connection.eligibility
+                connection.weight = low if weight < low else high if weight > high else weight
+                moved += 1
+            connection.eligibility = 0.0
+    return moved

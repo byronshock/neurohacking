@@ -67,11 +67,12 @@ import random
 from typing import Callable, Sequence
 
 from .grid import GridOfNeurons
+from .constants import TEACHER_CREDIT  # noqa: F401  (the teacher's credit per input neuron)
 from .constants import (
     BASELINE_RATE, CRITIC, ELIGIBILITY, HOMEOSTASIS, LATE, LR, RATE_MEMORY, RULE, SIGMA, STUCK_ABOVE, STUCK_BELOW,
     TARGET, TARGET_RATE, THRESHOLD_RANGE, UNSTICK, UNSTICK_TARGET, WINDOW,
 )
-from .dopamine import Dopamine
+from .dopamine import Dopamine, apply_teacher
 from .monitor import run_epoch
 from .neuron import Neuron
 
@@ -84,7 +85,7 @@ TARGETS: dict[str, Target] = {
     "all-on": lambda pattern: [True] * len(pattern),
 }
 
-RULES = ("dopamine", "reinforce")  # which learning rule runs (AUTHORITY.md §6)
+RULES = ("teacher", "dopamine", "reinforce")  # which learning rule runs (AUTHORITY.md §6)
 ELIGIBILITIES = ("perturb", "hebb")
 LATE_RULES = ("count", "ignore", "depress")  # what a signal that arrived after its target fired earns
 
@@ -186,6 +187,20 @@ def decoded_accuracy(grid: GridOfNeurons, target: str = "reversed") -> float:
 def decoded_exact(grid: GridOfNeurons, target: str = "reversed") -> float:
     """1 if the corrected, decoded data bits are all right, else 0."""
     return 1.0 if decoded_output(grid, target) == expected_data(grid) else 0.0
+
+
+def teacher_score(grid: GridOfNeurons, target: str = "copy") -> float:
+    """The external teacher's score for the read (AUTHORITY.md §6.10), in [-1, 1] for a four-neuron input zone.
+
+    Byron, September 12, 2026: +TEACHER_CREDIT for a forced-input neuron
+    that sustains, +TEACHER_CREDIT for an input neuron whose input is zero
+    and does not fire, -TEACHER_CREDIT for a forced-input neuron that fails
+    to sustain, -TEACHER_CREDIT for an input neuron whose input is zero and
+    does fire. With four inputs the possible scores are -1, -0.5, 0, 0.5, 1.
+    """
+    fired = output_fired(grid)
+    want = expected_outputs(grid, target)
+    return TEACHER_CREDIT * sum(1 if f == w else -1 for f, w in zip(fired, want))
 
 
 def sustained(grid: GridOfNeurons, target: str = "copy") -> float:
@@ -405,8 +420,9 @@ class Teacher:
         if rule not in RULES:
             raise ValueError(f"unknown learning rule {rule!r}; choose from {', '.join(RULES)}")
         self.rule = rule
-        if rule == "dopamine" and getattr(grid, "dopamine", None) is None:
+        if rule in ("dopamine", "teacher") and getattr(grid, "dopamine", None) is None:
             grid.dopamine = Dopamine(lr=lr)
+        grid.rule = rule if rule in ("dopamine", "teacher") else "dopamine"  # the reinforce rule leaves the schedule's hook alone
         if target not in TARGETS:
             raise ValueError(f"unknown target {target!r}; choose from {', '.join(TARGETS)}")
         if critic not in CRITICS:
@@ -426,6 +442,8 @@ class Teacher:
         self.unstick = unstick
         self.unstick_target = unstick_target
         self.unstuck_count = 0  # how many epoch-nudges the output un-sticking has applied
+        self.moved = 0  # synapses the external teacher has moved
+        self.last_signal: float | None = None  # the teacher's score for the last epoch, in [-1, 1]
         self.history: list[dict] = []  # one entry per progress report; saved in checkpoints
         if not 0.0 < target_rate < 1.0:
             raise ValueError(f"target firing rate must be between 0 and 1, got {target_rate}")
@@ -475,7 +493,10 @@ class Teacher:
         if self.baseline is None:
             self.baseline = reward
         advantage = reward - self.baseline
-        if self.rule == "reinforce":
+        self.last_signal = teacher_score(self.grid, self.target) if self.rule == "teacher" else None
+        if self.rule == "teacher":
+            self.moved += apply_teacher(self.grid, self.last_signal, self.lr)  # the teacher pays the epoch's eligibility
+        elif self.rule == "reinforce":
             reinforce(self.grid, advantage, self.lr, self.sigma, self.eligibility, self.late)
         update_rates(self.grid)
         homeostasis(self.grid, self.homeostasis, self.target_rate, self.threshold_range)
@@ -485,6 +506,8 @@ class Teacher:
         if self._trace is not None:
             pool = self.grid.dopamine
             level, expected = ("", "") if pool is None else (f"{pool.peek(self.grid.horizon):.6g}", f"{pool.expected():.6g}")
+            if self.rule == "teacher":
+                level, expected = f"{self.last_signal:+g}", f"{self.moved}"  # the teacher's signal, and synapses moved to date
             self._trace.write(f"{self.grid.epoch},{self.grid.time:g},{level},{expected},{reward:.6g}\n")
         self.total_reward += reward
         self.last_reward = reward
@@ -516,10 +539,13 @@ class Teacher:
         return entry
 
     def status(self) -> str:
-        verb = "learning" if self.rule == "reinforce" else "scoring"  # under the dopamine rule the Teacher only scores
+        verb = {"dopamine": "scoring", "teacher": "teaching"}.get(self.rule, "learning")  # under the dopamine rule the Teacher only scores
         if self.average is None:
             return f"{verb} {self.target}: no epochs yet"
-        if self.rule == "dopamine":
+        if self.rule == "teacher":
+            signal = "none yet" if self.last_signal is None else f"{self.last_signal:+g}"
+            settings = f"signal {signal}, {self.moved:,} synapses moved, lr {self.lr:g}, sigma {self.sigma:g}"
+        elif self.rule == "dopamine":
             settings = f"{self.grid.dopamine.status()}, sigma {self.sigma:g}"
         else:
             settings = f"{self.eligibility}, lr {self.lr:g}, sigma {self.sigma:g}"

@@ -44,14 +44,18 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         "permutation": grid.permutation,
         "ecc": grid.ecc,
         "coding": grid.coding,  # complement or raw
+        "input_cells": grid.input_cells,  # an input zone, or None for the bottom row
+        "grid_reach": getattr(grid, "reach", None) if not lattice else None,  # hex steps the grid's local wiring covers
         "problem": getattr(grid, "problem", None),  # what the run was asked to do (problems.PROBLEMS)
         "engine": engine,
         "random_weights": grid.weight is None if not lattice else True,
         "epoch": grid.epoch,
         "time": grid.time,  # the clock, nominal milliseconds
         "interval": grid.interval,
+        "tau": Neuron.tau,
         "refractory": Neuron.refractory,
         "refractory_hops": Neuron.refractory_hops,
+        "bored_after": Neuron.bored_after,
         "horizon": grid.horizon,  # the time the schedule has run to
         "connections": len(grid.connections),
         # the shortcuts are the only random part of a grid's topology: record them so a load can verify the mesh
@@ -62,12 +66,14 @@ def checkpoint(grid: GridOfNeurons, path: str | Path, teacher=None) -> dict:
         # the state the clock leaves behind, so a resumed run continues rather than restarts
         "potentials": [n.potential for n in grid.all_neurons()],
         "fired_at": [n.fired_at for n in grid.all_neurons()],
+        "last_update": [n.last_update for n in grid.all_neurons()],
         "previous_fired_at": [n.previous_fired_at for n in grid.all_neurons()],
         "spikes": [n.spikes for n in grid.all_neurons()],
         # the synapses' stamps and the signals in flight, so a resumed run continues mid-cascade
         "last_signal": [grid.connections[i].last_signal for i in range(1, len(grid.connections) + 1)],
         "pending": [[time, connection.id] for time, connection in grid.schedule.pending()],
         "dopamine": None if grid.dopamine is None else grid.dopamine.state(),
+        "rule": grid.rule,  # which rule the schedule's hook serves: dopamine, or teacher (eligibility for the read)
     }
     if lattice:
         index = {n: i for i, n in enumerate(grid.neurons)}
@@ -139,7 +145,10 @@ def restore(path: str | Path) -> tuple[GridOfNeurons, dict]:
         permute=False,
         weight_range=tuple(data.get("weight_range", (-1.0, 1.0))),
         minimum_potential=data.get("minimum_potential", float("-inf")),  # older checkpoints had no floor
+        reach=data.get("grid_reach") or 2,
     )
+    if data.get("input_cells"):
+        grid.set_input_cells(data["input_cells"])
     grid.permutation = list(data["permutation"])
     grid.ecc = _ecc_name(data)
     grid.coding = data.get("coding", "complement")
@@ -254,6 +263,8 @@ def _restore_clock(grid, data: dict) -> None:
         neuron.potential = potential
     for neuron, fired_at in zip(neurons, data.get("fired_at", [])):
         neuron.fired_at = fired_at
+    for neuron, last in zip(neurons, data.get("last_update", [])):
+        neuron.last_update = last
     for neuron, previous in zip(neurons, data.get("previous_fired_at", [])):
         neuron.previous_fired_at = previous
     for neuron, spikes in zip(neurons, data.get("spikes", [])):
@@ -265,6 +276,7 @@ def _restore_clock(grid, data: dict) -> None:
         grid.schedule.signal(grid.connections[connection_id], time)
     if data.get("dopamine"):
         grid.dopamine = Dopamine.from_state(data["dopamine"])
+    grid.rule = data.get("rule", "dopamine")
 
 
 def _ecc_name(data: dict) -> str | None:

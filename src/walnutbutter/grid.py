@@ -64,8 +64,13 @@ class GridOfNeurons(Network):
         permute: bool = True,
         weight_range: tuple[float, float] = WEIGHT_RANGE,
         minimum_potential: float = MINIMUM_POTENTIAL,
+        reach: int = 2,
     ):
         """Build the mesh.
+
+        `reach` is how many hex steps the local wiring covers: 2 (the
+        default) wires the six neighbours and the twelve neighbours of
+        neighbours; 3 adds the eighteen cells beyond them, and so on.
 
         `weight` is given to every connection; pass None to draw each weight
         independently and uniformly from `weight_range` instead. The range is
@@ -89,6 +94,9 @@ class GridOfNeurons(Network):
         self.threshold = threshold  # firing threshold given to every neuron
         self.minimum_potential = minimum_potential  # floor on every neuron's potential
         self.omega = omega
+        if int(reach) != reach or reach < 1:
+            raise ValueError(f"reach must be a whole number of hex steps, at least 1, got {reach}")
+        self.reach = int(reach)  # hex steps the local wiring covers
         self.seed = seed
         self._rng = random.Random(seed)  # one stream for shortcuts, then weights
         self.neurons: dict[tuple[int, int], Neuron] = {}  # Maps axial (q, r) to Neuron
@@ -130,11 +138,18 @@ class GridOfNeurons(Network):
                 if neuron.connection_to(neighbor) is None:
                     connection_id = len(self.connections) + 1
                     self.connections[connection_id] = neuron.connect(neighbor, connection_id, weight)
-        for neuron in self.neurons.values():
-            for neighbor in self.get_second_neighbors(neuron):
-                if neuron.connection_to(neighbor) is None:
-                    connection_id = len(self.connections) + 1
-                    self.connections[connection_id] = neuron.connect(neighbor, connection_id, weight, kind="local2")
+        if self.reach >= 2:
+            for neuron in self.neurons.values():
+                for neighbor in self.get_second_neighbors(neuron):
+                    if neuron.connection_to(neighbor) is None:
+                        connection_id = len(self.connections) + 1
+                        self.connections[connection_id] = neuron.connect(neighbor, connection_id, weight, kind="local2")
+        for distance in range(3, self.reach + 1):  # further rings, ring by ring, each cell in a fixed order
+            for neuron in self.neurons.values():
+                for neighbor in self.get_ring(neuron, distance):
+                    if neuron.connection_to(neighbor) is None:
+                        connection_id = len(self.connections) + 1
+                        self.connections[connection_id] = neuron.connect(neighbor, connection_id, weight, kind=f"local{distance}")
 
     def _add_small_world_connections(self, omega: float) -> None:
         """Add shortcuts until they are the fraction `omega` of all connections.
@@ -162,8 +177,8 @@ class GridOfNeurons(Network):
             wanted -= 1
 
     def _are_neighbours(self, a: Neuron, b: Neuron) -> bool:
-        """True if b is within two steps of a, i.e. already reached by a local connection."""
-        return hex_distance(a.position, b.position) <= 2
+        """True if b is within the reach of a, i.e. already reached by a local connection."""
+        return hex_distance(a.position, b.position) <= self.reach
 
     def small_world_connections(self) -> list[Connection]:
         """The shortcut connections added for omega, in ID order."""
@@ -171,7 +186,7 @@ class GridOfNeurons(Network):
 
     def local_connections(self) -> list[Connection]:
         """The connections within the mesh (first and second ring), in ID order."""
-        return [c for c in self.connections.values() if c.kind in ("local", "local2")]
+        return [c for c in self.connections.values() if c.kind.startswith("local")]
 
     def first_ring_connections(self) -> list[Connection]:
         """Connections to immediate neighbours, in ID order."""
@@ -213,6 +228,16 @@ class GridOfNeurons(Network):
         """The neurons two steps away: neighbours of neighbours, excluding the neighbours themselves."""
         q, r = neuron.position
         return [self.neurons[(q + dq, r + dr)] for dq, dr in DIRECTIONS2 if (q + dq, r + dr) in self.neurons]
+
+    def get_ring(self, neuron: Neuron, distance: int) -> list:
+        """The neurons exactly `distance` hex steps away, in a fixed order (by axial offset), for any distance."""
+        q, r = neuron.position
+        ring = []
+        for dq in range(-distance, distance + 1):
+            for dr in range(-distance, distance + 1):
+                if max(abs(dq), abs(dr), abs(dq + dr)) == distance and (q + dq, r + dr) in self.neurons:
+                    ring.append(self.neurons[(q + dq, r + dr)])
+        return ring
 
     def get_neuron(self, q: int, r: int) -> Neuron | None:
         """Retrieve a neuron by axial coordinates."""

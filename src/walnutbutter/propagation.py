@@ -128,12 +128,16 @@ class Schedule:
         until: float = math.inf,
         waves: list[Wave] | None = None,
         on_wave: Callable[[Wave], None] | None = None,
+        everyone: list[Neuron] | None = None,
     ) -> list[Wave]:
         """Process every wave due before `until`, appending to and returning `waves`.
 
         `on_wave` is called after each wave has fired, with the wave: this is
         where the refires learn (dopamine.py). Waves are numbered on from the
-        length of `waves`.
+        length of `waves`. With `everyone`, the network's neurons, every wave
+        also fires any neuron that has become ready without being touched:
+        one whose threshold has fallen with its silence (Neuron.threshold_at),
+        or one recovered from a refractory period with enough potential.
         """
         waves = [] if waves is None else waves
         hop = Neuron.hop()
@@ -179,6 +183,10 @@ class Schedule:
             for neuron in touched:
                 if neuron.can_fire(time):
                     self._fire(neuron, wave, hop)
+            if everyone is not None:
+                for neuron in everyone:
+                    if neuron.touched_stamp != mark and neuron.can_fire(time):  # the touched were checked above
+                        self._fire(neuron, wave, hop)
             waves.append(wave)
             if on_wave is not None:
                 on_wave(wave)

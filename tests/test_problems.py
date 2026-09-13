@@ -19,7 +19,7 @@ def quiet(monkeypatch):
 
 
 def test_the_problems_and_the_default():
-    assert set(PROBLEMS) == {"reversal", "sustain_inputs"}
+    assert set(PROBLEMS) == {"reversal", "sustain_inputs", "improved_sustain"}
     assert build_parser().parse_args([]).problem == C.PROBLEM == "reversal"
     assert PROBLEMS["reversal"].trained and not PROBLEMS["sustain_inputs"].trained
     sustain = PROBLEMS["sustain_inputs"]
@@ -161,17 +161,18 @@ def test_sustain_inputs_is_scored_traced_and_checkpointed(tmp_path, capsys):
     assert "-> coded" not in err
     assert "problem sustain_inputs" in err and "Epochs 20 ms apart" in err and "by the row critic, on meaning spiked again after the input" in err
     assert "shows raw bit" in err
-    assert "scoring copy" in err and "dopamine" in err and f"tracing every epoch to {trace}" in err
+    assert "teaching copy" in err and "rule: teacher" in err and f"tracing every epoch to {trace}" in err
     data = json.loads(save.read_text())
     assert data["across"] == 4 and data["epoch"] == 12 and data["problem"] == "sustain_inputs" and data["interval"] == 20.0
     assert data["coding"] == "raw" and data["learning"]["target"] == "copy" and data["learning"]["critic"] == "row"
+    assert data["learning"]["rule"] == "teacher"
     lines = trace.read_text().splitlines()
     assert lines[0] == "epoch,time_ms,dopamine,expected,score" and len(lines) == 13
     epoch, time_ms, dopamine, expected, score = lines[-1].split(",")
     assert epoch == "12" and float(time_ms) == 220.0 and float(dopamine) >= 0 and float(expected) >= 0 and 0 <= float(score) <= 1
     assert cli_main(["--headless", "--load-weights", str(save), "--epochs", "3", "--no-save"]) == 0
     err = capsys.readouterr().err
-    assert "problem: sustain_inputs (from the checkpoint)" in err and "scoring copy" in err and "tracing" not in err
+    assert "problem: sustain_inputs (from the checkpoint)" in err and "teaching copy" in err and "tracing" not in err
     assert cli_main(["--headless", "--problem", "sustain_inputs", "--seeds", "2", "--seed", "1", "--epochs", "3", "--no-save"]) == 0
     assert cli_main(["--headless", "--problem", "sustain_inputs", "--rule", "reinforce"]) == 2
     assert "needs a trained problem" in capsys.readouterr().err
@@ -183,3 +184,59 @@ def test_reversal_is_unchanged(tmp_path, capsys):
     data = json.loads(save.read_text())
     assert data["problem"] == "reversal" and "learning" in data and data["across"] == 8 and data["interval"] == 10.0
     assert not save.with_suffix(".csv").exists()
+
+
+def test_the_external_teacher_scores_the_read_and_pays_the_eligibility():
+    from walnutbutter.dopamine import Dopamine, apply_teacher
+    from walnutbutter.learning import RULES, teacher_score
+
+    assert RULES[0] == "teacher" and C.RULE == "teacher" and C.TEACHER_CREDIT == 0.25
+    grid = GridOfNeurons(across=4, rows=3, weight=1.0, omega=0, permute=False)  # the bits land where they are
+    grid.coding, grid.readout, grid.read, grid.rule = "raw", "input", "again", "teacher"
+    grid.dopamine = Dopamine(lr=0.1)
+    grid.set_input_bits([True, False, True, False])
+    row = grid.input_row()
+
+    def score_with(on):  # what the teacher would say if these input neurons read as on
+        for neuron, is_on in zip(row, on):
+            neuron.fired_at = grid.time + 1.0 if is_on else None
+        return teacher_score(grid)
+
+    assert score_with([True, False, True, False]) == 1.0  # all four right
+    assert score_with([False, True, False, True]) == -1.0  # all four wrong
+    assert score_with([True, False, True, True]) == 0.5  # three right, one wrong
+    assert score_with([True, True, True, True]) == 0.0  # two and two
+    assert score_with([False, False, True, False]) == 0.5
+    assert sorted({score_with([a, b, c, d]) for a in (0, 1) for b in (0, 1) for c in (0, 1) for d in (0, 1)}) == [-1.0, -0.5, 0.0, 0.5, 1.0]
+
+    # the trace: a refire earns, the teacher pays, the trace clears
+    into = next(c for c in grid.connections.values() if c.target is row[0])
+    into.weight, into.eligibility = 0.5, 2.0
+    assert apply_teacher(grid, 0.5, 0.1) == 1 and into.weight == pytest.approx(0.5 + 0.1 * 0.5 * 2.0)
+    assert into.eligibility == 0.0  # cleared, so an epoch's credit never carries into the next
+    into.eligibility = 2.0
+    assert apply_teacher(grid, 0.0, 0.1) == 0 and into.eligibility == 0.0  # a zero score still clears the trace
+
+
+def test_the_teacher_rule_runs_end_to_end_and_both_engines_agree():
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("scipy")
+    from walnutbutter.arrays import ArrayNetwork
+    from walnutbutter.dopamine import Dopamine
+
+    def make():
+        grid = GridOfNeurons(across=4, rows=6, weight=None, seed=7)
+        grid.coding, grid.readout, grid.read, grid.interval, grid.rule = "raw", "input", "again", 20.0, "teacher"
+        grid.dopamine = Dopamine(lr=0.05)
+        return grid
+
+    mesh, net = make(), ArrayNetwork(make())
+    a, b = Teacher(mesh, seed=1, target="copy", critic="row", rule="teacher"), Teacher(net, seed=1, target="copy", critic="row", rule="teacher")
+    before = [c.weight for c in mesh.connections.values()]
+    for _ in range(60):
+        assert a.epoch(verbose=False) == b.epoch(verbose=False)
+        assert a.last_signal == b.last_signal and a.last_signal in (-1.0, -0.5, 0.0, 0.5, 1.0)
+        assert np.allclose([c.weight for c in mesh.connections.values()], net.weight, atol=1e-12)
+    assert a.moved == b.moved > 0 and [c.weight for c in mesh.connections.values()] != before
+    assert all(c.eligibility == 0.0 for c in mesh.connections.values()) and not net.eligibility.any()
+    assert "teaching copy" in a.status() and "synapses moved" in a.status()

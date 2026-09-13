@@ -25,15 +25,19 @@ WEIGHT_EPSILON = 0.001  # --epsilon: the smallest weight allowed under --positiv
 # --- the neuron: activation and the clock (nominal milliseconds) ----------------
 THRESHOLD = 0.25  # total weighted input a neuron needs before it fires
 MINIMUM_POTENTIAL = -1.0  # floor on a potential: inhibition and carried-over charge can go no lower
+TAU = 2.0  # ms: leak time constant of the potential, computed lazily on arrival (Byron, September 12, 2026, bringing the leak back; his earlier sweep chose 2); math.inf switches it off
 REFRACTORY = 5.0  # absolute refractory period: a neuron that fired this recently ignores every signal
 REFRACTORY_HOPS = 3.0  # the refractory period divided by the time a signal takes to travel one hop; not an integer (Byron, September 11, 2026)
 INTERVAL = 10.0  # spacing of inputs when no time is given
+BORED_AFTER = 200.0  # ms of silence after which a neuron's threshold has fallen to zero and it fires on its own (Byron, September 12, 2026); 0 = off
 
 # --- the problem ------------------------------------------------------------------
 PROBLEM = "reversal"  # what the network is asked to do and how it is watched (problems.PROBLEMS)
 
 # --- learning: dopamine (AUTHORITY.md §6) --------------------------------------------
-RULE = "dopamine"  # which learning rule runs: dopamine, or the reinforce rule factored out below (learning.RULES)
+RULE = "teacher"  # which learning rule runs (learning.RULES): teacher (an external teacher scores the read, Byron, September 12, 2026),
+# dopamine (the student as its own teacher), or the reinforce rule factored out below
+TEACHER_CREDIT = 0.25  # what each input neuron read correctly adds to the teacher's score, and each one read wrongly subtracts
 LR = 0.03  # learning rate, both rules
 SIGMA = 0.1  # exploration noise: std dev added to each neuron's potential at every input; 0 switches it off
 DOPAMINE_RELEASE_ALPHA = 2.0  # shape of the gamma density of the amount a refire releases against its delay past the refractory period (Byron, September 12, 2026)
